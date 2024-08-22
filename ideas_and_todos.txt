@@ -1,0 +1,4 @@
+- Change class names to use UpperCaseCamelCase
+- Change utils to be a class with static methods: this will make it cleaner in terms of cleaning a separate namespace for all of our in-house utilities
+- Have a ModelManager class to handle operations on a model. That way, we would use self.model_manager.some_function as opposed to self.model.some_function.
+- Constants are usually defined on a module level and written in all capital letters with underscores separating words. Examples include MAX_OVERFLOW and TOTAL.
