@@ -12,6 +12,7 @@ ParallelizedModel(BaseModel)
     .SubdomainInData(BaseModel) # An entire replica within a data subdomain  (this would avoid using subdomain in weights but would still allow for weigth pipelining)
         .WeightParallelModel(BaseModel)
             .SubdomainInWeights(BaseModel)
+                # the subdomain will consist in a stage, i.e. a layer or more than 1. Each layer will be of type ShardedStage
                 .ShardedStage(BaseModel)
 
 Inheritance Graph:
@@ -21,3 +22,4 @@ BaseModel(nn.Module)
     .self.stage_list
     .decide_tensor_device()
 '''
+

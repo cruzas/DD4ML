@@ -32,16 +32,16 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
     if rank is None and master_addr is None and master_port is None and world_size is None: # we are on a cluster
         print(f'Should be initializing {os.environ["SLURM_NNODES"]} nodes')
         ## Execute code on a cluster
-        os.environ["MASTER_PORT"] = "29501"
-        os.environ["WORLD_SIZE"] = os.environ["SLURM_NNODES"]
-        os.environ["LOCAL_RANK"] = "0"
-        os.environ["RANK"] = os.environ["SLURM_NODEID"]
-        node_list = os.environ["SLURM_NODELIST"]
+        os.environ['MASTER_PORT'] = '29501'
+        os.environ['WORLD_SIZE'] = os.environ['SLURM_NNODES']
+        os.environ['LOCAL_RANK'] = '0'
+        os.environ['RANK'] = os.environ['SLURM_NODEID']
+        node_list = os.environ['SLURM_NODELIST']
         master_node = subprocess.getoutput(
-            f"scontrol show hostname {node_list} | head -n1"
+            f'scontrol show hostname {node_list} | head -n1'
         )
-        os.environ["MASTER_ADDR"] = master_node
-        dist.init_process_group(backend="nccl")
+        os.environ['MASTER_ADDR'] = master_node
+        dist.init_process_group(backend='nccl')
     else: # To execute on a PC
         os.environ['MASTER_ADDR'] = master_addr
         os.environ['MASTER_PORT'] = master_port if master_port is not None else find_free_port()
@@ -108,3 +108,22 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
                 return loss.item(), None
         return loss.item()
     return closure2 
+
+def check_gpus_per_rank():
+    '''
+    Ensure that the number of GPUs is the same on every rank in the distributed environment.
+    This is necessary to perform tensor sharding. 
+    '''
+    # Get the number of GPUs available on the current rank
+    local_gpus = torch.cuda.device_count()
+
+    # Gather the number of GPUs from all ranks
+    gpu_counts = [torch.tensor(0).cuda() for _ in range(dist.get_world_size())]
+    dist.all_gather(gpu_counts, torch.tensor(local_gpus).cuda())
+
+    # Convert gathered tensors to CPU and list
+    gpu_counts = [gpu.item() for gpu in gpu_counts]
+
+    # Check if all ranks have the same number of GPUs
+    if len(set(gpu_counts)) != 1:
+        raise ValueError("Mismatch in the number of GPUs across ranks")

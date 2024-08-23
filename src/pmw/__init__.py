@@ -6,11 +6,11 @@ from .parallelized_model import ParallelizedModel
 from .weight_parallelized_model import WeightParallelizedModel
 from .weight_parallelized_subdomain import WeightParallelizedSubdomain
 from .weight_parallelized_tensor import WeightParallelizedTensor
-from .tensor_sharding import TensorSharding
+from .sharded_layer import ShardedLayer
 
 # Define __all__ to specify what should be imported when using *
 __all__ = ['ParallelizedModel',
            'WeightParallelizedModel',
            'WeightParallelizedSubdomain',
            'WeightParallelizedTensor',
-           'TensorSharding']
+           'ShardedLayer']
