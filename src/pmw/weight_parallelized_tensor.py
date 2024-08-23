@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.distributed as dist
-from pmw.model import BaseModel
+from pmw.base_model import BaseModel
 
 class WeightParallelizedTensor(BaseModel):
     def __init__(self, tensor, backend, master_group, rank):

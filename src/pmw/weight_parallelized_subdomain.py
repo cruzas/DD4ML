@@ -1,8 +1,5 @@
-import time 
 import torch
-import torch.nn as nn
-import torch.autograd as autograd
-from pmw.model import BaseModel
+from pmw.base_model import BaseModel
 from pmw.sharded_layer import ShardedLayer
 
 class WeightParallelizedSubdomain(BaseModel):

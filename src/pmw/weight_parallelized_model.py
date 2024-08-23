@@ -6,10 +6,10 @@ import torch.autograd as autograd
 import utils
 from pmw.weight_parallelized_subdomain import WeightParallelizedSubdomain
 from pmw.weight_parallelized_tensor import WeightParallelizedTensor
-from pmw.model import BaseModel
+from pmw.base_model import BaseModel
 
 class WeightParallelizedModel(BaseModel):
-    def __init__(self, stage_list, rank_list, sample, device=None):        
+    def __init__(self, stage_list, rank_list, sample):        
         '''
         NOTE: grad_norm function returns the infinity norm of the subdomain gradient of the model (i.e. restricted to the current rank).
         Assumptions:
@@ -52,7 +52,7 @@ class WeightParallelizedModel(BaseModel):
     def subdomain_grad_norm(self, p=2): # Returns the subdomain gradient norm of the model
         return torch.norm(torch.cat([param.grad.flatten() for param in self.parameters()], dim=0), p=p).item()
 
-    def forward(self, x, chunks_amount=1, reset_grad = False, compute_grad = True):        
+    def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):        
         # Initialize the input and output tensors on the subdomain (needed for the backward pass and to process data on their own)
         self.subdomain.inputs = [None]*chunks_amount
         self.subdomain.outputs = [None]*chunks_amount  

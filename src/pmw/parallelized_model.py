@@ -13,7 +13,7 @@ class ParallelizedModel(nn.Module):
         self.num_replicas = num_replicas
         self.world_size = dist.get_world_size()
         self.data_parallel = data_parallel
-        # self.backend_device = 'cpu' if dist.get_backend() == 'gloo' else 'cuda:0' # TODO: remove if not used
+        self.backend_device = 'cpu' if dist.get_backend() == 'gloo' else 'cuda:0' # TODO: remove if not used
         self.tensor_device = utils.decide_tensor_device(ws=dist.get_world_size(), backend=dist.get_backend(), gpu_id=0) if device is None else device
         if num_replicas*len(stage_list) != self.world_size:
             raise ValueError(f"The number of replicas times the number of layers ({num_replicas}*{len(stage_list)}={num_replicas*len(stage_list)}) must be equal to the world size ({self.world_size}).")
@@ -31,7 +31,7 @@ class ParallelizedModel(nn.Module):
         for ranks in self.model_ranks:
             if self.rank in ranks:
                 # TODO: Change gpu_id to be more generic for tensor sharding later on...
-                self.model = WeightParallelizedModel(stage_list=stage_list, rank_list=ranks, sample=sample, device=device)
+                self.model = WeightParallelizedModel(stage_list=stage_list, rank_list=ranks, sample=sample)
                 self.subdomain = self.model.subdomain
         
         # Create a process group for each layer. This group contains all the ranks that are responsible for the layer across all replicas.

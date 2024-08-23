@@ -1,5 +1,5 @@
 import torch.nn as nn
-from pmw.model import BaseModel
+from pmw.base_model import BaseModel
 from torch import autograd
 import torch.autograd as autograd
 

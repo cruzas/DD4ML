@@ -4,32 +4,6 @@ import torch.distributed as dist
 
 class APTS(torch.optim.Optimizer):
     def __init__(self, model, criterion, subdomain_optimizer, subdomain_optimizer_defaults, global_optimizer, global_optimizer_defaults, lr=0.01, max_subdomain_iter=0, dogleg=False, APTS_in_data=False, APTS_in_data_sync_strategy='average'):
-        """
-        Initializes an APTS optimizer.
-
-        Args:
-            model (nn.Module): The subdomain model.
-            criterion (callable): The loss function.
-            subdomain_optimizer (torch.optim.Optimizer): The optimizer for the subdomain model.
-            subdomain_optimizer_defaults (dict): The default parameters for the subdomain optimizer.
-            global_optimizer (torch.optim.Optimizer): The optimizer for the global model.
-            global_optimizer_defaults (dict): The default parameters for the global optimizer.
-            lr (float, optional): The learning rate. Defaults to 0.01.
-            max_subdomain_iter (int, optional): The maximum number of subdomain iterations. Defaults to 0.
-            dogleg (bool, optional): Whether to use the dogleg method. Defaults to False.
-            APTS_in_data (bool, optional): Whether to use the APTS in data approach. Defaults to False.
-            APTS_in_data_sync_strategy (str, optional): The synchronization strategy for APTS in data. Must be either "average" or "sum". Defaults to "average".
-
-        Raises:
-            ValueError: If the learning rate is less than or equal to 0.
-            ValueError: If the APTS in data synchronization strategy is not "average" or "sum".
-
-        Note:
-            - If APTS_in_data is True, the subdomains are trained independently using the APTS approach in data.
-            - If APTS_in_data is False and multiple replicas of the model are available, the standard parallel in data approach applies.
-            - The APTS in data "sum" synchronization strategy is still experimental and needs to be tested/verified.
-            - We use infinity norm for the gradient norm.
-        """
         super(APTS, self).__init__(model.parameters(), {'lr': lr, 'max_subdomain_iter': max_subdomain_iter, 'dogleg': dogleg})
         for key in self.param_groups[0].keys():  
             if key not in ['params']:
@@ -54,21 +28,12 @@ class APTS(torch.optim.Optimizer):
         self.timings = {'smoother':0, 'precond':0, 'copy_params': 0, 'step_comp':0, 'dogleg':0, 'closure_1':0, 'closure_2':0}
    
     def get_timings(self):
-        """
-        Returns:
-            dict: The timings dictionary containing the timing information for the APTS optimizer.
-        """
         timings = {key: self.timings[key] for key in self.timings.keys()}
         if 'tradam' in str(self.subdomain_optimizer).lower():
             timings.update(self.subdomain_optimizer.get_timings())
         return timings
 
     def display_avg_timers(self):
-        """
-        Returns:
-            str: A formatted table displaying the timers, time in seconds, and percentage.
-        """
-
         timings = self.get_timings()
         timings.pop('precond')
         total_time = sum(timings.values())
@@ -97,12 +62,6 @@ class APTS(torch.optim.Optimizer):
         return '\n'.join(table)
         
     def update_param_group(self):
-        """
-        Update the parameter group with the current values of the optimizer.
-
-        This method iterates over the keys of the first parameter group and updates the corresponding values
-        with the attributes of the optimizer object.
-        """
         for key in self.param_groups[0].keys():
             if key not in ['params']:
                 self.param_groups[0][key] = getattr(self, key)
