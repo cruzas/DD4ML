@@ -20,14 +20,12 @@ class WeightParallelizedModel(BaseModel):
         self.rank_list = rank_list
         self.rank_index = rank_list.index(self.rank)
         self.master_group = dist.new_group(ranks=self.rank_list, use_local_synchronization=True)
-        self.inputs = []  # Each rank will store here the input of the next rank or layer (so the output of the current layer)  | -> this is needed for the backward pass
-        self.outputs = []  # Each rank will store here the output of the previous rank or layer (so its input)                  | -> this is needed for the backward pass
-        self.grad_output = [] # Each rank will store here the gradient of the output of the current layer (so the gradient of the loss w.r.t. the output of the current layer) | -> this is needed for the backward pass
         (layer_class, params) = stage_list[self.rank_index]
         self.stage = layer_class(**params).to(self.tensor_device) # Initialize the layer with provided parameters
         self.subdomain = WeightParallelizedSubdomain(self.stage) # Initialize the subdomain model
+        self.do_setup_phase(rank_list, sample)
         
-        # Setup phase to compute the shapes of the tensors in the pipeline
+    def do_setup_phase(self,rank_list, sample):
         self.setup_phase = True
         loss = None
         out = self.forward(torch.randn(*sample.shape).to(self.tensor_device), chunks_amount=1, reset_grad=True, compute_grad=True)
@@ -36,8 +34,7 @@ class WeightParallelizedModel(BaseModel):
         self.backward([loss])
         self.zero_grad()
         self.setup_phase = False
-        # End of setup phase
-        
+
     def zero_grad(self):
         self.stage.zero_grad()
     
@@ -69,7 +66,6 @@ class WeightParallelizedModel(BaseModel):
             chunk_shapes = torch.zeros(chunks_amount, dtype=torch.int32)
             if self.rank == self.rank_list[0]: # If the rank is in the first layer's rank list, send the input to the next device
                 chunks = list(x.chunk(chunks_amount)) # Chunkenize the input tensor
-                self.inputs = chunks if compute_grad else [] 
                 chunk_shapes = torch.tensor([chunk.shape[0] for chunk in chunks], dtype=torch.int32) # Store the batch size of each chunk
             # Broadcast the chunk_shapes tensor to all the ranks (this allows to know the shape of the input tensor for each rank in the pipeline and prepare the recv function)
             shape_transfer = dist.broadcast(tensor=chunk_shapes.to(self.backend_device(x)), src=self.rank_list[0], group=self.master_group, async_op=True) # broadcasting only the batch size | async operation to avoid blocking the first layer
@@ -121,7 +117,7 @@ class WeightParallelizedModel(BaseModel):
 
     def backward(self, losses):
         chunks_amount = len(losses) # Number of chunks 
-        self.subdomain.grad_output = [None]*chunks_amount 
+        self.subdomain.grad_outputs = [None]*chunks_amount 
         for c, loss in enumerate(losses): # Chunked loss
             chunk_size = self.subdomain.outputs[c].shape[0]
             if self.rank == self.rank_list[-1]: # End of the pipeline
@@ -143,6 +139,4 @@ class WeightParallelizedModel(BaseModel):
                 dist.send(tensor=grad_data.to(self.backend_device(grad_data)), dst=self.rank_list[self.rank_index-1]) # TODO make this async if possible
                 
             self.subdomain.backward(grad_output)
-        # TODO / NOTE: maybe we can delete self.inputs to free memory. It is not used anymore after the backward pass. (even in subdomains)
-        return None
  

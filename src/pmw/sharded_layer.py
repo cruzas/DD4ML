@@ -1,6 +1,9 @@
 import torch.nn as nn
 from pmw.model import BaseModel
+from torch import autograd
+import torch.autograd as autograd
 
+# TODO: Implement this properly to actually perform sharding of the layers.
 class ShardedLayer(BaseModel):
     def __init__(self, layer, is_sharded:bool):
         super(ShardedLayer, self).__init__()
@@ -55,8 +58,10 @@ class ShardedLayer(BaseModel):
         else:
             raise NotImplementedError("Sharded layer forward pass is not implemented yet.") 
 
-    def backward(self):
+    def backward(self, output, grad_output, num_chunks):
         if not self.layer_is_sharded:
-            self.layer.backward()
+            for param in self.parameters():
+                grad = autograd.grad(output, param, grad_outputs=grad_output, retain_graph=True)[0] / num_chunks
+                param.grad = grad if param.grad is None else param.grad + grad
         else:
             raise NotImplementedError("Sharded layer backward pass is not implemented yet.")
