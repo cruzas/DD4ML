@@ -71,8 +71,8 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
     """
     NOTE: Losses from different chunks are averaged.
     """
-    if model.__class__.__name__ != 'ParallelizedModel':
-        raise ValueError('Model must be an instance of the "ParallelizedModel".')
+    # if model.__class__.__name__ != 'ParallelizedModel':
+    #     raise ValueError('Model must be an instance of the "ParallelizedModel".')
     if isinstance(criterion, type):
         raise ValueError('Criterion must be an instance of a class.')
     if model.rank == model.rank_list[-1]:
