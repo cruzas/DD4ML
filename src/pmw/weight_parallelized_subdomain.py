@@ -35,28 +35,16 @@ class WeightParallelizedSubdomain(BaseModel):
         
     def backward(self, grad_output=None):
         if grad_output is None:
-            for k in range(len(self.outputs)):
-                for param in self.parameters():
-                    if param.grad is None:
-                        param.grad = autograd.grad(self.outputs[k], param, grad_outputs=self.grad_output[k], retain_graph=True)[0]/len(self.outputs)
-                    else:
-                        param.grad += autograd.grad(self.outputs[k], param, grad_outputs=self.grad_output[k], retain_graph=True)[0]/len(self.outputs)
+            loop = range(len(self.outputs))
         else:
-            if None in self.grad_output:
-                k = self.grad_output.index(None)
-            else:
-                k = len(self.grad_output) - 1
+            k = self.grad_output.index(None) if None in self.grad_output else len(self.grad_output) - 1
+            loop = [k]
             self.grad_output[k] = grad_output
+        for k in loop:
             for param in self.parameters():
-                if param.grad is None:
-                    try:
-                        param.grad = autograd.grad(self.outputs[k], param, grad_outputs=self.grad_output[k], retain_graph=True)[0]/len(self.outputs)
-                    except Exception as e:
-                        print(e)
-                else:
-                    param.grad += autograd.grad(self.outputs[k], param, grad_outputs=self.grad_output[k], retain_graph=True)[0]/len(self.outputs)
+                grad = autograd.grad(self.outputs[k], param, grad_outputs=self.grad_output[k], retain_graph=True)[0] / len(self.outputs)
+                param.grad = grad if param.grad is None else param.grad + grad
 
-                        
     def grad(self):
         return [param.grad for param in self.model.parameters()]
     

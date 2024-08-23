@@ -25,10 +25,6 @@ class WeightParallelizedModel(BaseModel):
         self.grad_output = [] # Each rank will store here the gradient of the output of the current layer (so the gradient of the loss w.r.t. the output of the current layer) | -> this is needed for the backward pass
         (layer_class, params) = stage_list[self.rank_index]
         self.stage = layer_class(**params).to(self.tensor_device) # Initialize the layer with provided parameters
-        self.num_f_evals = 0 # Number of forward evaluations
-        self.num_g_evals = 0 # Number of gradient evaluations
-        self.f_time = 0 # Forward pass time
-        self.g_time = 0 # Gradient computation time
         self.subdomain = WeightParallelizedSubdomain(self.stage) # Initialize the subdomain model
         
         # Setup phase to compute the shapes of the tensors in the pipeline
@@ -42,17 +38,6 @@ class WeightParallelizedModel(BaseModel):
         self.setup_phase = False
         # End of setup phase
         
-
-    def zero_counters(self):
-        self.num_f_evals = 0
-        self.num_g_evals = 0
-        self.f_time = 0
-        self.g_time = 0
-        self.subdomain.num_f_evals = 0
-        self.subdomain.num_g_evals = 0
-        self.subdomain.f_time = 0
-        self.subdomain.g_time = 0
-
     def zero_grad(self):
         self.stage.zero_grad()
     
@@ -71,14 +56,11 @@ class WeightParallelizedModel(BaseModel):
         return torch.norm(torch.cat([param.grad.flatten() for param in self.parameters()], dim=0), p=p).item()
 
     def forward(self, x, chunks_amount=1, reset_grad = False, compute_grad = True):        
-        start = time.time()
-        # Initialize the input and output tensors (needed for the backward pass)
-        self.inputs = [None]*chunks_amount 
+        # Initialize the input and output tensors on the subdomain (needed for the backward pass and to process data on their own)
         self.subdomain.inputs = [None]*chunks_amount
-        self.outputs = [None]*chunks_amount  
         self.subdomain.outputs = [None]*chunks_amount  
+        
         compute_grad = False if not torch.is_grad_enabled() else compute_grad # flag to avoid storing the tensors needed to compute the gradients
-        self.num_f_evals += 1 
         with torch.set_grad_enabled(compute_grad):
             if reset_grad:
                 self.zero_grad() # Reset the gradients of the model before starting to accumulate them again
@@ -98,7 +80,6 @@ class WeightParallelizedModel(BaseModel):
                     chunk = chunks[c].to(self.tensor_device)
                     out = self.subdomain.forward(chunk) 
                     next_rank = self.rank_list[self.rank_index+1]
-                    self.outputs[c] = out if compute_grad else None
                     if self.setup_phase:
                         input_shape = lambda x: [x]+list(chunks[c].shape)[1:]
                         output_shape = lambda x: [x]+list(out.shape)[1:]
@@ -114,9 +95,7 @@ class WeightParallelizedModel(BaseModel):
                         temp = torch.empty(*self.shapes[0](chunk_shapes[c]), device=self.backend_device(), requires_grad=True)
                     dist.recv(tensor=temp, src=self.rank_list[self.rank_index-1])
                     temp = temp.to(self.tensor_device)
-                    self.inputs[c] = temp if compute_grad else None
                     out = self.subdomain.forward(temp)
-                    self.outputs[c] = out 
                     if self.setup_phase:
                         input_shape = lambda x: [x]+list(temp.shape)[1:]
                         output_shape = lambda x: [x]+list(out.shape)[1:]
@@ -131,8 +110,6 @@ class WeightParallelizedModel(BaseModel):
                     dist.recv(tensor=temp, src=self.rank_list[self.rank_index-1])
                     temp = temp.to(self.tensor_device)
                     out = self.subdomain.forward(temp)
-                    self.inputs[c] = temp if compute_grad else None
-                    self.outputs[c] = out if compute_grad else None
                     next_rank = self.rank_list[self.rank_index+1]
                     if self.setup_phase:
                         input_shape = lambda x: [x]+list(temp.shape)[1:]
@@ -140,51 +117,32 @@ class WeightParallelizedModel(BaseModel):
                         self.shapes = [input_shape, output_shape]
                         utils.send_shape(out.shape, dst=next_rank, device=self.backend_device())
                     dist.send(tensor=out.to(self.backend_device(out)), dst=next_rank) # send the tensor
-        self.f_time += time.time() - start
-        # If the rank is in the last layer's rank list, return the output, else True (for some reason we can't remember)
-        return self.outputs if self.rank == self.rank_list[-1] else True
+        return self.subdomain.outputs if self.rank == self.rank_list[-1] else True
 
     def backward(self, losses):
-        chunks_amount = len(losses) # Number of chunks
-        self.grad_output = [None]*chunks_amount 
+        chunks_amount = len(losses) # Number of chunks 
         self.subdomain.grad_output = [None]*chunks_amount 
-        start = time.time()
-        self.num_g_evals += 1 
         for c, loss in enumerate(losses): # Chunked loss
-            chunk_size = self.outputs[c].shape[0]
+            chunk_size = self.subdomain.outputs[c].shape[0]
             if self.rank == self.rank_list[-1]: # End of the pipeline
-                self.grad_output[c] = autograd.grad(loss, self.outputs[c], retain_graph=True)[0]     # TODO: Update so that it takes into account sequential models
-                grad_data = autograd.grad(self.outputs[c], self.inputs[c], grad_outputs=self.grad_output[c], retain_graph=True)[0] # this is needed to compute the derivative at the previous stage
+                grad_output = autograd.grad(loss, self.subdomain.outputs[c], retain_graph=True)[0]     # TODO: Update so that it takes into account sequential models
+                grad_data = autograd.grad(self.subdomain.outputs[c], self.subdomain.inputs[c], grad_outputs=grad_output, retain_graph=True)[0] # this is needed to compute the derivative at the previous stage
                 dist.send(tensor=grad_data.to(self.backend_device(grad_data)), dst=self.rank_list[-2]) # TODO make this async if possible
-                # for param in self.stage.parameters():
-                #     if param.grad is None:
-                #         param.grad = autograd.grad(self.outputs[c], param, grad_outputs=self.grad_output[c], retain_graph=True)[0]/chunks_amount
-                #     else:
-                #         param.grad += autograd.grad(self.outputs[c], param, grad_outputs=self.grad_output[c], retain_graph=True)[0]/chunks_amount
-                self.subdomain.backward(self.grad_output[c])
+                
             elif self.rank == self.rank_list[0]: # Beginning of the pipeline
-                self.grad_output[c] = torch.empty(*self.shapes[1](chunk_size), device=self.backend_device(), requires_grad=True)
-                dist.recv(self.grad_output[c], src=self.rank_list[1])       
-                self.grad_output[c] = self.grad_output[c].to(self.tensor_device).detach()
-                # for param in self.stage.parameters():
-                #     if param.grad is None:
-                #         param.grad = autograd.grad(self.outputs[c], param, grad_outputs=self.grad_output[c], retain_graph=True)[0]/chunks_amount
-                #     else:
-                #         param.grad += autograd.grad(self.outputs[c], param, grad_outputs=self.grad_output[c], retain_graph=True)[0]/chunks_amount
-                self.subdomain.backward(self.grad_output[c])
+                grad_output = torch.empty(*self.shapes[1](chunk_size), device=self.backend_device(), requires_grad=True)
+                dist.recv(grad_output, src=self.rank_list[1])       
+
+                grad_output = grad_output.to(self.tensor_device).detach()
             else: # Middle of the pipeline
-                self.grad_output[c] = torch.empty(*self.shapes[1](chunk_size), device=self.backend_device(), requires_grad=True)
-                dist.recv(self.grad_output[c], src=self.rank_list[self.rank_index+1])       
-                self.grad_output[c] = self.grad_output[c].to(self.tensor_device).detach()
-                data_grad2 = autograd.grad(self.outputs[c], self.inputs[c], grad_outputs=self.grad_output[c], retain_graph=True)[0] # this is needed to compute the derivative at the previous stage
-                dist.send(tensor=data_grad2.to(self.backend_device(data_grad2)), dst=self.rank_list[self.rank_index-1]) # TODO make this async if possible
-                # for param in self.stage.parameters():
-                #     if param.grad is None: 
-                #         param.grad = autograd.grad(self.outputs[c], param, grad_outputs=self.grad_output[c], retain_graph=True)[0]/chunks_amount
-                #     else:
-                #         param.grad += autograd.grad(self.outputs[c], param, grad_outputs=self.grad_output[c], retain_graph=True)[0]/chunks_amount
-                self.subdomain.backward(self.grad_output[c])
+                grad_output = torch.empty(*self.shapes[1](chunk_size), device=self.backend_device(), requires_grad=True)
+                dist.recv(grad_output, src=self.rank_list[self.rank_index+1])       
+
+                grad_output = grad_output.to(self.tensor_device).detach()
+                grad_data = autograd.grad(self.subdomain.outputs[c], self.subdomain.inputs[c], grad_outputs=grad_output, retain_graph=True)[0] # this is needed to compute the derivative at the previous stage
+                dist.send(tensor=grad_data.to(self.backend_device(grad_data)), dst=self.rank_list[self.rank_index-1]) # TODO make this async if possible
+                
+            self.subdomain.backward(grad_output)
         # TODO / NOTE: maybe we can delete self.inputs to free memory. It is not used anymore after the backward pass. (even in subdomains)
-        self.g_time += time.time() - start
         return None
  
