@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.distributed as dist
 import torch.autograd as autograd
-from utils import *
+
 
 class WeightParallelizedTensor(nn.Module):
     def __init__(self, tensor, backend, master_group, rank):

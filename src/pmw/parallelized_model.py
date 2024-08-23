@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from utils import Utils
+import utils
 from pmw.weight_parallelized_model import WeightParallelizedModel
 
 class ParallelizedModel(nn.Module):
@@ -14,7 +14,7 @@ class ParallelizedModel(nn.Module):
         self.world_size = dist.get_world_size()
         self.data_parallel = data_parallel
         # self.backend_device = 'cpu' if dist.get_backend() == 'gloo' else 'cuda:0' # TODO: remove if not used
-        self.tensor_device = Utils.decide_tensor_device(ws=dist.get_world_size(), backend=dist.get_backend(), gpu_id=0) if device is None else device
+        self.tensor_device = utils.decide_tensor_device(ws=dist.get_world_size(), backend=dist.get_backend(), gpu_id=0) if device is None else device
         if num_replicas*len(stage_list) != self.world_size:
             raise ValueError(f"The number of replicas times the number of layers ({num_replicas}*{len(stage_list)}={num_replicas*len(stage_list)}) must be equal to the world size ({self.world_size}).")
         self.rank = dist.get_rank()

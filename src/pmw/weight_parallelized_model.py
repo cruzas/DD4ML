@@ -1,8 +1,11 @@
 import torch
+import time
 import torch.nn as nn
 import torch.distributed as dist
 import torch.autograd as autograd
-from src.utils import *
+import utils
+from pmw.weight_parallelized_subdomain import WeightParallelizedSubdomain
+from pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 class WeightParallelizedModel(nn.Module):
     def __init__(self, stage_list, rank_list, sample, device=None):        
@@ -19,7 +22,7 @@ class WeightParallelizedModel(nn.Module):
         self.master_group = dist.new_group(ranks=self.rank_list, use_local_synchronization=True)
         self.backend = dist.get_backend()
         self.backend_device = 'cpu' if self.backend == 'gloo' else self.tensor_device
-        self.tensor_device = decide_tensor_device(ws=dist.get_world_size(), backend=dist.get_backend(), gpu_id=0) if device is None else device
+        self.tensor_device = utils.decide_tensor_device(ws=dist.get_world_size(), backend=dist.get_backend(), gpu_id=0) if device is None else device
         self.inputs = []  # Each rank will store here the input of the next rank or layer (so the output of the current layer)  | -> this is needed for the backward pass
         self.outputs = []  # Each rank will store here the output of the previous rank or layer (so its input)                  | -> this is needed for the backward pass
         self.grad_output = [] # Each rank will store here the gradient of the output of the current layer (so the gradient of the loss w.r.t. the output of the current layer) | -> this is needed for the backward pass
@@ -42,7 +45,7 @@ class WeightParallelizedModel(nn.Module):
         self.zero_grad()
         self.setup_phase = False
         # End of setup phase
-        self.subdomain = Weight_Parallelized_Subdomain(self) # Initialize the subdomain model
+        self.subdomain = WeightParallelizedSubdomain(self) # Initialize the subdomain model
 
     def zero_counters(self):
         self.num_f_evals = 0
@@ -59,14 +62,14 @@ class WeightParallelizedModel(nn.Module):
     
     def grad(self, clone=False): # Returns the global gradient of the model
         gradient = [param.grad.clone() if clone else param.grad for param in self.parameters()]
-        return Weight_Parallelized_Tensor(gradient, self.backend, self.master_group, self.rank)
+        return WeightParallelizedTensor(gradient, self.backend, self.master_group, self.rank)
     
     def grad_norm(self, p=2): # Returns the global gradient norm of the model
         return self.grad().norm(p=p)
     
     def parameters(self, clone=False): # Returns the global parameters of the model
         params = [param.clone() if clone else param for param in self.stage.parameters()]
-        return Weight_Parallelized_Tensor(params, self.backend, self.master_group, self.rank)
+        return WeightParallelizedTensor(params, self.backend, self.master_group, self.rank)
     
     def subdomain_grad_norm(self, p=2): # Returns the subdomain gradient norm of the model
         return torch.norm(torch.cat([param.grad.flatten() for param in self.parameters()], dim=0), p=p).item()
@@ -102,12 +105,12 @@ class WeightParallelizedModel(nn.Module):
                         input_shape = lambda x: [x]+list(chunks[c].shape)[1:]
                         output_shape = lambda x: [x]+list(out.shape)[1:]
                         self.shapes = [input_shape, output_shape]
-                        send_shape(out.shape, dst=next_rank, device=self.backend_device)
+                        utils.send_shape(out.shape, dst=next_rank, device=self.backend_device)
                     dist.send(tensor=out.to(self.backend_device), dst=next_rank) # send the tensor
                 elif self.rank_index == len(self.rank_list)-1: # End of the pipeline (last layer)
                     shape_transfer.wait() # wait for the shape to be broadcasted
                     if self.setup_phase:
-                        shapes = receive_shape(src=self.rank_list[self.rank_index-1], device=self.backend_device)
+                        shapes = utils.receive_shape(src=self.rank_list[self.rank_index-1], device=self.backend_device)
                         temp = torch.empty(*shapes, device=self.backend_device, requires_grad=True)
                     else:
                         temp = torch.empty(*self.shapes[0](chunk_shapes[c]), device=self.backend_device, requires_grad=True)
@@ -123,7 +126,7 @@ class WeightParallelizedModel(nn.Module):
                 else: # Middle of the pipeline (between the first and the last layer)
                     shape_transfer.wait() # Wait for the shape to be broadcasted
                     if self.setup_phase:
-                        shapes = receive_shape(src=self.rank_list[self.rank_index-1], device=self.backend_device)
+                        shapes = utils.receive_shape(src=self.rank_list[self.rank_index-1], device=self.backend_device)
                         temp = torch.empty(*shapes, device=self.backend_device, requires_grad=True)
                     else:
                         temp = torch.empty(*self.shapes[0](chunk_shapes[c]), device=self.backend_device, requires_grad=True)
@@ -137,7 +140,7 @@ class WeightParallelizedModel(nn.Module):
                         input_shape = lambda x: [x]+list(temp.shape)[1:]
                         output_shape = lambda x: [x]+list(out.shape)[1:]
                         self.shapes = [input_shape, output_shape]
-                        send_shape(out.shape, dst=next_rank, device=self.backend_device)
+                        utils.send_shape(out.shape, dst=next_rank, device=self.backend_device)
                     dist.send(tensor=out.to(self.backend_device), dst=next_rank) # send the tensor
         self.f_time += time.time() - start
         # If the rank is in the last layer's rank list, return the output, else True (for some reason we can't remember)
