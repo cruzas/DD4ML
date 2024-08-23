@@ -1,6 +1,7 @@
 import torch.nn as nn
+from pmw.model import BaseModel
 
-class TensorSharding(nn.Module):
+class TensorSharding(BaseModel):
     def __init__(self, module, rank_list, device_mesh, parallelize_plan):
         super(TensorSharding, self).__init__()
         self.module = module

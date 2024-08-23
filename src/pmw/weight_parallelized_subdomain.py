@@ -2,8 +2,9 @@ import time
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
+from pmw.model import BaseModel
 
-class WeightParallelizedSubdomain(nn.Module):
+class WeightParallelizedSubdomain(BaseModel):
     def __init__(self, model):
         super(WeightParallelizedSubdomain, self).__init__()
         self.model = model

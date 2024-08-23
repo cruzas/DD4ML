@@ -1,12 +1,9 @@
 import math
-import time 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
-import torch.autograd as autograd
+from pmw.model import BaseModel
 
-
-class WeightParallelizedTensor(nn.Module):
+class WeightParallelizedTensor(BaseModel):
     def __init__(self, tensor, backend, master_group, rank):
         super().__init__()  # Call to the superclass (nn.Module) constructor
         self.tensor = tensor
