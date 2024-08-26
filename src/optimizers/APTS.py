@@ -94,10 +94,7 @@ class APTS(torch.optim.Optimizer):
                 if i != self.max_subdomain_iter - 1:
                     self.model.subdomain_forward() 
                     self.model.subdomain_backward()
-                # time.sleep(0.1*dist.get_rank())
-                # print(f'Rank {dist.get_rank()} subdomain step {i+1} - subdomain param norm: {torch.norm(torch.cat([p.flatten() for p in self.model.subdomain_params()]))}')
-
-
+                
             # Check if TRAdam is used as the local optimizer
             # if 'tradam' in str(self.subdomain_optimizer).lower():
             #     self.subdomain_optimizer.reset_momentum()

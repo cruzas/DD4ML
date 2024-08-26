@@ -26,14 +26,16 @@ class DataAndWeightParallelizedSubdomain(BaseModel):
     def _create_process_groups(self):
         self.final_layer_group = None
         self.layer_copies_group = None
+        self.final_layer_ranks = None
         if self.num_replicas_per_subdomain > 1:
             use_local_synchronization = True
-            weight_parallelized_model_ranks = [[k+r*len(self.stage_list) for r in range(self.num_replicas_per_subdomain)] for k in range(len(self.stage_list))]
+            weight_parallelized_model_ranks = [[self.rank_list[0][0]+k+r*len(self.stage_list) for r in range(self.num_replicas_per_subdomain)] for k in range(len(self.stage_list))]
             for stage_ranks in weight_parallelized_model_ranks:
                 if self.rank in stage_ranks:
                     self.layer_copies_group = dist.new_group(ranks=stage_ranks, use_local_synchronization=use_local_synchronization) # Create a group for the current layer (across all data parallel replicas)       
                     break
-            self.final_layer_group = dist.new_group(ranks=[ranks[-1] for ranks in self.rank_list], use_local_synchronization=use_local_synchronization)
+            self.final_layer_ranks = [ranks[-1] for ranks in self.rank_list]
+            self.final_layer_group = dist.new_group(ranks=self.final_layer_ranks, use_local_synchronization=use_local_synchronization)
         
     def forward(self, x, chunks_amount=1, reset_grad = False, compute_grad = True):
         return self.weight_parallelized_model.forward(x, chunks_amount=chunks_amount, reset_grad=reset_grad, compute_grad=compute_grad)
@@ -47,9 +49,7 @@ class DataAndWeightParallelizedSubdomain(BaseModel):
         # TODO/NOTE: Use the sharding class 
         if self.num_replicas_per_subdomain > 1:
             for param in self.weight_parallelized_model.subdomain.parameters():
-                # param.data = param.data.to(self.backend_device(param.data))
                 dist.all_reduce(tensor=param.data, group=self.layer_copies_group, op=dist.ReduceOp.SUM)
-                # param.data = param.data.to('cuda')
                 if method == 'average':
                     param.data /= self.num_replicas_per_subdomain
                 elif method == 'sum':
