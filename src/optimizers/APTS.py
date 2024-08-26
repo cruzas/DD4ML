@@ -96,8 +96,7 @@ class APTS(torch.optim.Optimizer):
             # Check if TRAdam is used as the local optimizer
             # if 'tradam' in str(self.subdomain_optimizer).lower():
             #     self.subdomain_optimizer.reset_momentum()
-            if not self.model.data_parallel:
-                self.model.sync_params(method=self.APTS_in_data_sync_strategy)
+            self.model.sync_params(method=self.APTS_in_data_sync_strategy)
             self.update_param_group()
 
     def zero_timers(self):

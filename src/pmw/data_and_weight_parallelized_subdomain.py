@@ -6,7 +6,7 @@ from pmw.weight_parallelized_model import WeightParallelizedModel
 
 class DataAndWeightParallelizedSubdomain(BaseModel):
     def __init__(self, stage_list, rank_list, sample, num_replicas_per_subdomain=1):
-        super(DataAndWeightParallelizedSubdomain, self).__init__()
+        super().__init__()
         '''
         This function defines a subdomain in data. The subdomain has subdomains in weights and can parallelize forward and backward passes in data.
         
@@ -15,7 +15,7 @@ class DataAndWeightParallelizedSubdomain(BaseModel):
         self.stage_list = stage_list
         self.rank_list = rank_list
         self.num_replicas_per_subdomain = num_replicas_per_subdomain
-        self.create_process_groups()
+        self._create_process_groups()
         # Initialize WeightParallelizedModel replicas 
         for model_ranks in self.rank_list:
             if self.rank in model_ranks:
@@ -23,15 +23,15 @@ class DataAndWeightParallelizedSubdomain(BaseModel):
         # Synchronize the parameters across all replicas
         self.sync_params() 
 
-    def create_process_groups(self):
+    def _create_process_groups(self):
         self.final_layer_group = None
-        self.current_layer_group = None
+        self.layer_copies_group = None
         if self.num_replicas_per_subdomain > 1:
             use_local_synchronization = True
-            weight_parallelized_model_ranks = [[r+k*len(self.stage_list) for r in range(len(self.stage_list))] for k in range(self.num_replicas_per_subdomain)]
+            weight_parallelized_model_ranks = [[k+r*len(self.stage_list) for r in range(self.num_replicas_per_subdomain)] for k in range(len(self.stage_list))]
             for stage_ranks in weight_parallelized_model_ranks:
                 if self.rank in stage_ranks:
-                    self.current_layer_group = dist.new_group(ranks=stage_ranks, use_local_synchronization=use_local_synchronization) # Create a group for the current layer (across all data parallel replicas)       
+                    self.layer_copies_group = dist.new_group(ranks=stage_ranks, use_local_synchronization=use_local_synchronization) # Create a group for the current layer (across all data parallel replicas)       
                     break
             self.final_layer_group = dist.new_group(ranks=[ranks[-1] for ranks in self.rank_list], use_local_synchronization=use_local_synchronization)
         
@@ -40,11 +40,15 @@ class DataAndWeightParallelizedSubdomain(BaseModel):
     
     def backward(self, losses, sync=True):
         self.weight_parallelized_model.backward(losses=losses)
-        self.sync_grads() 
+        if sync:
+            self.sync_grads()
     
     def sync_params(self, method='average'):
+        # TODO/NOTE: Use the sharding class 
         for param in self.weight_parallelized_model.parameters():
+            param.data = param.data.to(self.backend_device(param.data))
             dist.all_reduce(tensor=param.data, group=self.layer_copies_group, op=dist.ReduceOp.SUM)
+            param.data = param.data.to('cuda')
             if method == 'average':
                 param.data /= self.num_replicas_per_subdomain
             elif method == 'sum':
