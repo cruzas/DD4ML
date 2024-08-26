@@ -28,7 +28,9 @@ def find_free_port():
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return str(s.getsockname()[1])  
 
-def prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None):
+def prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None, is_cuda_enabled=True):
+    if not is_cuda_enabled:
+        os.environ["CUDA_VISIBLE_DEVICES"]="" # TODO: Remove this line. It's just for debugging purposes.
     if rank is None and master_addr is None and master_port is None and world_size is None: # we are on a cluster
         print(f'Should be initializing {os.environ["SLURM_NNODES"]} nodes')
         ## Execute code on a cluster

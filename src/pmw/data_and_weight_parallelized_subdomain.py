@@ -45,18 +45,20 @@ class DataAndWeightParallelizedSubdomain(BaseModel):
     
     def sync_params(self, method='average'):
         # TODO/NOTE: Use the sharding class 
-        for param in self.weight_parallelized_model.parameters():
-            param.data = param.data.to(self.backend_device(param.data))
-            dist.all_reduce(tensor=param.data, group=self.layer_copies_group, op=dist.ReduceOp.SUM)
-            param.data = param.data.to('cuda')
-            if method == 'average':
-                param.data /= self.num_replicas_per_subdomain
-            elif method == 'sum':
-                pass # nothing to do since we already summed the parameters through all_reduce
-            else:
-                raise ValueError(f"Method {method} is not supported.")
+        if self.num_replicas_per_subdomain > 1:
+            for param in self.weight_parallelized_model.subdomain.parameters():
+                # param.data = param.data.to(self.backend_device(param.data))
+                dist.all_reduce(tensor=param.data, group=self.layer_copies_group, op=dist.ReduceOp.SUM)
+                # param.data = param.data.to('cuda')
+                if method == 'average':
+                    param.data /= self.num_replicas_per_subdomain
+                elif method == 'sum':
+                    pass # nothing to do since we already summed the parameters through all_reduce
+                else:
+                    raise ValueError(f"Method {method} is not supported.")
 
     def sync_grads(self):
-        for param in self.weight_parallelized_model.parameters():
-            dist.all_reduce(tensor=param.grad, group=self.layer_copies_group, op=dist.ReduceOp.SUM)
-            param.grad /= self.num_replicas_per_subdomain
+        if self.num_replicas_per_subdomain > 1:
+            for param in self.weight_parallelized_model.subdomain.parameters():
+                dist.all_reduce(tensor=param.grad, group=self.layer_copies_group, op=dist.ReduceOp.SUM)
+                param.grad /= self.num_replicas_per_subdomain

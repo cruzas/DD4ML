@@ -19,12 +19,12 @@ class APTS(torch.optim.Optimizer):
         if lr <= 0:
             raise ValueError('The learning rate "lr" must be bigger than 0.')
         subdomain_optimizer_defaults.update({'lr': lr})
-        self.subdomain_optimizer = subdomain_optimizer(params=model.subdomain.parameters(), **subdomain_optimizer_defaults) # subdomain optimizer
+        self.subdomain_optimizer = subdomain_optimizer(params=model.subdomain_params(), **subdomain_optimizer_defaults) # subdomain optimizer
         if 'TR' in str(global_optimizer):
             self.global_optimizer = global_optimizer(model=model, criterion=criterion, **global_optimizer_defaults) # TR optimizer
         else:
             global_optimizer_defaults.update({'lr': lr})
-            self.global_optimizer = global_optimizer(params=model.subdomain.parameters(), **global_optimizer_defaults) # standard PyTorch optimizers
+            self.global_optimizer = global_optimizer(params=model.subdomain_params(), **global_optimizer_defaults) # standard PyTorch optimizers
         self.timings = {'smoother':0, 'precond':0, 'copy_params': 0, 'step_comp':0, 'dogleg':0, 'closure_1':0, 'closure_2':0}
    
     def get_timings(self):
@@ -83,16 +83,21 @@ class APTS(torch.optim.Optimizer):
         # Set up the learning rate
         if self.max_subdomain_iter > 0:
             if self.APTS_in_data and self.APTS_in_data_sync_strategy == 'sum':
-                self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/(self.max_subdomain_iter * self.model.num_replicas)
+                self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/(self.num_subdomains)
             else:
                 self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/self.max_subdomain_iter
             # Do subdomain steps
             for i in range(self.max_subdomain_iter):
+                # TODO: Add criterion to exit for-loop
                 self.subdomain_optimizer.step()
                 self.subdomain_optimizer.zero_grad()
                 if i != self.max_subdomain_iter - 1:
                     self.model.subdomain_forward() 
                     self.model.subdomain_backward()
+                # time.sleep(0.1*dist.get_rank())
+                # print(f'Rank {dist.get_rank()} subdomain step {i+1} - subdomain param norm: {torch.norm(torch.cat([p.flatten() for p in self.model.subdomain_params()]))}')
+
+
             # Check if TRAdam is used as the local optimizer
             # if 'tradam' in str(self.subdomain_optimizer).lower():
             #     self.subdomain_optimizer.reset_momentum()

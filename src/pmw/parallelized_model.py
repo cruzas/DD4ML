@@ -65,8 +65,9 @@ class ParallelizedModel(BaseModel):
     def subdomain_forward(self):
         return self.subdomain.weight_parallelized_model.subdomain.forward()
 
-    def subdomain_backward(self, sync=True):
+    def subdomain_backward(self):
         self.subdomain.weight_parallelized_model.subdomain.backward()
+        self.subdomain.sync_grads() # This is needed in case there are multiple replicas per subdomain (exact data parallelism)
 
     def subdomain_params(self):
         return self.subdomain.weight_parallelized_model.subdomain.parameters()
@@ -99,11 +100,11 @@ class ParallelizedModel(BaseModel):
     def sync_params(self, method='average'):
         if self.num_subdomains > 1:
             for param in self.subdomain_params():
-                param.data = param.data.to(self.subdomain.backend_device(param.data))
+                # param.data = param.data.to(self.subdomain.backend_device(param.data))
                 dist.all_reduce(tensor=param.data, group=self.layer_copies_group, op=dist.ReduceOp.SUM)
-                param.data = param.data.to('cuda') # TODO: Take into account tensor sharding
+                # param.data = param.data.to('cuda') # TODO: Take into account tensor sharding
                 if method == 'average':
-                    param.data /= self.num_replicas
+                    param.data /= self.tot_replicas
                 elif method == 'sum':
                     pass # nothing to do since we already summed the parameters through all_reduce
                 else:
