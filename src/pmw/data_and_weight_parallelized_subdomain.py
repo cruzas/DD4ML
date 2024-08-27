@@ -5,7 +5,7 @@ from pmw.base_model import BaseModel
 from pmw.weight_parallelized_model import WeightParallelizedModel
 
 class DataAndWeightParallelizedSubdomain(BaseModel):
-    def __init__(self, stage_list, rank_list, sample, num_replicas_per_subdomain=1):
+    def __init__(self, stage_list, rank_list, sample, num_replicas_per_subdomain=1, is_sharded:bool = True):
         super().__init__()
         '''
         This function defines a subdomain in data. The subdomain has subdomains in weights and can parallelize forward and backward passes in data.
@@ -19,7 +19,7 @@ class DataAndWeightParallelizedSubdomain(BaseModel):
         # Initialize WeightParallelizedModel replicas 
         for model_ranks in self.rank_list:
             if self.rank in model_ranks:
-                self.weight_parallelized_model = WeightParallelizedModel(stage_list=stage_list, rank_list=model_ranks, sample=sample)
+                self.weight_parallelized_model = WeightParallelizedModel(stage_list=stage_list, rank_list=model_ranks, sample=sample, is_sharded=is_sharded)
         # Synchronize the parameters across all replicas
         self.sync_params() 
 

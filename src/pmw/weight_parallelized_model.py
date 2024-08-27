@@ -9,7 +9,7 @@ from pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from pmw.base_model import BaseModel
 
 class WeightParallelizedModel(BaseModel):
-    def __init__(self, stage_list, rank_list, sample):        
+    def __init__(self, stage_list, rank_list, sample, is_sharded:bool = True):        
         '''
         NOTE: grad_norm function returns the infinity norm of the subdomain gradient of the model (i.e. restricted to the current rank).
         Assumptions:
@@ -20,9 +20,9 @@ class WeightParallelizedModel(BaseModel):
         self.rank_list = rank_list
         self.rank_index = rank_list.index(self.rank)
         self.master_group = dist.new_group(ranks=self.rank_list, use_local_synchronization=True)
-        (layer_class, params) = stage_list[self.rank_index]
-        self.stage = layer_class(**params).to(self.tensor_device) # Initialize the layer with provided parameters
-        self.subdomain = WeightParallelizedSubdomain(self.stage) # Initialize the subdomain model
+        # (layer_class, params) = stage_list[self.rank_index]
+        self.unbuilt_stage = stage_list[self.rank_index]# layer_class(**params).to(self.tensor_device) # Initialize the layer with provided parameters
+        self.subdomain = WeightParallelizedSubdomain(self.unbuilt_stage,is_sharded) # Initialize the subdomain model
         self.do_setup_phase(rank_list, sample)
         
     def do_setup_phase(self,rank_list, sample):
@@ -36,7 +36,7 @@ class WeightParallelizedModel(BaseModel):
         self.setup_phase = False
 
     def zero_grad(self):
-        self.stage.zero_grad()
+        self.subdomain.zero_grad()
     
     def grad(self, clone=False): # Returns the global gradient of the model
         gradient = [param.grad.clone() if clone else param.grad for param in self.parameters()]
@@ -46,7 +46,7 @@ class WeightParallelizedModel(BaseModel):
         return self.grad().norm(p=p)
     
     def parameters(self, clone=False): # Returns the global parameters of the model
-        params = [param.clone() if clone else param for param in self.stage.parameters()]
+        params = [param.clone() if clone else param for param in self.subdomain.parameters()]
         return WeightParallelizedTensor(params, self.backend, self.master_group, self.rank)
     
     def subdomain_grad_norm(self, p=2): # Returns the subdomain gradient norm of the model

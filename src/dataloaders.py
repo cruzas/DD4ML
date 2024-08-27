@@ -53,12 +53,12 @@ class MockDataset(Dataset):
             return (1, 1)
         
 class GeneralizedDistributedDataLoader(DataLoader):
-    def __init__(self, stage_list, num_replicas, dataset, batch_size, shuffle, device='cpu' if not torch.cuda.is_available() else 'cuda', num_workers=0, pin_memory=False, seed=0, **kwargs):
+    def __init__(self, len_stage_list, num_replicas, dataset, batch_size, shuffle, device='cpu' if not torch.cuda.is_available() else 'cuda', num_workers=0, pin_memory=False, seed=0, **kwargs):
         """
         Initializes the GeneralizedDistributedDataLoader object.
 
         Args:
-            stage_list (list): A list of stages.
+            len_stage_list (scalar): The length of the list of stages.
             num_replicas (int): The number of replicas.
             dataset: The dataset to be loaded.
             batch_size (int): The batch size.
@@ -69,7 +69,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
             seed (int): The random seed. Defaults to 0.
             **kwargs: Additional keyword arguments.
             
-        E.g.: Supppose len(stage_list) = 3 and num_replicas = 2.Then:
+        E.g.: Supppose len_stage_list = 3 and num_replicas = 2.Then:
         model 0 will be distributed across ranks [0,1,2] with first layer in rank 0 and second layer in rank 1 and so on.
         model 1 will be distributed across ranks [3,4,5] with first layer in rank 3 and second layer in rank 4 and so on.
         """
@@ -80,8 +80,8 @@ class GeneralizedDistributedDataLoader(DataLoader):
         if batch_size > len(dataset):
             print(f"(WARNING) Batch size {batch_size} is greater than the dataset size {len(dataset)}. Setting batch size to dataset size.")
             batch_size = min(batch_size, len(dataset))
-        first_layer_ranks = [0+len(stage_list)*i for i in range(num_replicas)]
-        last_layer_ranks = [len(stage_list)-1+len(stage_list)*i for i in range(num_replicas)]
+        first_layer_ranks = [0+len_stage_list*i for i in range(num_replicas)]
+        last_layer_ranks = [len_stage_list-1+len_stage_list*i for i in range(num_replicas)]
 
         rank = dist.get_rank()
         self.is_active_rank = True

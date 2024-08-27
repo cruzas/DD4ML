@@ -8,7 +8,7 @@ from pmw.data_and_weight_parallelized_subdomain import DataAndWeightParallelized
 
 
 class ParallelizedModel(BaseModel):
-    def __init__(self, stage_list, sample, num_replicas_per_subdomain=1, num_subdomains=1):
+    def __init__(self, stage_list, sample, num_replicas_per_subdomain=1, num_subdomains=1, is_sharded: bool = True):
         '''
         Ranks that will be used are [0, ..., world_size - 1]
 
@@ -35,6 +35,7 @@ class ParallelizedModel(BaseModel):
         self.num_subdomains = num_subdomains
         self.num_replicas_per_subdomain = num_replicas_per_subdomain
         self.tot_replicas = num_subdomains * num_replicas_per_subdomain
+        self.is_sharded = is_sharded
     
         # Model ranks is a list of lists, where each list contains the rank corresponding to a model replica
         self.all_model_ranks = [[r+k*len(self.stage_list) for r in range(len(self.stage_list))] for k in range(self.tot_replicas)] 
@@ -44,7 +45,7 @@ class ParallelizedModel(BaseModel):
         for model_rank_list in self.all_model_ranks_per_subdomain:
             model_rank_flat_list = [item for sublist in model_rank_list for item in sublist]
             if self.rank in model_rank_flat_list:
-                self.subdomain = DataAndWeightParallelizedSubdomain(stage_list, model_rank_list, sample, num_replicas_per_subdomain)
+                self.subdomain = DataAndWeightParallelizedSubdomain(stage_list, model_rank_list, sample, num_replicas_per_subdomain, is_sharded)
                 break
         
         self._create_process_groups()

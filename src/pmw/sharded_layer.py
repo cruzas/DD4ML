@@ -5,16 +5,19 @@ import torch.autograd as autograd
 
 # TODO: Implement this properly to actually perform sharding of the layers.
 class ShardedLayer(BaseModel):
-    def __init__(self, layer, is_sharded:bool):
-        super(ShardedLayer, self).__init__()
-        self.layer = layer
-        # TODO: Handle this outside this class.. use nn.Sequential instead.
+    def __init__(self, layer, layer_settings, is_sharded:bool):
+        super().__init__()
+    
         self.is_sharded = is_sharded
+        self.layer = layer(**layer_settings).to('cpu') 
 
         # TODO: Check the type of a layer and shard it, if sharding is not possible set a variable 
         # to False in order to know that the layer is not sharded so "unshard" can be called on the dst rank.
         if self.is_sharded:
-            if isinstance(layer, nn.Linear):
+            # Shard the layer into torch.cuda.device_count() parts 
+            # and send each part to a different GPU in the current rank.
+
+            if isinstance(self.layer, nn.Linear):
                 self.layer_is_sharded = False # This should be a True (after proper implementation)
                 pass
             else:
@@ -56,6 +59,7 @@ class ShardedLayer(BaseModel):
             # TODO: (ExaTrain 2) Store in the current class the input/output of the layer to be able make a subdomain out of this sharded layer.
             return self.layer(x)
         else:
+            return self.layer(ShardedTensor(x))
             raise NotImplementedError("Sharded layer forward pass is not implemented yet.") 
 
     def backward(self, output, grad_output, num_chunks):
