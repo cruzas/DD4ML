@@ -2,19 +2,22 @@
 
 # Strong Scaling Test Script
 
+RUNPATH=/Users/cruzalegriasamueladolfo/Documents/GitHub/ML_APTS/
+cd $RUNPATH || exit
+
 # Fixed parameters
-MODELS=("NN")
+MODELS=("feedforward")
 OPTIMIZERS=("APTS")
 DATASETS=("MNIST")
-BATCH_SIZES=(32 64 128)
-NUM_SUBDOMAINS=(2 4 8)
+BATCH_SIZES=(32)
+NUM_SUBDOMAINS=(2)
 NUM_REPLICAS_PER_SUBDOMAIN=(1)
-NUM_STAGES_PER_REPLICA=(2 4 8)
+NUM_STAGES_PER_REPLICA=(2)
 EPOCHS=2
-NUM_TRIALS=2
+NUM_TRIALS=1
 
 # Output log directory
-LOG_DIR="../scaling_logs/strong_scaling_logs"
+LOG_DIR="./scaling_logs/strong_scaling_logs"
 
 # Check if LOG_DIR exists. If not, create it.
 if [ ! -d "$LOG_DIR" ]; then
@@ -35,8 +38,10 @@ submit_job() {
     error_file="${job_name}.err"
     output_file="${job_name}.out"
 
-    # sbatch --job-name="$job_name" --output="$output_file" --error="$error_file" strong_scaling.job "$optimizer" "$dataset" "$batch_size" "$model" "$num_subdomains" "$num_replicas_per_subdomain" "$num_stages_per_replica" "$trial" "$EPOCHS"
-    python3 -u ../tests/scaling_test.py --optimizer "$optimizer" --dataset "$dataset" --batch_size "$batch_size" --model "$model" --num_subdomains "$num_subdomains" --num_replicas_per_subdomain "$num_replicas_per_subdomain" --num_stages_per_replica "$num_stages_per_replica" --epochs "$EPOCHS" --trial "$trial"
+    nodes=$((num_subdomains * num_replicas_per_subdomain * num_stages_per_replica))
+
+    # sbatch --nodes="$nodes" --job-name="$job_name" --output="$output_file" --error="$error_file" strong_scaling.job "$optimizer" "$dataset" "$batch_size" "$model" "$num_subdomains" "$num_replicas_per_subdomain" "$num_stages_per_replica" "$trial" "$EPOCHS"
+    python3 -u tests/scaling_test.py --optimizer "$optimizer" --dataset "$dataset" --batch_size "$batch_size" --model "$model" --num_subdomains "$num_subdomains" --num_replicas_per_subdomain "$num_replicas_per_subdomain" --num_stages_per_replica "$num_stages_per_replica" --epochs "$EPOCHS" --trial "$trial"
 }
 
 
