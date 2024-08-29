@@ -2,10 +2,10 @@
 
 # Define the arrays for each parameter
 optimizers=("APTS")
-batch_sizes=(250)
-epochs=50
-nodes_SGD_Adam=(2 4 8)
-nodes_APTS=(4)
+batch_sizes=(10000)
+epochs=2
+nodes_SGD_Adam=(2)
+nodes_APTS=(2)
 trial_numbers=(1)
 datasets=("cifar10")
 
