@@ -91,24 +91,24 @@ def construct_stage_list(model_type, num_stages):
         raise ValueError(f"Unknown model type: {model_type}")
 
 
-construct_simple_nn = 1
-construct_cnn = 0
-construct_resnet = 0
-if construct_simple_nn:
-    # Example usage:
-    # Feedforward stage list with 3 stages
-    feedforward_stage_list = construct_stage_list('feedforward', 3)
-    print(feedforward_stage_list)
+# construct_simple_nn = 0
+# construct_cnn = 0
+# construct_resnet = 0
+# if construct_simple_nn:
+#     # Example usage:
+#     # Feedforward stage list with 3 stages
+#     feedforward_stage_list = construct_stage_list('feedforward', 3)
+#     print(feedforward_stage_list)
 
-if construct_cnn:
-    # CNN stage list with 3 stages
-    cnn_stage_list = construct_stage_list('cnn', 3)
-    print(cnn_stage_list)
+# if construct_cnn:
+#     # CNN stage list with 3 stages
+#     cnn_stage_list = construct_stage_list('cnn', 3)
+#     print(cnn_stage_list)
 
-if construct_resnet:
-    # ResNet stage list with 3 stages
-    resnet_stage_list = construct_stage_list('resnet', 3)
-    print(resnet_stage_list)
+# if construct_resnet:
+#     # ResNet stage list with 3 stages
+#     resnet_stage_list = construct_stage_list('resnet', 3)
+#     print(resnet_stage_list)
 
 # import torch
 # import torch.nn as nn
