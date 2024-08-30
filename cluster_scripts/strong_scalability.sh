@@ -2,14 +2,14 @@
 
 # Strong Scaling Test Script
 
-RUNPATH=/users/scruzale/ML_APTS/
+RUNPATH=/scratch/snx3000/scruzale/ML_APTS/
 cd $RUNPATH || exit
 
 # Fixed parameters
 MODELS=("feedforward")
 OPTIMIZERS=("APTS")
 DATASETS=("MNIST")
-BATCH_SIZES=(32)
+BATCH_SIZES=(60000)
 NUM_SUBDOMAINS=(2)
 NUM_REPLICAS_PER_SUBDOMAIN=(1)
 NUM_STAGES_PER_REPLICA=(2)
@@ -35,13 +35,12 @@ submit_job() {
     local trial=$8
 
     job_name="${optimizer}_${dataset}_${batch_size}_${model}_${num_subdomains}_${num_replicas_per_subdomain}_${num_stages_per_replica}_t${trial}"
-    error_file="${job_name}.err"
-    output_file="${job_name}.out"
+    error_file="$LOG_DIR/${job_name}.err"
+    output_file="$LOG_DIR/${job_name}.out"
 
     nodes=$((num_subdomains * num_replicas_per_subdomain * num_stages_per_replica))
 
     sbatch --nodes="$nodes" --job-name="$job_name" --output="$output_file" --error="$error_file" cluster_scripts/strong_scalability.job "$optimizer" "$dataset" "$batch_size" "$model" "$num_subdomains" "$num_replicas_per_subdomain" "$num_stages_per_replica" "$trial" "$EPOCHS"
-    # python3 -u tests/scaling_test.py --optimizer "$optimizer" --dataset "$dataset" --batch_size "$batch_size" --model "$model" --num_subdomains "$num_subdomains" --num_replicas_per_subdomain "$num_replicas_per_subdomain" --num_stages_per_replica "$num_stages_per_replica" --epochs "$EPOCHS" --trial "$trial"
 }
 
 

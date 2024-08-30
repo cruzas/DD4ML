@@ -9,7 +9,7 @@ class ShardedLayer(BaseModel):
         super().__init__()
     
         self.is_sharded = is_sharded
-        self.layer = layer(**layer_settings).to('cpu') 
+        self.layer = layer(**layer_settings).to(self.tensor_device) 
 
         # TODO: Check the type of a layer and shard it, if sharding is not possible set a variable 
         # to False in order to know that the layer is not sharded so "unshard" can be called on the dst rank.

@@ -27,6 +27,11 @@ class ParallelizedModel(BaseModel):
         '''
         super().__init__()
         if num_replicas_per_subdomain*num_subdomains*len(stage_list) != dist.get_world_size():
+            # print("Num replicas per subdomain: ", num_replicas_per_subdomain)
+            # print("Num subdomains: ", num_subdomains)
+            # print("Length of stage list: ", len(stage_list))
+            # print("The three multiplied together: ", num_replicas_per_subdomain*num_subdomains*len(stage_list))
+            # print("World size: ", dist.get_world_size())
             raise ValueError("The number of replicas per subdomain times the number of subdomains times the length of the stage_list must be equal to the world size.")
 
         self.rank = dist.get_rank()
@@ -62,6 +67,9 @@ class ParallelizedModel(BaseModel):
                 if self.rank in stage_ranks:
                     self.layer_copies_group = dist.new_group(ranks=stage_ranks, use_local_synchronization=use_local_synchronization)
                     break
+    
+    def parameters(self):
+        return self.subdomain.weight_parallelized_model.subdomain.parameters()
 
     def subdomain_forward(self):
         return self.subdomain.weight_parallelized_model.subdomain.forward()

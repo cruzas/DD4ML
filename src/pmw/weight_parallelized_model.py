@@ -52,7 +52,7 @@ class WeightParallelizedModel(BaseModel):
     def subdomain_grad_norm(self, p=2): # Returns the subdomain gradient norm of the model
         return torch.norm(torch.cat([param.grad.flatten() for param in self.parameters()], dim=0), p=p).item()
 
-    def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):        
+    def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):
         # Initialize the input and output tensors on the subdomain (needed for the backward pass and to process data on their own)
         self.subdomain.inputs = [None]*chunks_amount
         self.subdomain.outputs = [None]*chunks_amount  
