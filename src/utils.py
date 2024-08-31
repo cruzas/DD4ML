@@ -84,14 +84,14 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
         if zero_grad:
             model.zero_grad()
         with torch.set_grad_enabled(compute_grad):
-            print(f"Num inputs: {len(inputs)}, inputs[0] shape: {inputs[0].shape}")
+            print(f"Rank {dist.get_rank()} num inputs: {len(inputs)}, inputs shape: {inputs.shape}")
             outputs = model(inputs, chunks_amount=data_chunks_amount)
+            print(f"Rank {dist.get_rank()} num outputs: {len(outputs)}, Num targets: {len(targets)}")
         losses = [0] * data_chunks_amount
         loss = torch.tensor(0.0).to(model.tensor_device)
         if model.rank in model.all_stage_ranks[-1]:
-            print(f"Num outputs: {len(outputs)}, Num targets: {len(targets)}")
             for i, out in enumerate(outputs):
-                print(f"Output shape: {out.shape}, Target shape: {targets[i].shape}")
+                print(f"Rank {dist.get_rank()} output shape: {out.shape}, Target shape: {targets[i].shape}")
                 losses[i] = criterion(out, targets[i].to(out.device))
             loss = sum(losses)/len(losses)
         # Average losses across replicas
