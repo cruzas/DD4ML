@@ -78,21 +78,17 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
     if isinstance(criterion, type):
         raise ValueError('Criterion must be an instance of a class.')
     if model.rank in model.all_stage_ranks[-1]:
-        print(f"Rank {dist.get_rank()} original targets shape: {targets.shape}")
         targets = targets.chunk(data_chunks_amount)
     # Compute loss
     def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount):
         if zero_grad:
             model.zero_grad()
         with torch.set_grad_enabled(compute_grad):
-            print(f"Rank {dist.get_rank()} num inputs: {len(inputs)}, inputs shape: {inputs.shape}")
             outputs = model(inputs, chunks_amount=data_chunks_amount)
-            print(f"Rank {dist.get_rank()} num outputs: {len(outputs)}, Num targets: {len(targets)}")
         losses = [0] * data_chunks_amount
         loss = torch.tensor(0.0).to(model.tensor_device)
         if model.rank in model.all_stage_ranks[-1]:
             for i, out in enumerate(outputs):
-                print(f"Rank {dist.get_rank()} output shape: {out.shape}, Target shape: {targets[i].shape}")
                 losses[i] = criterion(out, targets[i].to(out.device))
             loss = sum(losses)/len(losses)
         # Average losses across replicas

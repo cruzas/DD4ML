@@ -27,11 +27,6 @@ class ParallelizedModel(BaseModel):
         '''
         super().__init__()
         if num_replicas_per_subdomain*num_subdomains*len(stage_list) != dist.get_world_size():
-            # print("Num replicas per subdomain: ", num_replicas_per_subdomain)
-            # print("Num subdomains: ", num_subdomains)
-            # print("Length of stage list: ", len(stage_list))
-            # print("The three multiplied together: ", num_replicas_per_subdomain*num_subdomains*len(stage_list))
-            # print("World size: ", dist.get_world_size())
             raise ValueError("The number of replicas per subdomain times the number of subdomains times the length of the stage_list must be equal to the world size.")
 
         self.rank = dist.get_rank()

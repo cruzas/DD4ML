@@ -9,11 +9,11 @@ cd $RUNPATH || exit
 MODELS=("feedforward")
 OPTIMIZERS=("APTS")
 DATASETS=("MNIST")
-BATCH_SIZES=(60000)
+BATCH_SIZES=(28000)
 NUM_SUBDOMAINS=(2)
 NUM_REPLICAS_PER_SUBDOMAIN=(1)
-NUM_STAGES_PER_REPLICA=(2)
-EPOCHS=2
+NUM_STAGES_PER_REPLICA=(3)
+EPOCHS=5
 NUM_TRIALS=1
 
 # Output log directory
@@ -34,7 +34,12 @@ submit_job() {
     local num_stages_per_replica=$7
     local trial=$8
 
-    job_name="${optimizer}_${dataset}_${batch_size}_${model}_${num_subdomains}_${num_replicas_per_subdomain}_${num_stages_per_replica}_t${trial}"
+    # If the file $optimizer_$dataset_$batch_size_$model_$num_subdomains_$num_replicas_per_subdomain_$num_stages_per_replica_t$trial.out exists, increase trial by one
+    while [ -f "$LOG_DIR/${optimizer}_${dataset}_${batch_size}_${model}_${num_subdomains}_${num_replicas_per_subdomain}_${num_stages_per_replica}_t${trial}.out" ]; do
+        trial=$((trial + 1))
+    done
+
+    job_name="${optimizer}_${dataset}_${batch_size}_${model}_${num_subdomains}_${num_replicas_per_subdomain}_${num_stages_per_replica}_${EPOCHS}_t${trial}"
     error_file="$LOG_DIR/${job_name}.err"
     output_file="$LOG_DIR/${job_name}.out"
 

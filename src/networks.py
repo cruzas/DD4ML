@@ -10,14 +10,18 @@ def create_feedforward_stage_list(num_stages):
         if i == 0:
             layers = [nn.Flatten, nn.Linear, nn.ReLU, nn.Linear, nn.ReLU]
             layer_params = [{'start_dim': 1}, {'in_features': input_size, 'out_features': hidden_size}, {}, {'in_features': hidden_size, 'out_features': hidden_size}, {}]
-        else:
+        elif i == 1:
             layers = [nn.Linear, nn.ReLU]
-            layer_params = [{'in_features': input_size if i == 0 else hidden_size, 'out_features': hidden_size}, {}]
+            layer_params = [{'in_features': hidden_size, 'out_features': 128}, {}]
+        # else:
+        #     layers = [nn.Linear, nn.ReLU]
+        #     layer_params = [{'in_features': hidden_size, 'out_features': hidden_size}, {}]
         stage_list.append((layers, layer_params))
 
     # Final output stage
     final_layers = [nn.Linear, nn.Sigmoid, nn.LogSoftmax]
-    final_params = [{'in_features': hidden_size, 'out_features': 10}, {}, {'dim': 1}]
+    final_params = [{'in_features': 128, 'out_features': 10}, {}, {'dim': 1}]
+    # final_params = [{'in_features': hidden_size, 'out_features': 10}, {}, {'dim': 1}]
     stage_list.append((final_layers, final_params))
 
     return stage_list

@@ -20,16 +20,11 @@ class WeightParallelizedSubdomain(BaseModel):
             self.sharded_layers = nn.Sequential(*[layer(**layer_settings).to(self.tensor_device) for layer, layer_settings in zip(self.unbuilt_stage[0], self.unbuilt_stage[1])])
     
     def forward(self, x=None):
-        try:
-            print(f"Rank {self.rank}, subdomain x shape: {x.shape}")
-        except:
-            pass
         if x is None:
             for k, chunk in enumerate(self.inputs):
                 for layer in self.sharded_layers:
                     chunk = layer.forward(chunk)
                 self.outputs[k] = chunk
-            print(f"Rank {self.rank}, case 1 num outputs: {len(self.outputs)}, outputs shape: {self.outputs[0].shape}")
             return self.outputs
         else:
             # Index of the first None in list self.inputs (current chunk), else -1
@@ -43,7 +38,6 @@ class WeightParallelizedSubdomain(BaseModel):
                 for layer in self.sharded_layers:
                     x = layer.forward(x)
                 self.outputs[k] = x
-                print(f"Rank {self.rank}, case 2 num outputs: {len(self.outputs)}, outputs shape: {self.outputs[k].shape}")
                 return self.outputs[k]
         
     def backward(self, grad_output=None):

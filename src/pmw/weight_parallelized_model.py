@@ -57,8 +57,6 @@ class WeightParallelizedModel(BaseModel):
         self.subdomain.inputs = [None]*chunks_amount
         self.subdomain.outputs = [None]*chunks_amount  
         
-        print(f"Rank: {self.rank}, chunks_amount: {chunks_amount}, x shape: {x.shape}")
-
         compute_grad = False if not torch.is_grad_enabled() else compute_grad # flag to avoid storing the tensors needed to compute the gradients
         with torch.set_grad_enabled(compute_grad):
             if reset_grad:
@@ -69,74 +67,53 @@ class WeightParallelizedModel(BaseModel):
             if self.rank == self.rank_list[0]: # If the rank is in the first layer's rank list, send the input to the next device
                 chunks = list(x.chunk(chunks_amount)) # Chunkenize the input tensor
                 chunk_shapes = torch.tensor([chunk.shape[0] for chunk in chunks], dtype=torch.int32) # Store the batch size of each chunk
-                print(f"Rank {self.rank}, should be broadcasting chunk_shapes: {chunk_shapes} to ranks {dist.get_process_group_ranks(self.master_group)}")
             # Broadcast the chunk_shapes tensor to all the ranks (this allows to know the shape of the input tensor for each rank in the pipeline and prepare the recv function)
             chunk_shapes = chunk_shapes.to(self.backend_device(x)) # NOTE: Necessary for broadcast to work correctly, as to can be asynchronous when transferring to CUDA devices. Broadcasting only the batch size | async operation to avoid blocking the first layer
             shape_transfer = dist.broadcast(tensor=chunk_shapes, src=self.rank_list[0], group=self.master_group, async_op=True) # broadcasting only the batch size | async operation to avoid blocking the first layer
 
-            print(f"Rank {self.rank}, self.rank_index: {self.rank_index}, chunk shapes: {chunk_shapes}")
             # Go through the pipeline
             for c in range(chunks_amount):
                 if self.rank_index == 0: # Beginning of the pipeline (first layer)
-                    print(f"Rank {self.rank}, start of pipeline")
                     chunk = chunks[c].to(self.tensor_device)
-                    print(f"Rank {self.rank}, start of pipeline chunk shape: {chunk.shape}")
                     out = self.subdomain.forward(chunk) 
-                    print(f"Rank {self.rank}, start of pipeline out shape: {out.shape}")
                     next_rank = self.rank_list[self.rank_index+1]
                     if self.setup_phase:
                         input_shape = lambda x: [x]+list(chunks[c].shape)[1:]
                         output_shape = lambda x: [x]+list(out.shape)[1:]
                         self.shapes = [input_shape, output_shape]
-                        print(f"Rank {self.rank}, start of pipeline self.shapes: {self.shapes} sending shape to rank {next_rank}")
                         utils.send_shape(out.shape, dst=next_rank, device=self.backend_device(out))
-                    print(f"Rank {self.rank} start of pipeling sending tensor with shape {out.shape} to rank {next_rank}")
                     dist.send(tensor=out.to(self.backend_device(out)), dst=next_rank) # send the tensor
                 elif self.rank_index == len(self.rank_list)-1: # End of the pipeline (last layer)
-                    print(f"Rank {self.rank}, end of pipeline")
                     shape_transfer.wait() # wait for the shape to be broadcasted
-                    print(f"Rank {self.rank}, end of pipeline after shape transfer chunk_shapes: {chunk_shapes}")
                     if self.setup_phase:
                         shapes = utils.receive_shape(src=self.rank_list[self.rank_index-1], device=self.backend_device())
                         temp = torch.empty(*shapes, device=self.backend_device(), requires_grad=True)
-                        print(f"Rank {self.rank}, end of pipeline temp should have shape: {temp.shape}")
                     else:
-                        print(f"Rank {self.rank}, end of pipeline self.shapes: (in={self.shapes[0](chunk_shapes[c])}, out={self.shapes[1](chunk_shapes[c])}")
                         temp = torch.empty(*self.shapes[0](chunk_shapes[c]), device=self.backend_device(), requires_grad=True)
-                        print(f"Rank {self.rank}, end of pipeline temp created shape: {temp.shape}")
                     dist.recv(tensor=temp, src=self.rank_list[self.rank_index-1])
-                    print(f"Rank {self.rank}, end of pipeline received temp shape: {temp.shape}")
                     temp = temp.to(self.tensor_device)
                     out = self.subdomain.forward(temp)
-                    print(f"Rank {self.rank}, end of pipeline out shape: {out.shape}")
                     if self.setup_phase:
                         input_shape = lambda x: [x]+list(temp.shape)[1:]
                         output_shape = lambda x: [x]+list(out.shape)[1:]
                         self.shapes = [input_shape, output_shape]
                 else: # Middle of the pipeline (between the first and the last layer)
-                    print(f"Rank {self.rank}, middle of pipeline")
                     shape_transfer.wait() # Wait for the shape to be broadcasted
-                    print(f"Rank {self.rank}, middle of pipeline after shape transfer chunk_shapes: {chunk_shapes}")
                     if self.setup_phase:
                         shapes = utils.receive_shape(src=self.rank_list[self.rank_index-1], device=self.backend_device())
                         temp = torch.empty(*shapes, device=self.backend_device(), requires_grad=True)
                     else:
                         temp = torch.empty(*self.shapes[0](chunk_shapes[c]), device=self.backend_device(), requires_grad=True)
                     dist.recv(tensor=temp, src=self.rank_list[self.rank_index-1])
-                    print(f"Rank {self.rank}, middle of pipeline received temp shape: {temp.shape}")
                     temp = temp.to(self.tensor_device)
                     out = self.subdomain.forward(temp)
-                    print(f"Rank {self.rank}, middle of pipeline out shape: {out.shape}")
                     next_rank = self.rank_list[self.rank_index+1]
                     if self.setup_phase:
                         input_shape = lambda x: [x]+list(temp.shape)[1:]
                         output_shape = lambda x: [x]+list(out.shape)[1:]
                         self.shapes = [input_shape, output_shape]
-                        print(f"Rank {self.rank}, middle of pipeline self.shapes: {self.shapes} sending shape to rank {next_rank}")
                         utils.send_shape(out.shape, dst=next_rank, device=self.backend_device())
-                    print(f"Rank {self.rank} middle of pipeline sending tensor with shape {out.shape} to rank {next_rank}")
                     dist.send(tensor=out.to(self.backend_device(out)), dst=next_rank) # send the tensor
-        print(f"Rank {self.rank}, end of forward. Num outputs: {len(self.subdomain.outputs)}, outputs shape: {self.subdomain.outputs[0].shape}")
         return self.subdomain.outputs if self.rank == self.rank_list[-1] else [True]
 
     def backward(self, losses):
