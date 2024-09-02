@@ -15,6 +15,7 @@ NUM_REPLICAS_PER_SUBDOMAIN=(1)
 NUM_STAGES_PER_REPLICA=(3)
 EPOCHS=5
 NUM_TRIALS=1
+seed_base=12345
 
 # Output log directory
 LOG_DIR="./scaling_logs/strong_scaling_logs"
@@ -32,20 +33,22 @@ submit_job() {
     local num_subdomains=$5
     local num_replicas_per_subdomain=$6
     local num_stages_per_replica=$7
-    local trial=$8
+    local seed=$8
+    local trial=$9
 
     # If the file $optimizer_$dataset_$batch_size_$model_$num_subdomains_$num_replicas_per_subdomain_$num_stages_per_replica_t$trial.out exists, increase trial by one
-    while [ -f "$LOG_DIR/${optimizer}_${dataset}_${batch_size}_${model}_${num_subdomains}_${num_replicas_per_subdomain}_${num_stages_per_replica}_t${trial}.out" ]; do
+    while [ -f "$LOG_DIR/${optimizer}_${dataset}_${batch_size}_${model}_${num_subdomains}_${num_replicas_per_subdomain}_${num_stages_per_replica}_${EPOCHS}_${seed}_t${trial}.out" ]; do
         trial=$((trial + 1))
+        seed=$((seed_base * trial))
     done
 
-    job_name="${optimizer}_${dataset}_${batch_size}_${model}_${num_subdomains}_${num_replicas_per_subdomain}_${num_stages_per_replica}_${EPOCHS}_t${trial}"
+    job_name="${optimizer}_${dataset}_${batch_size}_${model}_${num_subdomains}_${num_replicas_per_subdomain}_${num_stages_per_replica}_${EPOCHS}_${seed}_t${trial}"
     error_file="$LOG_DIR/${job_name}.err"
     output_file="$LOG_DIR/${job_name}.out"
 
     nodes=$((num_subdomains * num_replicas_per_subdomain * num_stages_per_replica))
 
-    sbatch --nodes="$nodes" --job-name="$job_name" --output="$output_file" --error="$error_file" cluster_scripts/strong_scalability.job "$optimizer" "$dataset" "$batch_size" "$model" "$num_subdomains" "$num_replicas_per_subdomain" "$num_stages_per_replica" "$trial" "$EPOCHS"
+    sbatch --nodes="$nodes" --job-name="$job_name" --output="$output_file" --error="$error_file" cluster_scripts/strong_scalability.job "$optimizer" "$dataset" "$batch_size" "$model" "$num_subdomains" "$num_replicas_per_subdomain" "$num_stages_per_replica" "$seed" "$trial" "$EPOCHS"
 }
 
 
@@ -65,8 +68,11 @@ do
                         do
                             for trial in $(seq 0 $(($NUM_TRIALS - 1)))
                             do 
-                                echo "Running $optimizer on $dataset with batch size $batch_size, model $model, $num_subdomains subdomains, $num_replicas_per_subdomain replicas per subdomain, $num_stages_per_replica stages per replica, trial $trial" for $EPOCHS epochs
-                                submit_job "$optimizer" "$dataset" "$batch_size" "$model" "$num_subdomains" "$num_replicas_per_subdomain" "$num_stages_per_replica" "$trial"
+                                # Define a seed here
+                                seed=$((seed_base * trial))
+
+                                echo "Running $optimizer on $dataset with batch size $batch_size, model $model, $num_subdomains subdomains, $num_replicas_per_subdomain replicas per subdomain, $num_stages_per_replica stages per replica, with seed $seed for trial $trial" for $EPOCHS epochs
+                                submit_job "$optimizer" "$dataset" "$batch_size" "$model" "$num_subdomains" "$num_replicas_per_subdomain" "$num_stages_per_replica" "$seed" "$trial"
                             done
                         done
                     done
