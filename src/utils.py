@@ -78,6 +78,7 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
     if isinstance(criterion, type):
         raise ValueError('Criterion must be an instance of a class.')
     if model.rank in model.all_stage_ranks[-1] and data_chunks_amount > 1:
+        print(f"Rank {dist.get_rank()} original targets shape: {targets.shape}")
         targets = targets.chunk(data_chunks_amount)
     # Compute loss
     def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount):
@@ -98,6 +99,7 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
         if model.rank in model.all_stage_ranks[-1]:
             dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=model.layer_copies_group) # Summing the losses across final layers of each replicas
             loss = loss/model.tot_replicas
+        
         loss_broadcast = dist.broadcast(tensor=loss.detach(), src=model.all_stage_ranks[-1][0], async_op=True) # Last layer of first model replica broadcasts the loss to all other ranks 
         if compute_grad and torch.is_grad_enabled():
             model.backward(losses)
