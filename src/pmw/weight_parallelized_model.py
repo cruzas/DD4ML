@@ -137,7 +137,7 @@ class WeightParallelizedModel(BaseModel):
                     print(f"Rank {self.rank} middle of pipeline sending tensor with shape {out.shape} to rank {next_rank}")
                     dist.send(tensor=out.to(self.backend_device(out)), dst=next_rank) # send the tensor
         print(f"Rank {self.rank}, end of forward. Num outputs: {len(self.subdomain.outputs)}, outputs shape: {self.subdomain.outputs[0].shape}")
-        return self.subdomain.outputs if self.rank == self.rank_list[-1] else True
+        return self.subdomain.outputs if self.rank == self.rank_list[-1] else [True]
 
     def backward(self, losses):
         chunks_amount = len(losses) # Number of chunks 

@@ -77,7 +77,7 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
     #     raise ValueError('Model must be an instance of the "ParallelizedModel".')
     if isinstance(criterion, type):
         raise ValueError('Criterion must be an instance of a class.')
-    if model.rank in model.all_stage_ranks[-1] and data_chunks_amount > 1:
+    if model.rank in model.all_stage_ranks[-1]:
         print(f"Rank {dist.get_rank()} original targets shape: {targets.shape}")
         targets = targets.chunk(data_chunks_amount)
     # Compute loss
