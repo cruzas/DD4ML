@@ -9,12 +9,12 @@ cd $RUNPATH || exit
 MODELS=("feedforward")
 OPTIMIZERS=("APTS")
 DATASETS=("MNIST")
-BATCH_SIZES=(28000)
+BATCH_SIZES=(5000)
 NUM_SUBDOMAINS=(2)
 NUM_REPLICAS_PER_SUBDOMAIN=(1)
 NUM_STAGES_PER_REPLICA=(3)
-EPOCHS=5
-NUM_TRIALS=1
+EPOCHS=3
+NUM_TRIALS=3
 seed_base=12345
 
 # Output log directory
@@ -42,12 +42,13 @@ submit_job() {
         seed=$((seed_base * trial))
     done
 
+    echo "Running $optimizer on $dataset with batch size $batch_size, model $model, $num_subdomains subdomains, $num_replicas_per_subdomain replicas per subdomain, $num_stages_per_replica stages per replica, with seed $seed for trial $trial" for $EPOCHS epochs
+
     job_name="${optimizer}_${dataset}_${batch_size}_${model}_${num_subdomains}_${num_replicas_per_subdomain}_${num_stages_per_replica}_${EPOCHS}_${seed}_t${trial}"
     error_file="$LOG_DIR/${job_name}.err"
     output_file="$LOG_DIR/${job_name}.out"
 
     nodes=$((num_subdomains * num_replicas_per_subdomain * num_stages_per_replica))
-
     sbatch --nodes="$nodes" --job-name="$job_name" --output="$output_file" --error="$error_file" cluster_scripts/strong_scalability.job "$optimizer" "$dataset" "$batch_size" "$model" "$num_subdomains" "$num_replicas_per_subdomain" "$num_stages_per_replica" "$seed" "$trial" "$EPOCHS"
 }
 
@@ -70,8 +71,6 @@ do
                             do 
                                 # Define a seed here
                                 seed=$((seed_base * trial))
-
-                                echo "Running $optimizer on $dataset with batch size $batch_size, model $model, $num_subdomains subdomains, $num_replicas_per_subdomain replicas per subdomain, $num_stages_per_replica stages per replica, with seed $seed for trial $trial" for $EPOCHS epochs
                                 submit_job "$optimizer" "$dataset" "$batch_size" "$model" "$num_subdomains" "$num_replicas_per_subdomain" "$num_stages_per_replica" "$seed" "$trial"
                             done
                         done
