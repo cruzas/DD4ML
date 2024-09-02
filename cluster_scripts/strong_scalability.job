@@ -21,18 +21,20 @@ cd $RUNPATH || exit
 
 # Retrieve parameters from the command line
 optimizer=$1
-dataset=$2
-batch_size=$3
-model=$4
-num_subdomains=$5
-num_replicas_per_subdomain=$6
-num_stages_per_replica=$7
-seed=$8
-trial=$9
-epochs=${10}
+lr=$2
+dataset=$3
+batch_size=$4
+model=$5
+num_subdomains=$6
+num_replicas_per_subdomain=$7
+num_stages_per_replica=$8
+seed=$9
+trial=${10}
+epochs=${11}
 
 # Display parameters (for debugging)
 echo "Optimizer: $optimizer"
+echo "Learning rate: $lr"
 echo "Dataset: $dataset"
 echo "Batch size: $batch_size"
 echo "Model: $model"
@@ -46,4 +48,4 @@ echo "Epochs: $epochs"
 echo "Activating llms $(date)"
 source activate llms
 echo "Calling python script $(date)"
-srun python3 -u tests/scaling_test.py --optimizer "$optimizer" --dataset "$dataset" --batch_size "$batch_size" --model "$model" --num_subdomains "$num_subdomains" --num_replicas_per_subdomain "$num_replicas_per_subdomain" --num_stages_per_replica "$num_stages_per_replica" --seed "$seed" --trial "$trial" --epochs "$epochs"
+srun python3 -u tests/scaling_test.py --optimizer "$optimizer" --lr "$lr" --dataset "$dataset" --batch_size "$batch_size" --model "$model" --num_subdomains "$num_subdomains" --num_replicas_per_subdomain "$num_replicas_per_subdomain" --num_stages_per_replica "$num_stages_per_replica" --seed "$seed" --trial "$trial" --epochs "$epochs"
