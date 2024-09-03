@@ -18,7 +18,8 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 def compute_speedup(base_substring, split_substring):
     # Get the list of all relevant files
     file_list = glob.glob(f"*{base_substring}.csv")
-    file_list.sort()
+    # List file_list depending on the number right after splitting using split_substring
+    file_list = sorted(file_list, key=lambda x: int(x.split(split_substring)[-1].split("_")[1]))
 
     print(f"File list: {file_list}")
 

@@ -36,18 +36,18 @@ def speedup_statistics(file_list):
     # Compute the speedup statistics based on the cum_time measurements
     dataframes = [pd.read_csv(file) for file in file_list]
 
-    
-
-
 def main():
+    # Change directory to this file's location
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
     # Identify all file patterns
     OPTIMIZERS = ["APTS"]
     LEARNING_RATES = [1.0]
     DATASETS = ["MNIST"]
     BATCH_SIZES = [10000]
     MODELS = ["feedforward"]
-    NUM_SUBDOMAINS = [1]
-    NUM_REPLICAS_PER_SUBDOMAIN = [2, 4, 8]
+    NUM_SUBDOMAINS = [2, 4, 8, 16] # [1]
+    NUM_REPLICAS_PER_SUBDOMAIN = [1] # [2, 4, 8, 16]
     NUM_STAGES_PER_REPLICA = [3]
     NUM_TRIALS = 3
     EPOCHS = 15
