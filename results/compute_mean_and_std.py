@@ -8,6 +8,10 @@ def compute_rowwise_statistics(file_list):
     """Compute row-wise mean and variance across multiple files."""
     dataframes = [pd.read_csv(file) for file in file_list]
     
+    # For each data frame, add another column called "cum_time" which is the cumulative time
+    for df in dataframes:
+        df['cum_time'] = df['time'].cumsum()
+
     # Stack the dataframes to create a 3D array (rows, columns, files)
     stacked_data = pd.concat(dataframes, axis=0).groupby(level=0)
     
@@ -21,8 +25,8 @@ def compute_rowwise_statistics(file_list):
         'loss_var': var_df['loss'],
         'accuracy_mean': mean_df['accuracy'],
         'accuracy_var': var_df['accuracy'],
-        'time_mean': mean_df['time'],
-        'time_var': var_df['time']
+        'time_mean': mean_df['cum_time'],
+        'time_var': var_df['cum_time']
     })
     
     return result_df
@@ -32,13 +36,13 @@ def main():
     OPTIMIZERS = ["APTS"]
     LEARNING_RATES = [1.0]
     DATASETS = ["MNIST"]
-    BATCH_SIZES = [5000]
+    BATCH_SIZES = [10000]
     MODELS = ["feedforward"]
-    NUM_SUBDOMAINS = [2]
-    NUM_REPLICAS_PER_SUBDOMAIN = [1]
+    NUM_SUBDOMAINS = [1]
+    NUM_REPLICAS_PER_SUBDOMAIN = [2, 4, 8]
     NUM_STAGES_PER_REPLICA = [3]
-    NUM_TRIALS = 2
-    EPOCHS = 2
+    NUM_TRIALS = 3
+    EPOCHS = 15
 
     # Nested for loop that will go through all combinations of the lists above
     for optimizer, lr, dataset, batch_size, model, num_subdomains, num_replicas_per_subdomain, num_stages_per_replica in product(
@@ -46,6 +50,7 @@ def main():
     
         # Define base substring to look for
         base_substring = f"{optimizer}_{lr}_{dataset}_{batch_size}_{model}_{num_subdomains}_{num_replicas_per_subdomain}_{num_stages_per_replica}_{EPOCHS}"
+        print("Looking for files with base substring:", base_substring)
 
         # Make a list containing all names of files that match the base substring
         filenames = [f for f in os.listdir(".") if base_substring in f]
@@ -57,7 +62,8 @@ def main():
             filenames.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
         
         aggregated_metrics = compute_rowwise_statistics(filenames)
-        print(aggregated_metrics)
+        # Save the aggregated metrics to a csv file
+        aggregated_metrics.to_csv(f"{base_substring}_mean_and_std.csv", index=False)
 
 
 if __name__ == "__main__":

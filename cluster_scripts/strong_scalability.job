@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --account=c24
-#SBATCH --time=00:10:00
+#SBATCH --time=03:00:00
 #SBATCH --ntasks-per-core=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
 #SBATCH --hint=nomultithread
 #SBATCH --constraint=gpu
-#SBATCH --partition=debug
+#SBATCH --partition=normal
 #SBATCH --exclusive
 
 module load daint-gpu
