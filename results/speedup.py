@@ -6,11 +6,11 @@ import os
 OPTIMIZER = "APTS"
 LR = 1.0
 DATASET = "MNIST"
-BATCH_SIZE = "10000"
+BATCH_SIZE = 30000
 MODEL = "feedforward"
 NUM_STAGES_PER_REPLICA = 3
 NUM_TRIALS = 3
-EPOCHS = 15
+EPOCHS = 30
 
 # Change working directory to the location of this file
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -37,7 +37,7 @@ def compute_speedup(base_substring, split_substring):
         speedup_dataframe = speedup_dataframe.append({"num_copies": num_copies, "speedup": speedup}, ignore_index=True)
 
     # Save the speedup dataframe to a csv file
-    speedup_dataframe.to_csv(f"speedup_{base_substring.replace('_mean_and_std', '')}.csv", index=False)
+    speedup_dataframe.to_csv(f"speedup_{base_substring.replace('_mean_and_std', '').replace('*', 'X')}.csv", index=False)
 
 def main():
     # Define the base substring pattern
