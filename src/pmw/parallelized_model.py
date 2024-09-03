@@ -55,6 +55,7 @@ class ParallelizedModel(BaseModel):
         # TODO: Avoid local sync before the global one
         # NOTE: if we only have one subdomain, sync should be done on the subdomain and not globally
         self.layer_copies_group = None
+        # TODO: Change this in case self.tot_replicas = 1, because we still need all_stage_ranks when using the closure from utils
         if self.tot_replicas > 1:
             use_local_synchronization = True
             self.all_stage_ranks = [[self.all_model_ranks[i][j] for i in range(self.tot_replicas)] for j in range(len(self.stage_list))]

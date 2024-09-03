@@ -8,10 +8,11 @@ def compute_rowwise_statistics(file_list):
     """Compute row-wise mean and variance across multiple files."""
     dataframes = [pd.read_csv(file) for file in file_list]
     
-    # For each data frame, add another column called "cum_time" which is the cumulative time
+    # For each data frame
+    # - Add another column called "cum_time" which is the cumulative time
     for df in dataframes:
         df['cum_time'] = df['time'].cumsum()
-
+        
     # Stack the dataframes to create a 3D array (rows, columns, files)
     stacked_data = pd.concat(dataframes, axis=0).groupby(level=0)
     
@@ -26,10 +27,17 @@ def compute_rowwise_statistics(file_list):
         'accuracy_mean': mean_df['accuracy'],
         'accuracy_var': var_df['accuracy'],
         'time_mean': mean_df['cum_time'],
-        'time_var': var_df['cum_time']
+        'time_var': var_df['cum_time'],
     })
     
     return result_df
+
+def speedup_statistics(file_list):
+    # Compute the speedup statistics based on the cum_time measurements
+    dataframes = [pd.read_csv(file) for file in file_list]
+
+    
+
 
 def main():
     # Identify all file patterns
@@ -65,6 +73,7 @@ def main():
         # Save the aggregated metrics to a csv file
         aggregated_metrics.to_csv(f"{base_substring}_mean_and_std.csv", index=False)
 
+        
 
 if __name__ == "__main__":
     main()
