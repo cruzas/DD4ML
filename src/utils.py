@@ -1,5 +1,6 @@
 import os  
 import torch
+import socket
 import subprocess
 import torch.distributed as dist
 
@@ -77,31 +78,44 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
     #     raise ValueError('Model must be an instance of the "ParallelizedModel".')
     if isinstance(criterion, type):
         raise ValueError('Criterion must be an instance of a class.')
-    if model.rank in model.all_stage_ranks[-1]:
+    if model.rank in model.last_layer_main_shard:
         targets = targets.chunk(data_chunks_amount)
     # Compute loss
-    def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount):
+    def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount, sync_loss='global'):
+        '''
+        sync_loss: 'global' or 'local' ('global' means every rank, 'local' means only the ranks within the same subdomain in data)
+        '''
+        if sync_loss not in ['global', 'local']:
+            raise ValueError('sync_loss must be either "global" or "local".')
         if zero_grad:
             model.zero_grad()
         with torch.set_grad_enabled(compute_grad):
             outputs = model(inputs, chunks_amount=data_chunks_amount)
         losses = [0] * data_chunks_amount
         loss = torch.tensor(0.0).to(model.tensor_device)
-        if model.rank in model.all_stage_ranks[-1]:
+        if model.rank in model.last_layer_main_shard:
             for i, out in enumerate(outputs):
                 losses[i] = criterion(out, targets[i].to(out.device))
             loss = sum(losses)/len(losses)
         # Average losses across replicas
-        if model.rank in model.all_stage_ranks[-1]:
-            dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=model.layer_copies_group) # Summing the losses across final layers of each replicas
-            loss = loss/model.tot_replicas
+        if sync_loss == 'global':
+            if model.rank in model.all_final_stages_main_rank:
+                dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=model.all_final_stages_main_rank_group) # Summing the losses across final layers of each replicas
+                loss = loss/len(model.all_final_stages_main_rank)
+            loss_broadcast = dist.broadcast(tensor=loss.detach(), src=model.all_final_stages_main_rank[0], group=model.all_model_ranks_group, async_op=True) # each replica gets the average loss across all replicas (since we are averaging the losses first)
+            # -> all subdomains will have the same loss
+        else:
+            if model.rank in model.subdomain_final_stages_main_rank:
+                dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=model.subdomain_final_stages_main_rank_group) # Summing the losses across shard 0 of final layers of each replicas within the same subdomain
+                loss = loss/model.num_replicas_per_subdomain
+            loss_broadcast = dist.broadcast(tensor=loss.detach(), src=model.subdomain_final_stages_main_rank[0], group=model.subdomain_ranks_group, async_op=True) # shard 0 of last layer of first model replica broadcasts the loss to all other replicas within the same subdomain
+            # -> each subdomains may have a different loss
         
-        loss_broadcast = dist.broadcast(tensor=loss.detach(), src=model.all_stage_ranks[-1][0], async_op=True) # Last layer of first model replica broadcasts the loss to all other ranks 
         if compute_grad and torch.is_grad_enabled():
             model.backward(losses)
         loss_broadcast.wait()
         if return_output:
-            if model.rank in model.all_stage_ranks[-1]:
+            if model.rank in model.last_layer_main_shard:
                 # Returning outputs here in case we want to compute the accuracy afterwards
                 return loss.item(), [output for output in outputs]
             else:
@@ -127,3 +141,43 @@ def check_gpus_per_rank():
     # Check if all ranks have the same number of GPUs
     if len(set(gpu_counts)) != 1:
         raise ValueError("Mismatch in the number of GPUs across ranks")
+    else:
+        return gpu_counts[0]
+    
+def gather_node_info():
+    # Get global rank and hostname
+    global_rank = dist.get_rank()
+    node_name = socket.gethostname()
+
+    # Create a dictionary of {node_name: global_rank}
+    local_info = {node_name: global_rank}
+
+    # Gather the information from all ranks
+    gathered_info = [None] * dist.get_world_size()  # Predefine the list size
+    dist.all_gather_object(gathered_info, local_info)
+
+    # Combine information into a dictionary where key is node_name and value is a list of global ranks
+    node_rank_dict = {}
+    for info in gathered_info:
+        for node, rank in info.items():
+            if node in node_rank_dict:
+                node_rank_dict[node].append(rank)
+            else:
+                node_rank_dict[node] = [rank]
+                
+    # {'node1': [0, 1, 2], 'node2': [3, 4, 5], ...}  -> node 1 will have 3 gpus with global rank number 0, 1, 2
+
+    # Sorting global ranks for each node
+    for node in node_rank_dict:
+        node_rank_dict[node].sort()
+
+    return node_rank_dict
+
+def list_flattener(l):
+    '''
+    Flattens a list of lists of lists of ... to a single list.
+    '''
+    while any(isinstance(i, list) for i in l):
+        l = [item for sublist in l for item in sublist]
+    return l
+    
