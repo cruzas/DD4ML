@@ -1,32 +1,58 @@
+import os 
 import torch
-from torch.distributed._tensor import DTensor, Shard, Replicate, distribute_tensor, distribute_module, init_device_mesh
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.distributed._tensor import Shard, distribute_tensor, init_device_mesh
 
-# construct a device mesh with available devices (multi-host or single host)
-device_mesh = init_device_mesh("cuda", (torch.cuda.device_count(),))
-# if we want to do row-wise sharding
-rowwise_placement=[Shard(0)]
-# if we want to do col-wise sharding
-colwise_placement=[Shard(1)]
+def prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None):
+    os.environ['MASTER_ADDR'] = master_addr
+    os.environ['MASTER_PORT'] = master_port
+    dist.init_process_group(backend='gloo', rank=rank, world_size=world_size)
 
-big_tensor = torch.randn(888, 12)
-# distributed tensor returned will be sharded across the dimension specified in placements
-rowwise_tensor = distribute_tensor(big_tensor, device_mesh=device_mesh, placements=rowwise_placement)
+def main(rank=None, master_addr=None, master_port=None, world_size=None):
+    # Suppose we have 4 ranks in total, i.e. ranks 0, 1, 2, and 3
+    prepare_distributed_environment(rank, master_addr, master_port, world_size)
+    # Shard first tensor across ranks [0,1], multliply it with a weight matrix, and send the output to ranks [2,3]
+    rowwise_placement=[Shard(0)]
+    our_ranks = [0,1]
+    next_ranks = [2,3]
+    dist.barrier()
+    if rank in [0,1]:
+        process_group = dist.new_group(ranks=[0,1], use_local_synchronization=True)
+        device_mesh = init_device_mesh("cuda", (2,), process_group=process_group) 
+        
+        # Define some tensors for testing
+        vector = torch.tensor([0,1,2,3,4,5,6,7,8,9], dtype=torch.float32).view(10, 1)
+        matrix = torch.eye(10, 10) 
 
-# if we want to do replication across a certain device list
-replica_placement = [Replicate()]
-# distributed tensor will be replicated to all four GPUs.
-replica_tensor = distribute_tensor(big_tensor, device_mesh=device_mesh, placements=replica_placement)
+        # NOTE: Currently the code gets stuck HERE because these functions require every rank to call them
+        sharded_matrix = distribute_tensor(matrix, device_mesh=device_mesh, placements=rowwise_placement, process_group=process_group)
+        sharded_vector = distribute_tensor(vector, device_mesh=device_mesh, placements=rowwise_placement, process_group=process_group)
+        
+        output = sharded_matrix @ sharded_vector
+        output = output._local_tensor.cpu()
+        print(f"Rank {rank} sending output {output} to {next_ranks[our_ranks.index(rank)]}")
+        dist.send(tensor=output, dst=next_ranks[our_ranks.index(rank)])
+        print(f'Rank {rank} sent output {output} to {next_ranks[our_ranks.index(rank)]}')
+        
+    if rank in [2,3]:
+        process_group = dist.new_group(ranks=[2,3], use_local_synchronization=True)
+        device_mesh = init_device_mesh("cuda", (2,), process_group=process_group) # sharded across ranks [2,3]
 
-# if we want to distributed a tensor with both replication and sharding
-device_mesh = init_device_mesh("cuda", (2, 2))
-# replicate across the first dimension of device mesh, then sharding on the second dimension of device mesh
-spec=[Replicate(), Shard(0)]
-partial_replica = distribute_tensor(big_tensor, device_mesh=device_mesh, placements=spec)
+        vector = torch.ones(10, 1)
+        sharded_input = distribute_tensor(vector, device_mesh=device_mesh, placements=rowwise_placement, process_group=process_group)
+        # We update the local tensor with the received tensor
+        temp = sharded_input._local_tensor.cpu()
+        print(f"Rank {rank} receiving tensor from {our_ranks[next_ranks.index(rank)]}")
+        dist.recv(tensor=temp, src=our_ranks[next_ranks.index(rank)])
+        print(f'Rank {rank} received tensor from {our_ranks[next_ranks.index(rank)]}')
+        sharded_input._local_tensor = temp.to('cuda')
+        
+        print(f"Rank {rank} received tensor: {sharded_input._local_tensor}")
+        # At this point we want to perform computations with the received tensor and another sharded matrix by only using ranks [2,3]
+    
+    print(f"Rank {rank} asd")
 
-# create a DistributedTensor that shards on dim 0, from a local torch.Tensor
-local_tensor = torch.randn((8, 8), requires_grad=True)
-rowwise_tensor = DTensor.from_local(local_tensor, device_mesh, rowwise_placement)
-
-# reshard the current row-wise tensor to a colwise tensor or replicate tensor
-colwise_tensor = rowwise_tensor.redistribute(device_mesh, colwise_placement)
-replica_tensor = colwise_tensor.redistribute(device_mesh, replica_placement)
+if __name__ == '__main__':  
+    world_size = 4
+    mp.spawn(main, args=('localhost', '12345', world_size), nprocs=world_size, join=True)
