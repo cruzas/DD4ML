@@ -14,6 +14,10 @@ class WeightParallelizedTensor(BaseModel):
     def norm(self, p=2):
         if p == 2:
             return math.sqrt(self @ self)
+        elif p == torch.tensor(float('inf')):
+            local_max = torch.tensor(max([p.flatten().abs().max().item() for p in self.tensor]))
+            dist.all_reduce(tensor=local_max, group=self.master_group, op=dist.ReduceOp.MAX)
+            return local_max.item()
         else:
             # Implement generic p
             raise NotImplementedError("Only L2 norm is implemented.")

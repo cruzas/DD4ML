@@ -103,24 +103,29 @@ class BaseModel(nn.Module):
         self.all_model_ranks_group = dist.new_group(ranks=self.all_model_ranks_flat, use_local_synchronization=True)
         
         # Store in each rank the correct layer_copies field - this will be needed to synchronize the parameters across the replicas
-        self.last_layer_main_shard = layer_copies['stage'+str(stages_amount-1)+'_shard0']
+        self.last_layers_main_shard = layer_copies['stage'+str(stages_amount-1)+'_shard0'] # list of last layers main shards
+        self.all_layer_copies_group = None
         for layer in layer_copies:
             if 'stage'+str(stages_amount-1)+'_shard0' == layer: # last layers and main shard (0) are responsible for the computation of the loss
-                self.last_layer_main_shard_group = dist.new_group(ranks=self.last_layer_main_shard, use_local_synchronization=True)
+                self.last_layers_main_shard_group = dist.new_group(ranks=self.last_layers_main_shard, use_local_synchronization=True)
             if self.rank in layer_copies[layer]:
                 self.all_layer_copies = layer_copies[layer]
                 self.all_layer_copies_group = dist.new_group(ranks=self.all_layer_copies, use_local_synchronization=True)
                 break     
             
         # create subdomain groups
+        self.last_layer_main_shard = self.subdomain_rank_structure()[0][-1][0] # first replica, last stage, first GPU (main shard)
         self.subdomain_ranks = self.subdomain_rank_structure(flatten=True)
         self.subdomain_ranks_group = dist.new_group(ranks=self.subdomain_rank_structure(flatten=True), use_local_synchronization=True)
         self.subdomain_final_stages_main_rank = [None]
+        self.subdomain_final_stages_main_rank_group = None
         for sd in range(subdomains):
             if self.rank in subdomain_final_stages_main_rank[sd]:
                 self.subdomain_final_stages_main_rank = subdomain_final_stages_main_rank[sd]
                 self.subdomain_final_stages_main_rank_group = dist.new_group(ranks=self.subdomain_final_stages_main_rank, use_local_synchronization=True)
                 break
+        self.replicas_in_subdomain_final_stages_main_rank = [r for r in self.subdomain_final_stages_main_rank if r in self.subdomain_ranks]
+        self.replicas_in_subdomain_final_stages_main_rank_group = dist.new_group(ranks=self.replicas_in_subdomain_final_stages_main_rank, use_local_synchronization=True)
         # create global group of final stages main rank
         self.all_final_stages_main_rank = all_final_stages_main_rank
         self.all_final_stages_main_rank_group = dist.new_group(ranks=self.all_final_stages_main_rank, use_local_synchronization=True)

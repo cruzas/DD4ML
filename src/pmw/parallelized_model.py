@@ -106,3 +106,8 @@ class ParallelizedModel(BaseModel):
             for param in self.subdomain_params():
                 dist.all_reduce(tensor=param.grad, group=self.all_layer_copies_group, op=dist.ReduceOp.SUM)	
                 param.grad /= self.tot_replicas
+
+    def normalize_grads(self, p=torch.inf):
+        norm = self.subdomain.weight_parallelized_model.grad_norm(p=p)
+        for param in self.subdomain_params():
+            param.grad /= norm

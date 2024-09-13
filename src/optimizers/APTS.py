@@ -3,17 +3,20 @@ import time
 import torch.distributed as dist
 
 class APTS(torch.optim.Optimizer):
-    def __init__(self, model, criterion, subdomain_optimizer, subdomain_optimizer_defaults, global_optimizer, global_optimizer_defaults, lr=0.01, max_subdomain_iter=0, dogleg=False, APTS_in_data=False, APTS_in_data_sync_strategy='average'):
+    def __init__(self, model, criterion, subdomain_optimizer, subdomain_optimizer_defaults, global_optimizer, global_optimizer_defaults, lr=0.01, max_subdomain_iter=0, dogleg=False, APTS_in_data_sync_strategy='average', step_strategy='mean'):
         super(APTS, self).__init__(model.parameters(), {'lr': lr, 'max_subdomain_iter': max_subdomain_iter, 'dogleg': dogleg})
         for key in self.param_groups[0].keys():  
             if key not in ['params']:
                 setattr(self, key, self.param_groups[0][key])
         self.model = model # subdomain model
-        self.APTS_in_data = APTS_in_data # APTS in data
-        self.APTS_in_data_sync_strategy = APTS_in_data_sync_strategy.lower() # APTS in data synchronization strategy (TODO: investigate 'sum' strategy)
-        if self.APTS_in_data and self.APTS_in_data_sync_strategy not in ['average', 'sum']:
+        self.APTS_in_data_sync_strategy = APTS_in_data_sync_strategy.lower()
+        self.step_strategy = step_strategy
+            
+        if self.step_strategy not in ['weighted_mean', 'mean']:
+            raise ValueError('The step strategy must be either "weighted_mean" or "mean".')
+        if self.APTS_in_data_sync_strategy not in ['average', 'sum']:
             raise ValueError('The APTS in data synchronization strategy must be either "average" or "sum"')
-        if self.APTS_in_data and self.APTS_in_data_sync_strategy == 'sum' and dist.get_rank() == 0:
+        if self.APTS_in_data_sync_strategy == 'sum' and dist.get_rank() == 0:
             print('(WARNING) APTS in data "sum" synchronization strategy still has to be tested/verified.')
         self.criterion = criterion # loss function
         if lr <= 0:
@@ -21,7 +24,7 @@ class APTS(torch.optim.Optimizer):
         subdomain_optimizer_defaults.update({'lr': lr})
         self.subdomain_optimizer = subdomain_optimizer(params=model.subdomain_params(), **subdomain_optimizer_defaults) # subdomain optimizer
         if 'TR' in str(global_optimizer):
-            self.global_optimizer = global_optimizer(model=model, criterion=criterion, **global_optimizer_defaults) # TR optimizer
+            self.global_optimizer = global_optimizer(model=model, **global_optimizer_defaults) # TR optimizer
         else:
             global_optimizer_defaults.update({'lr': lr})
             self.global_optimizer = global_optimizer(params=model.subdomain_params(), **global_optimizer_defaults) # standard PyTorch optimizers
@@ -66,7 +69,7 @@ class APTS(torch.optim.Optimizer):
             if key not in ['params']:
                 self.param_groups[0][key] = getattr(self, key)
             
-    def subdomain_steps(self):
+    def subdomain_steps(self, closure=None):
         """
         Perform subdomain steps.
 
@@ -82,8 +85,9 @@ class APTS(torch.optim.Optimizer):
         """
         # Set up the learning rate
         if self.max_subdomain_iter > 0:
-            if self.APTS_in_data and self.APTS_in_data_sync_strategy == 'sum':
-                self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/(self.num_subdomains)
+            if self.APTS_in_data_sync_strategy == 'sum' and self.step_strategy != 'weighted_mean':
+                self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/(self.model.num_subdomains*self.max_subdomain_iter)
+                # self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/(self.model.num_subdomains)
             else:
                 self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/self.max_subdomain_iter
             # Do subdomain steps
@@ -94,11 +98,28 @@ class APTS(torch.optim.Optimizer):
                 if i != self.max_subdomain_iter - 1:
                     self.model.subdomain_forward() 
                     self.model.subdomain_backward()
+                    # self.model.normalize_grads() # through infinity norm
                 
             # Check if TRAdam is used as the local optimizer
-            # if 'tradam' in str(self.subdomain_optimizer).lower():
-            #     self.subdomain_optimizer.reset_momentum()
-            self.model.sync_params(method=self.APTS_in_data_sync_strategy)
+            if 'tradam' in str(self.subdomain_optimizer).lower():
+                self.subdomain_optimizer.reset_momentum()
+                
+            if self.step_strategy == 'weighted_mean' and self.model.num_subdomains > 1:
+                # Loss seems to be synchronized because of data_and_weight_parallelized_subdomain
+                loss = closure(compute_grad=False, zero_grad=False, sync_loss='local')
+                loss = torch.tensor(loss).cuda()
+                ds_loss = loss.clone()
+                if self.model.rank in self.model.subdomain_final_stages_main_rank:
+                    dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=self.model.subdomain_final_stages_main_rank_group) # sums losses across all subdomains
+                dist.broadcast(tensor=loss, src=self.model.last_layer_main_shard, group=self.model.subdomain_ranks_group)
+                ds_loss_weight = ds_loss/loss
+                # Here premultiply every param by ds_loss weight
+                for param in self.model.parameters():
+                    param.data *= ds_loss_weight
+                self.model.sync_params(method='sum')
+            else:
+                self.model.sync_params(method=self.APTS_in_data_sync_strategy)
+
             self.update_param_group()
 
     def zero_timers(self):
@@ -130,9 +151,11 @@ class APTS(torch.optim.Optimizer):
         initial_parameters = self.model.parameters(clone=True)
         initial_grads = self.model.grad(clone=True)
         self.timings['copy_params'] += time.time() - tic
+        
         # Do subdomain steps
         tic = time.time()
-        self.subdomain_steps()
+        self.subdomain_steps(closure)
+            
         self.timings['precond'] += time.time() - tic
         with torch.no_grad():
             tic = time.time()

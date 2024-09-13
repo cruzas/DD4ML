@@ -17,7 +17,6 @@ class DataAndWeightParallelizedSubdomain(BaseModel):
         self.num_replicas_per_subdomain = len(rank_list)
         self._create_process_groups()
         # Initialize WeightParallelizedModel replicas 
-        print(f'Rank {self.rank}')
         for model_replica_ranks in self.rank_list:
             if self.rank in utils.list_flattener(model_replica_ranks):
                 self.weight_parallelized_model = WeightParallelizedModel(stage_list=stage_list, rank_list=model_replica_ranks, sample=sample)
