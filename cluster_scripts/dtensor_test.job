@@ -1,0 +1,25 @@
+#!/bin/bash
+#SBATCH --account=c24
+#SBATCH --time=00:30:00
+#SBATCH --ntasks-per-core=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --gres=gpu:1
+#SBATCH --hint=nomultithread
+#SBATCH --constraint=gpu
+#SBATCH --partition=debug
+#SBATCH --exclusive
+
+module load daint-gpu
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export NCCL_DEBUG=INFO
+export NCCL_IB_HCA=ipogif0
+export NCCL_IB_CUDA_SUPPORT=1
+
+RUNPATH=/scratch/snx3000/scruzale/ML_APTS/
+cd $RUNPATH || exit
+
+echo "Activating llms $(date)"
+source activate llms
+echo "Calling python script $(date)"
+srun python3 -u test_dtensor4.py 
