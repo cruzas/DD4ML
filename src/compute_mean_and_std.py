@@ -37,20 +37,22 @@ def speedup_statistics(file_list):
     dataframes = [pd.read_csv(file) for file in file_list]
 
 def main():
-    # Change directory to this file's location
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir("../results/")
+    
+    print ("Current working directory: ", os.getcwd())
 
     # Identify all file patterns
     OPTIMIZERS = ["APTS"]
     LEARNING_RATES = [1.0]
     DATASETS = ["MNIST"]
-    BATCH_SIZES = [10000]
+    BATCH_SIZES = [14976, 29952, 59904]
     MODELS = ["feedforward"]
-    NUM_SUBDOMAINS = [2, 4, 8, 16] # [1]
-    NUM_REPLICAS_PER_SUBDOMAIN = [1] # [2, 4, 8, 16]
+    NUM_SUBDOMAINS = [1] #[2, 4, 8, 16] 
+    NUM_REPLICAS_PER_SUBDOMAIN = [2, 4, 8, 16, 32]
     NUM_STAGES_PER_REPLICA = [3]
     NUM_TRIALS = 3
-    EPOCHS = 15
+    EPOCHS = 20
 
     # Nested for loop that will go through all combinations of the lists above
     for optimizer, lr, dataset, batch_size, model, num_subdomains, num_replicas_per_subdomain, num_stages_per_replica in product(
@@ -61,7 +63,7 @@ def main():
         print("Looking for files with base substring:", base_substring)
 
         # Make a list containing all names of files that match the base substring
-        filenames = [f for f in os.listdir(".") if base_substring in f]
+        filenames = [f for f in os.listdir(os.getcwd()) if base_substring in f]
         if len(filenames) < NUM_TRIALS:
             raise ValueError(f"Not enough files found for base substring {base_substring}")
         if len(filenames) > NUM_TRIALS:
