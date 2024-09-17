@@ -158,7 +158,8 @@ class APTS(torch.optim.Optimizer):
         self.timings['precond'] += time.time() - tic
         with torch.no_grad():
             tic = time.time()
-            new_loss = closure(compute_grad=False, zero_grad=True)
+        new_loss = closure(compute_grad=False, zero_grad=True)
+        with torch.no_grad():
             self.timings['closure_2'] += time.time() - tic
             tic = time.time()
             step = self.model.parameters(clone=False) - initial_parameters
@@ -167,8 +168,9 @@ class APTS(torch.optim.Optimizer):
             w = 0; c = 0
             self.timings['step_comp'] += time.time() - tic
             tic = time.time()
-            if self.dogleg:
-                while new_loss > initial_loss and c<5: 
+        if self.dogleg:
+            while new_loss > initial_loss and c<5: 
+                with torch.no_grad():
                     c += 1
                     # Decrease lr to decrease size of step ...
                     lr = lr/2
@@ -181,14 +183,15 @@ class APTS(torch.optim.Optimizer):
                     for i,p in enumerate(self.model.parameters()):
                         p.copy_(initial_parameters.tensor[i] + step2.tensor[i])
                     # Compute new global loss
-                    new_loss = closure(compute_grad=False, zero_grad=True)
-                    # Empty cache to avoid memory problems
-                    torch.cuda.empty_cache()
-            else:
+                new_loss = closure(compute_grad=False, zero_grad=True)
+                # Empty cache to avoid memory problems
+                torch.cuda.empty_cache()
+        else:
+            with torch.no_grad():
                 # Update the model with the new params
                 for i,p in enumerate(self.model.parameters()):
                     p.copy_(initial_parameters.tensor[i] + step.tensor[i])
-            self.timings['dogleg'] += time.time() - tic
+                self.timings['dogleg'] += time.time() - tic
 
         # Do global TR step
         tic = time.time()
@@ -197,5 +200,6 @@ class APTS(torch.optim.Optimizer):
          
         # Update the learning rate
         self.lr = self.global_optimizer.lr
+        # self.lr = self.global_optimizer.param_groups[0]['lr']
         self.update_param_group()
         return new_loss

@@ -5,7 +5,11 @@ def create_feedforward_stage_list(num_stages, input_size=2, out_features=1, hidd
     stage_list = []
     if num_stages == 1:
         layers = [nn.Linear, nn.Tanh, nn.Linear, nn.Tanh, nn.Linear]
-        layer_params = [{'in_features': input_size, 'out_features': hidden_size}, {}, {'in_features': hidden_size, 'out_features': hidden_size}, {}, {'in_features': hidden_size, 'out_features': out_features}]
+        layer_params = [{'in_features': input_size, 'out_features': hidden_size}, 
+                        {}, 
+                        {'in_features': hidden_size, 'out_features': hidden_size}, 
+                        {}, 
+                        {'in_features': hidden_size, 'out_features': out_features}]
         stage_list.append((layers, layer_params))
         return stage_list
     else:

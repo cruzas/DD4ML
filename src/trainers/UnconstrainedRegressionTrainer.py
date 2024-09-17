@@ -65,7 +65,7 @@ class UnconstrainedRegressionTrainer(object):
         elif(optimizer_type == PrecLBFGS):
             optimizer = optimizer_type(net.parameters())
         else:
-            optimizer = optimizer_type(model= net, lr=args.lr_global, subdomain_optimizer=optim.SGD, subdomain_optimizer_defaults={'lr': args.lr_global}, global_optimizer=TR, global_optimizer_defaults={'lr': args.lr_global}, max_subdomain_iter=5, dogleg=True, APTS_in_data_sync_strategy='average', step_strategy='mean')
+            optimizer = optimizer_type(model= net, lr=args.lr_global, subdomain_optimizer=optim.SGD, subdomain_optimizer_defaults={'lr': args.lr_global}, global_optimizer=optim.SGD, global_optimizer_defaults={'lr': args.lr_global}, max_subdomain_iter=1, dogleg=True, APTS_in_data_sync_strategy='average', step_strategy='mean')
 
         epoch = 0
         self.best_test_loss = 9e9
@@ -116,9 +116,9 @@ class UnconstrainedRegressionTrainer(object):
                 print("converged max_epochs")
             elif(np.isfinite(pde_loss) == False or np.isfinite(train_loss) == False or np.isfinite(test_loss) == False):
                 converged = True
-            elif(train_loss < self.config["loss_train_tol"] or test_loss < self.config["loss_test_tol"]):
-                print("converged small loss")
-                converged = True
+            # elif(train_loss < self.config["loss_train_tol"] or test_loss < self.config["loss_test_tol"]):
+            #     print("converged small loss")
+            #     converged = True
 
 
         num_loss_evals = 0
@@ -166,10 +166,8 @@ class UnconstrainedRegressionTrainer(object):
                 inputs = coordinates[0]
                 if self.use_cuda:
                     inputs = inputs.cuda()     
-                try:
-                    inputs.requires_grad = True
-                except:
-                    print('asd')
+                inputs.requires_grad = True
+                inputs = inputs.unsqueeze(0)
 
 
             def closure(**kwargs):
@@ -223,7 +221,7 @@ class UnconstrainedRegressionTrainer(object):
                     targets   = targets.cuda()
 
             else:
-                coordinates_sol = coordinates[0]
+                coordinates_sol = coordinates[0].unsqueeze(0)
 
                 coordinates = coordinates_sol[:, 0:-1]
                 exact_sol   = coordinates_sol[:, -1]

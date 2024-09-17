@@ -70,8 +70,10 @@ class PDEBase(object):
 
 
     def criterion(self, net, coords):
-
         net_out = net(coords)
+        # print(coords, " coords ", net_out, " net_out ")
+        if type(net_out) is list and len(net_out) == 1:
+            net_out = net_out[0]
 
         if(self.bc_exact is not None):
             # print("yes  here... ")

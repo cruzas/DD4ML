@@ -66,6 +66,8 @@ class Burgers(PDEBase):
             x = x.cuda()                  
 
         u_nn_test = net(x)    
+        if type(u_nn_test) is list and len(u_nn_test) == 1:
+            u_nn_test = u_nn_test[0]
         if(self.bc_exact is not None):
             u_nn_test = self.bc_exact.apply_bc(u_nn_test, x)
 
