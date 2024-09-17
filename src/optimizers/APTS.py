@@ -87,7 +87,6 @@ class APTS(torch.optim.Optimizer):
         if self.max_subdomain_iter > 0:
             if self.APTS_in_data_sync_strategy == 'sum' and self.step_strategy != 'weighted_mean':
                 self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/(self.model.num_subdomains*self.max_subdomain_iter)
-                # self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/(self.model.num_subdomains)
             else:
                 self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/self.max_subdomain_iter
             # Do subdomain steps
@@ -118,7 +117,7 @@ class APTS(torch.optim.Optimizer):
                     param.data *= ds_loss_weight
                 self.model.sync_params(method='sum')
             else:
-                self.model.sync_params(method=self.APTS_in_data_sync_strategy)
+                self.model.sync_params(method='average') # if this is "sum" it doesn't work `\_(ツ)_/`
 
             self.update_param_group()
 
