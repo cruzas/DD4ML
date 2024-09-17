@@ -6,14 +6,15 @@ import os
 OPTIMIZER = "APTS"
 LR = 1.0
 DATASET = "MNIST"
-BATCH_SIZE = 30000
+BATCH_SIZES = [14976, 29952, 59904]
 MODEL = "feedforward"
 NUM_STAGES_PER_REPLICA = 3
 NUM_TRIALS = 3
-EPOCHS = 30
+EPOCHS = 20
 
 # Change working directory to the location of this file
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
+os.chdir("../results/")
 
 def compute_speedup(base_substring, split_substring):
     # Get the list of all relevant files
@@ -40,22 +41,22 @@ def compute_speedup(base_substring, split_substring):
     speedup_dataframe.to_csv(f"speedup_{base_substring.replace('_mean_and_std', '').replace('*', 'X')}.csv", index=False)
 
 def main():
-    # Define the base substring pattern
-    NUM_SUBDOMAINS = 1
-    # NUM_REPLICAS_PER_SUBDOMAIN is what varies here
-    base_substring = f"{OPTIMIZER}_{LR}_{DATASET}_{BATCH_SIZE}_{MODEL}_{NUM_SUBDOMAINS}_*_{NUM_STAGES_PER_REPLICA}_{EPOCHS}_mean_and_std"
-    split_substring = f"{OPTIMIZER}_{LR}_{DATASET}_{BATCH_SIZE}_{MODEL}_{NUM_SUBDOMAINS}"
-    # Compute the speedup statistics
-    compute_speedup(base_substring, split_substring)
+    for BATCH_SIZE in BATCH_SIZES:
+        # Define the base substring pattern
+        NUM_SUBDOMAINS = 1
+        # NUM_REPLICAS_PER_SUBDOMAIN is what varies here
+        base_substring = f"{OPTIMIZER}_{LR}_{DATASET}_{BATCH_SIZE}_{MODEL}_{NUM_SUBDOMAINS}_*_{NUM_STAGES_PER_REPLICA}_{EPOCHS}_mean_and_std"
+        split_substring = f"{OPTIMIZER}_{LR}_{DATASET}_{BATCH_SIZE}_{MODEL}_{NUM_SUBDOMAINS}"
+        # Compute the speedup statistics
+        compute_speedup(base_substring, split_substring)
 
-    # Define the base substring pattern
-    NUM_REPLICAS_PER_SUBDOMAIN = 1
-    # NUM_SUBDOMAINS is what varies here
-    base_substring = f"{OPTIMIZER}_{LR}_{DATASET}_{BATCH_SIZE}_{MODEL}_*_{NUM_REPLICAS_PER_SUBDOMAIN}_{NUM_STAGES_PER_REPLICA}_{EPOCHS}_mean_and_std"
-    split_substring = f"{OPTIMIZER}_{LR}_{DATASET}_{BATCH_SIZE}_{MODEL}"
-    # Compute the speedup statistics
-    compute_speedup(base_substring, split_substring)
-
+        # Define the base substring pattern
+        NUM_REPLICAS_PER_SUBDOMAIN = 1
+        # NUM_SUBDOMAINS is what varies here
+        base_substring = f"{OPTIMIZER}_{LR}_{DATASET}_{BATCH_SIZE}_{MODEL}_*_{NUM_REPLICAS_PER_SUBDOMAIN}_{NUM_STAGES_PER_REPLICA}_{EPOCHS}_mean_and_std"
+        split_substring = f"{OPTIMIZER}_{LR}_{DATASET}_{BATCH_SIZE}_{MODEL}"
+        # Compute the speedup statistics
+        compute_speedup(base_substring, split_substring)
 
 if __name__ == "__main__":
     main()
