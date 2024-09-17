@@ -2,8 +2,9 @@ import torch
 import time
 import torch.distributed as dist
 
+
 class APTS(torch.optim.Optimizer):
-    def __init__(self, model, criterion, subdomain_optimizer, subdomain_optimizer_defaults, global_optimizer, global_optimizer_defaults, lr=0.01, max_subdomain_iter=0, dogleg=False, APTS_in_data_sync_strategy='average', step_strategy='mean'):
+    def __init__(self, model, subdomain_optimizer, subdomain_optimizer_defaults, global_optimizer, global_optimizer_defaults, lr=0.01, max_subdomain_iter=0, dogleg=False, APTS_in_data_sync_strategy='average', step_strategy='mean'):
         super(APTS, self).__init__(model.parameters(), {'lr': lr, 'max_subdomain_iter': max_subdomain_iter, 'dogleg': dogleg})
         for key in self.param_groups[0].keys():  
             if key not in ['params']:
@@ -18,7 +19,6 @@ class APTS(torch.optim.Optimizer):
             raise ValueError('The APTS in data synchronization strategy must be either "average" or "sum"')
         if self.APTS_in_data_sync_strategy == 'sum' and dist.get_rank() == 0:
             print('(WARNING) APTS in data "sum" synchronization strategy still has to be tested/verified.')
-        self.criterion = criterion # loss function
         if lr <= 0:
             raise ValueError('The learning rate "lr" must be bigger than 0.')
         subdomain_optimizer_defaults.update({'lr': lr})

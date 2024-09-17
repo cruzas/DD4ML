@@ -93,7 +93,11 @@ class GeneralizedDistributedDataLoader(DataLoader):
                         
         rank = dist.get_rank()
         self.is_active_rank = True
-        if rank not in first_layer_ranks+last_layer_ranks: # rank in the middle does not require any real data
+        num_stages = len(model_structure[0][0])
+        if num_stages == 1:
+            self.sampler = GeneralizedDistributedSampler(layer_ranks=first_layer_ranks, dataset=dataset, num_replicas=tot_replicas, rank=rank, shuffle=shuffle, drop_last=True, seed=seed, **kwargs)
+            super(GeneralizedDistributedDataLoader, self).__init__(dataset=dataset, batch_size=batch_size//tot_replicas, shuffle=False, sampler=self.sampler, num_workers=num_workers, pin_memory=pin_memory, drop_last=True, **kwargs)
+        elif rank not in first_layer_ranks+last_layer_ranks: # rank in the middle does not require any real data
             # Make a mock dataset with the same amount of batches as the original dataset (this is needed to keep iterations consistent across all ranks)
             amount_of_batches = 1 if len(dataset) == batch_size else len(dataset) // batch_size
             dataset = MockDataset(dataset, amount_of_batches, device=device, first=None)     

@@ -2,16 +2,19 @@ import numpy as np
 import copy
 import sys
 import torch
-import pyDOE
+import pyDOE  # py -3.10 -m pip install pyDOE
 import random
 from torch.utils.data import Dataset
-import skopt
+import skopt # py -3.10 -m pip install scikit-optimize
+import torch.distributed as dist
+from dataloaders import GeneralizedDistributedDataLoader
 
 
 class RectangleDomain2D(object):
 
-    def __init__(self, start_point, end_point, num_train_samples, num_test_samples, use_BC=False, sampling_strategy="latin_hypercube", ref_strategy="RAD", x_interior=None, xBC_train=None):
+    def __init__(self, start_point, end_point, num_train_samples, num_test_samples, use_BC=False, sampling_strategy="latin_hypercube", ref_strategy="RAD", x_interior=None, xBC_train=None, model_structure=None):
 
+        self.model_structure = model_structure
         self.dim = 2
         self.use_BC = use_BC
         
@@ -51,34 +54,45 @@ class RectangleDomain2D(object):
         if(self.use_BC):
             self.x_in_bc = torch.cat((self.x_interior, self.xBC_train), dim=0)
 
-            sampler_train = torch.utils.data.sampler.BatchSampler(
-                            torch.utils.data.sampler.RandomSampler(self.x_in_bc),
-                            batch_size=int(len(self.x_in_bc)),
-                            drop_last=False)
+            if dist.is_initialized():
+                #our stuff
+                raise NotImplementedError
+            else:
+                sampler_train = torch.utils.data.sampler.BatchSampler(
+                                torch.utils.data.sampler.RandomSampler(self.x_in_bc),
+                                batch_size=int(len(self.x_in_bc)),
+                                drop_last=False)
 
-            self.train_loader = torch.utils.data.DataLoader(self.x_in_bc, sampler=sampler_train)
-
+                self.train_loader = torch.utils.data.DataLoader(self.x_in_bc, sampler=sampler_train)
         else:
-            sampler_train = torch.utils.data.sampler.BatchSampler(
-                            torch.utils.data.sampler.RandomSampler(self.x_interior),
-                            batch_size=int(len(self.x_interior)),
-                            drop_last=False)
+            if dist.is_initialized():
+                #our stuff
+                # raise NotImplementedError
+                self.train_loader = GeneralizedDistributedDataLoader(model_structure=self.model_structure, dataset=self.x_interior, batch_size=int(len(self.x_interior)), shuffle=False, num_workers=0, pin_memory=True)
+            else:
+                sampler_train = torch.utils.data.sampler.BatchSampler(
+                                torch.utils.data.sampler.RandomSampler(self.x_interior),
+                                batch_size=int(len(self.x_interior)),
+                                drop_last=False)
 
-            self.train_loader = torch.utils.data.DataLoader(self.x_interior, sampler=sampler_train)
+                self.train_loader = torch.utils.data.DataLoader(self.x_interior, sampler=sampler_train)
 
 
             # print("len(self.x_interior) ", len(self.x_interior))
 
 
-
+        
         # test sampler
-        sampler_test =  torch.utils.data.sampler.BatchSampler(
-                        torch.utils.data.sampler.RandomSampler(self.x_test),
-                        batch_size=int(len(self.x_test)),
-                        drop_last=False)
+        if dist.is_initialized():
+            #our stuff
+            self.test_loader = GeneralizedDistributedDataLoader(model_structure=self.model_structure, dataset=self.x_test, batch_size=int(len(self.x_test)), shuffle=False, num_workers=0, pin_memory=True)
+        else:
+            sampler_test =  torch.utils.data.sampler.BatchSampler(
+                            torch.utils.data.sampler.RandomSampler(self.x_test),
+                            batch_size=int(len(self.x_test)),
+                            drop_last=False)
 
-
-        self.test_loader = torch.utils.data.DataLoader(self.x_test, sampler=sampler_test)
+            self.test_loader = torch.utils.data.DataLoader(self.x_test, sampler=sampler_test)
 
 
     def adaptivelly_refine(self, net, pde):
@@ -131,21 +145,28 @@ class RectangleDomain2D(object):
 
             if(self.use_BC):
                 self.x_in_bc = torch.cat((self.x_interior, self.xBC_train), dim=0)
+                if dist.is_initialized():
+                    #our stuff
+                    raise NotImplementedError
+                else:
+                    sampler_train = torch.utils.data.sampler.BatchSampler(
+                                    torch.utils.data.sampler.RandomSampler(self.x_in_bc),
+                                    batch_size=int(len(self.x_in_bc)),
+                                    drop_last=False)
 
-                sampler_train = torch.utils.data.sampler.BatchSampler(
-                                torch.utils.data.sampler.RandomSampler(self.x_in_bc),
-                                batch_size=int(len(self.x_in_bc)),
-                                drop_last=False)
-
-                self.train_loader = torch.utils.data.DataLoader(self.x_in_bc, sampler=sampler_train)
+                    self.train_loader = torch.utils.data.DataLoader(self.x_in_bc, sampler=sampler_train)
 
             else:
-                sampler_train = torch.utils.data.sampler.BatchSampler(
-                                torch.utils.data.sampler.RandomSampler(self.x_interior),
-                                batch_size=int(len(self.x_interior)),
-                                drop_last=False)
+                if dist.is_initialized():
+                    #our stuff
+                    raise NotImplementedError
+                else:
+                    sampler_train = torch.utils.data.sampler.BatchSampler(
+                                    torch.utils.data.sampler.RandomSampler(self.x_interior),
+                                    batch_size=int(len(self.x_interior)),
+                                    drop_last=False)
 
-                self.train_loader = torch.utils.data.DataLoader(self.x_interior, sampler=sampler_train)
+                    self.train_loader = torch.utils.data.DataLoader(self.x_interior, sampler=sampler_train)
 
 
             print("len(self.x_interior) ", len(self.x_interior))
@@ -218,20 +239,28 @@ class RectangleDomain2D(object):
             if(self.use_BC):
                 self.x_in_bc = torch.cat((self.x_interior, self.xBC_train), dim=0)
 
-                sampler_train = torch.utils.data.sampler.BatchSampler(
-                                torch.utils.data.sampler.RandomSampler(self.x_in_bc),
-                                batch_size=int(len(self.x_in_bc)),
-                                drop_last=False)
+                if dist.is_initialized():
+                    #our stuff
+                    raise NotImplementedError
+                else:
+                    sampler_train = torch.utils.data.sampler.BatchSampler(
+                                    torch.utils.data.sampler.RandomSampler(self.x_in_bc),
+                                    batch_size=int(len(self.x_in_bc)),
+                                    drop_last=False)
 
-                self.train_loader = torch.utils.data.DataLoader(self.x_in_bc, sampler=sampler_train)
+                    self.train_loader = torch.utils.data.DataLoader(self.x_in_bc, sampler=sampler_train)
 
             else:
-                sampler_train = torch.utils.data.sampler.BatchSampler(
-                                torch.utils.data.sampler.RandomSampler(self.x_interior),
-                                batch_size=int(len(self.x_interior)),
-                                drop_last=False)
+                if dist.is_initialized():
+                    #our stuff
+                    raise NotImplementedError
+                else:
+                    sampler_train = torch.utils.data.sampler.BatchSampler(
+                                    torch.utils.data.sampler.RandomSampler(self.x_interior),
+                                    batch_size=int(len(self.x_interior)),
+                                    drop_last=False)
 
-                self.train_loader = torch.utils.data.DataLoader(self.x_interior, sampler=sampler_train)
+                    self.train_loader = torch.utils.data.DataLoader(self.x_interior, sampler=sampler_train)
 
 
             print("len(self.x_interior) ", len(self.x_interior))
@@ -286,20 +315,28 @@ class RectangleDomain2D(object):
             if(self.use_BC):
                 self.x_in_bc = torch.cat((self.x_interior, self.xBC_train), dim=0)
 
-                sampler_train = torch.utils.data.sampler.BatchSampler(
-                                torch.utils.data.sampler.RandomSampler(self.x_in_bc),
-                                batch_size=int(len(self.x_in_bc)),
-                                drop_last=False)
+                if dist.is_initialized():
+                    #our stuff
+                    raise NotImplementedError
+                else:
+                    sampler_train = torch.utils.data.sampler.BatchSampler(
+                                    torch.utils.data.sampler.RandomSampler(self.x_in_bc),
+                                    batch_size=int(len(self.x_in_bc)),
+                                    drop_last=False)
 
-                self.train_loader = torch.utils.data.DataLoader(self.x_in_bc, sampler=sampler_train)
+                    self.train_loader = torch.utils.data.DataLoader(self.x_in_bc, sampler=sampler_train)
 
             else:
-                sampler_train = torch.utils.data.sampler.BatchSampler(
-                                torch.utils.data.sampler.RandomSampler(self.x_interior),
-                                batch_size=int(len(self.x_interior)),
-                                drop_last=False)
+                if dist.is_initialized():
+                    #our stuff
+                    raise NotImplementedError
+                else:
+                    sampler_train = torch.utils.data.sampler.BatchSampler(
+                                    torch.utils.data.sampler.RandomSampler(self.x_interior),
+                                    batch_size=int(len(self.x_interior)),
+                                    drop_last=False)
 
-                self.train_loader = torch.utils.data.DataLoader(self.x_interior, sampler=sampler_train)
+                    self.train_loader = torch.utils.data.DataLoader(self.x_interior, sampler=sampler_train)
 
 
         elif(self.ref_strategy=="None"):
@@ -315,15 +352,16 @@ class RectangleDomain2D(object):
             new_dataset = torch.hstack((self.x_test, exact_sol))
         else:
             new_dataset = pde.get_test_set()
+            sampler_test =  torch.utils.data.sampler.BatchSampler(
+                            torch.utils.data.sampler.RandomSampler(new_dataset),
+                            batch_size=int(len(new_dataset)),
+                            drop_last=False)
 
-
-        sampler_test =  torch.utils.data.sampler.BatchSampler(
-                        torch.utils.data.sampler.RandomSampler(new_dataset),
-                        batch_size=int(len(new_dataset)),
-                        drop_last=False)
-
-
-        self.test_loader = torch.utils.data.DataLoader(new_dataset, sampler=sampler_test)
+        if dist.is_initialized():
+            #our stuff
+            self.test_loader = GeneralizedDistributedDataLoader(model_structure=self.model_structure, dataset=new_dataset, batch_size=int(len(new_dataset)), shuffle=False, num_workers=0, pin_memory=True)
+        else:
+            self.test_loader = torch.utils.data.DataLoader(new_dataset, sampler=sampler_test)
 
 
 
