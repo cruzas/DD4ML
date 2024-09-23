@@ -6,6 +6,7 @@ import numpy as np
 import json
 import os
 import sys
+import copy
 
 def preprocessing(batch):
     # flatten the batch
@@ -19,7 +20,7 @@ net = {
     "start": {
         "callable": {'object': preprocessing, 'settings': {}},
         "dst": {"to": ["input_layer1.1", "input_layer1.2"], "strategy": None},
-        "rcv": {"src": None, "strategy": None},
+        "rcv": {"src": [], "strategy": None},
         "stage": 1,
     },
     "input_layer1.1": {
@@ -48,8 +49,8 @@ net = {
     },
     "finish": {
         "callable": {'object': nn.Linear, "settings": {"in_features": 128, "out_features": 10}},
-        "dst": {"to": None, "strategy": None},
-        "rcv": {'src': ["input_layer2.1"], 'strategy': average_fun},
+        "dst": {"to": [], "strategy": None},
+        "rcv": {'src': ["input_layer2.1", "input_layer2.2"], 'strategy': average_fun},
         "stage": 2,
     },
 }
@@ -58,33 +59,17 @@ class NetHandler():
     def __init__(self, net_dict):
         # TODO: Add a security check to ensure that the network has valid "to", "src", and stage numbers
         self.net_dict = net_dict
+        self.validate_network() 
+        self.organized_layers = None
+        self.organize_layers()
     
-    # def find_first_layers(self):
-    #     net = self.net_dict
-    #     stages = {}
-    #     # Group layers by stage
-    #     for layer_name, layer_info in net.items():
-    #         stage = layer_info.get('stage')
-    #         if stage is None:
-    #             continue
-    #         stages.setdefault(stage, []).append(layer_name)
-
-    #     first_layers = {}
-    #     for stage, layers in stages.items():
-    #         first_layers_in_stage = []
-    #         for layer_name in layers:
-    #             layer_info = net[layer_name]
-    #             rcv_sources = layer_info.get('rcv', {}).get('src', [])
-    #             if rcv_sources is None or not rcv_sources:
-    #                 # No sources; it's a first layer
-    #                 first_layers_in_stage.append(layer_name)
-    #             else:
-    #                 # Check if any source is in the same stage
-    #                 src_stages = [net[src].get('stage') for src in rcv_sources if src in net]
-    #                 if all(src_stage != stage for src_stage in src_stages):
-    #                     first_layers_in_stage.append(layer_name)
-    #         first_layers[stage] = first_layers_in_stage
-    #     return first_layers                
+    def __str__(self):
+        result = []
+        for stage, layers in self.organized_layers.items():
+            result.append(f"Stage {stage}:")
+            for layer in layers:
+                result.append(f"\t{layer}")
+        return "\n".join(result)
 
     def organize_layers(self):
         net = self.net_dict
@@ -120,7 +105,7 @@ class NetHandler():
                 ordered_layers = []
             organized_layers[stage] = ordered_layers
 
-        return organized_layers
+        self.organized_layers = organized_layers
 
     def topological_sort(self, graph):
         visited = set()
@@ -144,13 +129,83 @@ class NetHandler():
 
         return result
 
+    def validate_network(self):
+        
+        net = copy.deepcopy(self.net_dict)
+        for k,v in net.items():
+            v["stage"] = 1
 
+        errors = []
+
+        # Check for missing 'rcv' or 'dst', and invalid references
+        for layer_name, layer_info in net.items():
+            # Check for 'rcv' and 'dst' keys
+            if 'rcv' not in layer_info:
+                errors.append(f"Layer '{layer_name}' is missing 'rcv' entry.")
+                continue  # Skip further checks for this layer
+            if 'dst' not in layer_info:
+                errors.append(f"Layer '{layer_name}' is missing 'dst' entry.")
+                continue
+
+            # Check that 'rcv' sources exist
+            rcv_sources = layer_info['rcv'].get('src', [])
+            if rcv_sources is None:
+                rcv_sources = []
+            for src in rcv_sources:
+                if src not in net:
+                    errors.append(f"Layer '{layer_name}' has 'rcv' source '{src}' which does not exist.")
+
+            # Check that 'dst' destinations exist
+            dst_targets = layer_info['dst'].get('to', [])
+            if dst_targets is None:
+                dst_targets = []
+            for dst in dst_targets:
+                if dst not in net:
+                    errors.append(f"Layer '{layer_name}' has 'dst' target '{dst}' which does not exist.")
+
+            # Check for mutual consistency between 'rcv' and 'dst'
+            for dst in dst_targets:
+                dst_rcv_sources = net[dst]['rcv'].get('src', [])
+                if layer_name not in dst_rcv_sources:
+                    errors.append(f"Layer '{layer_name}' lists '{dst}' as a destination, but '{dst}' does not have '{layer_name}' in its 'rcv' sources.")
+
+            for src in rcv_sources:
+                src_dst_targets = net[src]['dst'].get('to', [])
+                if layer_name not in src_dst_targets:
+                    errors.append(f"Layer '{layer_name}' lists '{src}' as a source, but '{src}' does not have '{layer_name}' in its 'dst' targets.")
+
+        # Check for cycles in dependency graphs within stages
+        stages = {}
+        # Group layers by stage
+        for layer_name, layer_info in net.items():
+            stage = layer_info.get('stage')
+            if stage is None:
+                errors.append(f"Layer '{layer_name}' is missing 'stage' entry.")
+                continue
+            stages.setdefault(stage, []).append(layer_name)
+
+        for stage, layers in stages.items():
+            # Build dependency graph for layers in this stage
+            graph = {layer: [] for layer in layers}
+            for layer in layers:
+                layer_info = net[layer]
+                rcv_sources = layer_info['rcv'].get('src', [])
+                if rcv_sources is None:
+                    rcv_sources = []
+                for src in rcv_sources:
+                    if src in layers:
+                        graph[src].append(layer)
+
+            # Check for cycles
+            try:
+                self.topological_sort(graph)
+            except Exception as e:
+                errors.append(f"Cycle detected in stage {stage}: {e}")
+
+        if errors:
+            temp = '\n'.join(errors)
+            raise ValueError(f"Network validation failed. See list of errors:\n{temp}")
 
 nh = NetHandler(net)
-first_layers = nh.organize_layers()
+print(nh)
 
-# Print the layers in nh.net_dict
-for stage, layers in first_layers.items():
-    print(f"Stage {stage}:")
-    for layer in layers:
-        print(f"  {layer}")
