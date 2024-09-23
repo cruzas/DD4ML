@@ -19,38 +19,38 @@ def average_fun(input1, input2):
 net = {
     "start": {
         "callable": {'object': preprocessing, 'settings': {}},
-        "dst": {"to": ["input_layer1.1", "input_layer1.2"], "strategy": None},
+        "dst": {"to": ["input_layer1_1", "input_layer1_2"], "strategy": None},
         "rcv": {"src": [], "strategy": None},
         "stage": 1,
     },
-    "input_layer1.1": {
+    "input_layer1_1": {
         "callable": {'object': nn.Linear, 'settings': {"in_features": 700, "out_features": 256}},
-        "dst": {'to': ["input_layer2.1"], 'strategy': None}, # strategy must have as many outputs as the length of the to list (input will be the output of the processed data in current callable)
+        "dst": {'to': ["input_layer2_1"], 'strategy': None}, # strategy must have as many outputs as the length of the to list (input will be the output of the processed data in current callable)
         "rcv": {'src': ["start"], 'strategy': None},
         "stage": 1, 
     },
-    "input_layer1.2": {
+    "input_layer1_2": {
         "callable": {'object': nn.Linear, "settings": {"in_features": 84, "out_features": 32}},
-        "dst": {'to': ["input_layer2.2"], 'strategy': None},
+        "dst": {'to': ["input_layer2_2"], 'strategy': None},
         "rcv": {"src": ["start"], "strategy": None},
         "stage": 2, 
     },  
-    "input_layer2.1": {
+    "input_layer2_1": {
         "callable": {'object': nn.Linear, 'settings': {"in_features": 256, "out_features": 128}},
         "dst": {'to': ["finish"], 'strategy': None}, # strategy must have as many outputs as the length of the to list (input will be the output of the processed data in current callable)
-        "rcv": {'src': ["input_layer1.1"], 'strategy': None},
+        "rcv": {'src': ["input_layer1_1"], 'strategy': None},
         "stage": 1, 
     },
-    "input_layer2.2": {
+    "input_layer2_2": {
         "callable": {'object': nn.Linear, "settings": {"in_features": 32, "out_features": 128}},
         "dst": {'to': ["finish"], 'strategy': None},
-        "rcv": {"src": ["input_layer1.2"], "strategy": None},
+        "rcv": {"src": ["input_layer1_2"], "strategy": None},
         "stage": 2, 
     },
     "finish": {
         "callable": {'object': nn.Linear, "settings": {"in_features": 128, "out_features": 10}},
         "dst": {"to": [], "strategy": None},
-        "rcv": {'src': ["input_layer2.1", "input_layer2.2"], 'strategy': average_fun},
+        "rcv": {'src': ["input_layer2_1", "input_layer2_2"], 'strategy': average_fun},
         "stage": 2,
     },
 }
@@ -59,9 +59,9 @@ class NetHandler():
     def __init__(self, net_dict):
         # TODO: Add a security check to ensure that the network has valid "to", "src", and stage numbers
         self.net_dict = net_dict
-        self.validate_network() 
-        self.organized_layers = None
-        self.organize_layers()
+        self._validate_network() 
+        self.organized_layers = self._organize_layers()
+        self.stage_list = self._get_stage_list()
     
     def __str__(self):
         result = []
@@ -71,7 +71,23 @@ class NetHandler():
                 result.append(f"\t{layer}")
         return "\n".join(result)
 
-    def organize_layers(self):
+    def _get_stage_list(self):
+        # Return a list of lists, where each sublist contains the layers in a stage
+        stage_list = list(self.organized_layers.values())
+        if "start" not in stage_list[0]:
+            # Move the stage with the "start" layer to the beginning
+            for i, stage in enumerate(stage_list):
+                if "start" in stage:
+                    stage_list.insert(0, stage_list.pop(i))
+                    break
+        if "finish" not in stage_list[-1]:
+            for i, stage in enumerate(stage_list):
+                if "finish" in stage:
+                    stage_list.append(stage_list.pop(i))
+                    break
+        return stage_list
+
+    def _organize_layers(self):
         net = self.net_dict
         stages = {}
         # Group layers by stage
@@ -99,15 +115,14 @@ class NetHandler():
 
             # Perform topological sort on the graph
             try:
-                ordered_layers = self.topological_sort(graph)
+                ordered_layers = self._topological_sort(graph)
             except Exception as e:
                 print(f"Error in stage {stage}: {e}")
                 ordered_layers = []
             organized_layers[stage] = ordered_layers
+        return organized_layers
 
-        self.organized_layers = organized_layers
-
-    def topological_sort(self, graph):
+    def _topological_sort(self, graph):
         visited = set()
         temp_marks = set()
         result = []
@@ -129,12 +144,16 @@ class NetHandler():
 
         return result
 
-    def validate_network(self):
+    def _validate_network(self):
         
         net = copy.deepcopy(self.net_dict)
         for k,v in net.items():
             v["stage"] = 1
 
+        # check that the layers names do not contain symbols which cannot be in a python variable name
+        for layer_name in net.keys():
+            if not layer_name.isidentifier():
+                raise ValueError(f"Layer '{layer_name}' contains invalid characters. Only alphanumeric characters and underscores are allowed.")
         errors = []
 
         # Check for missing 'rcv' or 'dst', and invalid references
@@ -198,7 +217,7 @@ class NetHandler():
 
             # Check for cycles
             try:
-                self.topological_sort(graph)
+                self._topological_sort(graph)
             except Exception as e:
                 errors.append(f"Cycle detected in stage {stage}: {e}")
 
@@ -207,5 +226,6 @@ class NetHandler():
             raise ValueError(f"Network validation failed. See list of errors:\n{temp}")
 
 nh = NetHandler(net)
-print(nh)
+# print(nh)
+print(nh.stage_list)
 
