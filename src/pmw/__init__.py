@@ -8,6 +8,7 @@ from .weight_parallelized_subdomain import WeightParallelizedSubdomain
 from .data_and_weight_parallelized_subdomain import DataAndWeightParallelizedSubdomain
 from .weight_parallelized_tensor import WeightParallelizedTensor
 from .sharded_layer import ShardedLayer
+from .model_handler import ModelHandler
 
 # Define __all__ to specify what should be imported when using *
 __all__ = ['ParallelizedModel',
@@ -15,4 +16,5 @@ __all__ = ['ParallelizedModel',
            'WeightParallelizedSubdomain',
            'DataAndWeightParallelizedSubdomain',
            'WeightParallelizedTensor',
-           'ShardedLayer']
+           'ShardedLayer',
+           'ModelHandler']
