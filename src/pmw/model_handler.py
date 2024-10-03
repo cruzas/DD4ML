@@ -26,7 +26,9 @@ class ModelHandler():
         self.net_dict = net_dict
         self.num_subdomains = num_subdomains
         self.num_replicas_per_subdomain = num_replicas_per_subdomain
+        self.tot_replicas = num_subdomains*num_replicas_per_subdomain
         self.available_ranks = sorted(available_ranks) if available_ranks is not None else list(range(dist.get_world_size()))
+        self.rank = dist.get_rank()
         
         self._validate_network()
         self.organized_layers, self.num_ranks_per_model = self._organize_layers()
@@ -42,6 +44,36 @@ class ModelHandler():
             for layer in layers:
                 result.append(f"\t{layer}")
         return "\n".join(result)
+
+
+
+    def subdomain_ranks(self):
+        for sd in range(self.num_subdomains):
+            if self.rank in self.nn_structure[f"sd{sd}"]["ranks"]:
+                return self.nn_structure[f"sd{sd}"]["ranks"]
+            
+    def stage_data(self):
+        # Get the stage data corresponding to this rank
+        for sd in range(self.num_subdomains):
+            for rep in range(self.num_replicas_per_subdomain):
+                for s in range(len(self.stage_list)):
+                    if self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]:
+                        return self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]
+        
+    def rank_to_sd_rep_s(self):
+        # Get the subdomain and replica number correspoding to this rank
+        for sd in range(self.num_subdomains):
+            for rep in range(self.num_replicas_per_subdomain):
+                for s in range(self.num_stages):
+                    if self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]:
+                        return sd, rep, s
+    
+    def layer_name_to_ranks(self, layer_name): 
+        # within the same subdomain and replica
+        sd, rep, _ = self.rank_to_sd_rep()
+        for s in range(self.num_stages):
+            if layer_name in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["layers"]:
+                return self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]
 
     def create_distributed_model_rank_structure(self):
         if len(self.available_ranks) < self.num_subdomains*self.num_replicas_per_subdomain*self.num_ranks_per_model:
@@ -69,7 +101,8 @@ class ModelHandler():
                 old_ranks_per_this_stage = 0
                 for s, (stage, layers_in_stage) in enumerate(self.organized_layers.items()):
                     ranks_per_this_stage = self.net_dict[layers_in_stage[0]]["num_layer_shards"]
-                    nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"] = {"ranks": model_ranks[old_ranks_per_this_stage:old_ranks_per_this_stage+ranks_per_this_stage]}
+                    nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"] = {"ranks": model_ranks[old_ranks_per_this_stage:old_ranks_per_this_stage+ranks_per_this_stage], "layers": layers_in_stage}
+                
                     old_ranks_per_this_stage += ranks_per_this_stage
                     
                     for sh, rank in zip(range(self.net_dict[layers_in_stage[0]]["num_layer_shards"]), nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]):  

@@ -9,7 +9,7 @@ from pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from pmw.base_model import BaseModel
 
 class WeightParallelizedModel(BaseModel):
-    def __init__(self, stage_list, rank_list, sample):        
+    def __init__(self, model_handler, sample):        
         '''
         NOTE: grad_norm function returns the infinity norm of the subdomain gradient of the model (i.e. restricted to the current rank).
         Assumptions:
@@ -17,20 +17,10 @@ class WeightParallelizedModel(BaseModel):
         2) Only one layer is passed in the stage_list. Note that this counts sequential layers as one layer (e.g. nn.Sequential(nn.Linear(100,200), nn.ReLU(), nn.Linear(200,300)) counts as one layer).
         ''' 
         super().__init__()
-        self.rank_list = rank_list
-        for k, ranks in enumerate(self.rank_list):
-            if self.rank in ranks:
-                self.layer_index = k
-                break
-        self.master_group = dist.new_group(ranks=utils.list_flattener(self.rank_list), use_local_synchronization=True)
-        # (layer_class, params) = stage_list[self.layer_index]
-        self.unbuilt_stage = stage_list[self.layer_index]# layer_class(**params).to(self.tensor_device) # Initialize the layer with provided parameters
-        previous_layer_rank = None if self.layer_index-1 < 0 else self.rank_list[self.layer_index-1][0]
-        next_layer_rank = None if self.layer_index+1 >= len(self.rank_list) else self.rank_list[self.layer_index+1][0]
-        self.subdomain = WeightParallelizedSubdomain(previous_layer_rank, next_layer_rank, self.unbuilt_stage, sharded_on_ranks = ranks) # Initialize the subdomain model
-        self.do_setup_phase(rank_list, sample)
+        self.subdomain = WeightParallelizedSubdomain(model_handler) # Initialize the subdomain model
+        self.do_setup_phase(model_handler, sample)
         
-    def do_setup_phase(self,rank_list, sample):
+    def do_setup_phase(self, rank_list, sample):
         self.setup_phase = True
         loss = None
         out = self.forward(torch.randn(*sample.shape).to(self.tensor_device), chunks_amount=1, reset_grad=True, compute_grad=True)
