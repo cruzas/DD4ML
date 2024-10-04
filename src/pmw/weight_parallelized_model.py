@@ -18,13 +18,15 @@ class WeightParallelizedModel(BaseModel):
         ''' 
         super().__init__()
         self.subdomain = WeightParallelizedSubdomain(model_handler) # Initialize the subdomain model
-        self.do_setup_phase(model_handler, sample)
+        self.model_handler = model_handler
+        self.first_stage_ranks = self.model_handler.first_stage_ranks()
+        self.do_setup_phase(sample)
         
-    def do_setup_phase(self, rank_list, sample):
+    def do_setup_phase(self, sample):
         self.setup_phase = True
         loss = None
         out = self.forward(torch.randn(*sample.shape).to(self.tensor_device), chunks_amount=1, reset_grad=True, compute_grad=True)
-        if self.rank in rank_list[-1]:
+        if self.model_handler.is_last_stage():
             loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
         self.backward([loss])
         self.zero_grad()
@@ -47,11 +49,7 @@ class WeightParallelizedModel(BaseModel):
     def subdomain_grad_norm(self, p=2): # Returns the subdomain gradient norm of the model
         return torch.norm(torch.cat([param.grad.flatten() for param in self.parameters()], dim=0), p=p).item()
 
-    def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):
-        # Initialize the input and output tensors on the subdomain (needed for the backward pass and to process data on their own)
-        self.subdomain.inputs = [None]*chunks_amount
-        self.subdomain.outputs = [None]*chunks_amount  
-        
+    def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):        
         compute_grad = False if not torch.is_grad_enabled() else compute_grad # flag to avoid storing the tensors needed to compute the gradients
         with torch.set_grad_enabled(compute_grad):
             if reset_grad:
@@ -59,21 +57,18 @@ class WeightParallelizedModel(BaseModel):
                 
             # Initialize the chunk_shapes tensor to store the shapes of the chunks
             chunk_shapes = torch.zeros(chunks_amount, dtype=torch.int32)
-            if self.rank in self.rank_list[0]: # If the rank is in the first layer's rank list, send the input to the next device
+            if self.model_handler.is_first_stage(): # If the rank is in the first layer's rank list, send the input to the next device
                 chunks = list(x.chunk(chunks_amount)) # Chunkenize the input tensor
                 chunk_shapes = torch.tensor([chunk.shape[0] for chunk in chunks], dtype=torch.int32) # Store the batch size of each chunk
             # Broadcast the chunk_shapes tensor to all the ranks (this allows to know the shape of the input tensor for each rank in the pipeline and prepare the recv function)
             chunk_shapes = chunk_shapes.to(self.backend_device(x)) # NOTE: Necessary for broadcast to work correctly, as to can be asynchronous when transferring to CUDA devices. Broadcasting only the batch size | async operation to avoid blocking the first layer
-            dist.broadcast(tensor=chunk_shapes, src=self.rank_list[0][0], group=self.master_group, async_op=False) # broadcasting only the batch size | async operation to avoid blocking the first layer
+            dist.broadcast(tensor=chunk_shapes, src=self.first_stage_ranks[0], group=self.model_handler.get_replica_group(), async_op=False) # broadcasting only the batch size | async operation to avoid blocking the first layer
             # Go through the pipeline
             for c in range(chunks_amount):
-                if self.layer_index == 0: # Beginning of the pipeline (first layer)
-                    chunk = chunks[c].to(self.tensor_device)
-                    self.subdomain.forward(chunk, is_in_pipeline = True, setup_phase=self.setup_phase, chunk_shapes=None) 
-                else:
-                    self.subdomain.forward(x = None, is_in_pipeline = True, setup_phase=self.setup_phase, chunk_shapes=chunk_shapes[c]) 
-
-        return self.subdomain.outputs if self.rank in self.rank_list[-1] else [True]
+                temp = chunks[c].to(self.tensor_device) if self.model_handler.is_first_stage() else None 
+                self.subdomain.forward(num_chunks=chunks_amount, num_samples_in_chunk=chunk_shapes[c], chunk_id=c, x=temp, is_in_pipeline=True, setup_phase=self.setup_phase) 
+                
+        return self.subdomain.outputs if self.model_handler.is_last_stage() else [True]
 
     def backward(self, losses):
         self.subdomain.grad_outputs = [None for _ in range(len(losses))] # len(losses) is the chunks_amount

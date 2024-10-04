@@ -14,7 +14,10 @@ class ShardedLayer(BaseModel):
         if isfunction(layer_dict['callable']['object']) or len(layer_ranks) == 1:
             # This has no sharding so it will run on the main shard rank only
             if self.rank == layer_ranks[0]:
-                self.layer = layer_dict['callable']['object'](**layer_dict['callable']['settings'])
+                if isfunction(layer_dict['callable']['object']):
+                    self.layer = layer_dict['callable']['object']
+                else:
+                    self.layer = layer_dict['callable']['object'](**layer_dict['callable']['settings']).to(self.tensor_device)
         else:
             # This has sharding...TODO
             pass

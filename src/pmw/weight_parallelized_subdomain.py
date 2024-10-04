@@ -13,11 +13,10 @@ class WeightParallelizedSubdomain(BaseModel):
         self.model_handler = model_handler
         self.sd, self.rep, self.s = self.model_handler.rank_to_sd_rep_s()
 
-        self.outputs = []
-        self.inputs = {} # key is te name of the layer we want to receive the input from, value is the tensor
-        self.grad_outputs = []
+        self.inputs = {}
+        self.outputs = {}
+        self.grad_outputs = {}
         self.shapes = {}
-        self.local_communication = {}
         
         self.stage_data = model_handler.stage_data()
         self.sharded_layers = []
@@ -27,9 +26,7 @@ class WeightParallelizedSubdomain(BaseModel):
                 self.sharded_layers.append(ShardedLayer(layer_dict=self.model_handler.net_dict[layer_name], layer_ranks=self.stage_data['ranks']))
     
     def forward(self, num_chunks, num_samples_in_chunk, chunk_id, x=None, is_in_pipeline=False, setup_phase=False):
-        if chunk_id == 0:
-            self.inputs = {}
-
+        empty_at_the_end = []
         if x is None and not is_in_pipeline:
             for k, chunk in enumerate(self.inputs):
                 for layer in self.sharded_layers:
@@ -42,73 +39,71 @@ class WeightParallelizedSubdomain(BaseModel):
                 for src_name in self.model_handler.net_dict[layer_name]['rcv']['src']:
                     current_layer_stage = self.model_handler.net_dict[layer_name]['stage']
                     src_layer_stage = self.model_handler.net_dict[src_name]['stage']
-                    if current_layer_stage != src_layer_stage and src_name not in self.inputs.keys():
+                    key = layer_name+'_'+src_name
+                    if current_layer_stage != src_layer_stage:
                         src_ranks = self.model_handler.layer_name_to_ranks(src_name) 
                         src_rank = src_ranks[0] # TODO: maybe improve send/rcv when tensor sharding is implemented
                         if setup_phase:
-                            rcv_shape = utils.receive_shape(src=src_name, device=self.backend_device())
+                            rcv_shape = utils.receive_shape(src=src_rank, device=self.backend_device())
                             self.shapes[src_name] = lambda z: [z]+list(rcv_shape)[1:]
                         temp = torch.empty(*self.shapes[src_name](num_samples_in_chunk), device=self.backend_device(), requires_grad=True)
                         dist.recv(src=src_rank, tensor=temp) # TODO: make it async to speed up communication
-                        self.inputs[src_name][chunk_id] = temp
-                    
-            for layer_name in self.stage_data['layers']:
-                pass 
-            # Here write local_communication var
-            # out = ...
-
-            # DO SEND
-            for layer_name in self.stage_data['layers']:
-                for dst_name in self.model_handler.net_dict[layer_name]['dst']['to']:
-                    if dst_name not in self.outputs.keys(): # trying to receive the same tensor twice
-                        dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
-                        dst_rank = dst_ranks[0] # TODO: maybe improve send/rcv when tensor sharding is implemented
-
-                        current_layer_stage = self.model_handler.net_dict[layer_name]['stage']
-                        dst_layer_stage = self.model_handler.net_dict[dst_name]['stage']
-                        if current_layer_stage != dst_layer_stage:
-                            if setup_phase:
-                                utils.send_shape(to=dst_name, device=self.backend_device())
-                                self.shapes[src_name] = lambda z: [z]+list(send_shape)[1:]
-                            temp = torch.empty(*self.shapes[src_name](num_samples_in_chunk), device=self.backend_device(), requires_grad=True)
-                            dist.send(to=dst_rank, tensor=temp) # TODO: make it async to speed up communication
-                            self.inputs[src_name][chunk_id] = temp
-                        else:
-                            self.local_communication[src_name] = 0
                         
+                        if key not in self.inputs.keys() or len(self.inputs[key]) != num_chunks:
+                            self.inputs[key] = [None]*num_chunks
+                        print(f"Rank {self.rank}, sd{self.sd}, r{self.rep}, s{self.s} - Saving received tensor with shape {temp.shape} from {src_name} to {key} in inputs")
+                        self.inputs[key][chunk_id] = temp.to(self.tensor_device)
+                    # elif key not in self.inputs.keys():
+                    #     empty_at_the_end.append(key)
+                    #     self.inputs[key] = [None]*num_chunks
 
-            #     if self.previous_layer_rank is not None:
-            #         if setup_phase:
-            #             shapes = utils.receive_shape(src=self.previous_layer_rank, device=self.backend_device())
-            #             x = torch.empty(*shapes, device=self.backend_device(), requires_grad=True)
-            #         else:
-            #             x = torch.empty(*self.shapes[0](chunk_shapes), device=self.backend_device(), requires_grad=True)
-            #         dist.recv(tensor=x, src=self.previous_layer_rank)
-            #     x = x.to(self.tensor_device)
-                    
-            # # Index of the first None in list self.inputs (current chunk), else -1
-            # k = self.inputs.index(None) if None in self.inputs else len(self.inputs) - 1          
-            # if k == -1: # Nothing to store
-            #     for layer in self.sharded_layers:
-            #         x = layer.forward(x)
-            # else:
-            #     self.inputs[k] = x
-            #     for layer in self.sharded_layers:
-            #         x = layer.forward(x)
-            #     self.outputs[k] = x # TODO: add skip connection value to x, if any
+            for i, layer_name in enumerate(self.stage_data['layers']):
+                input_list = self.model_handler.net_dict[layer_name]['rcv']['src']
+                strategy_in = self.model_handler.net_dict[layer_name]['rcv']['strategy']
+                if layer_name != 'start':
+                    if strategy_in is None:
+                        x = self.inputs[layer_name+'_'+input_list[0]][chunk_id]
+                    else:
+                        x = strategy_in(*[self.inputs[layer_name+'_'+src_name][chunk_id] for src_name in input_list])
+                try:
+                    out = self.sharded_layers[i].forward(x)
+                except Exception as e:
+                    print(f"Rank {self.rank}, sd{self.sd}, r{self.rep}, s{self.s} - Error {e} in layer {layer_name}")
+                    raise e
+                # Check that out is of type torch.Tensor or a list of torch.Tensor
+                if isinstance(out, list) and len(self.model_handler.net_dict[layer_name]['dst']['to']) != len(out):
+                    raise ValueError(f"Output of layer {layer_name} is a list of torch.Tensor with length different from the number of destination layers")
+                elif not isinstance(out, torch.Tensor) and not isinstance(out, list):
+                    raise TypeError(f"Output of the callable object with label {layer_name} is of type {type(out)}. Only torch.Tensor or List (of torch.Tensor) is allowed.")
+
+                for dst_idx, dst_name in enumerate(self.model_handler.net_dict[layer_name]['dst']['to']):
+                    dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
+                    dst_rank = dst_ranks[0] # TODO: maybe improve send/rcv when tensor sharding is implemented
+                    key = layer_name+'_'+dst_name 
+                    current_layer_stage = self.model_handler.net_dict[layer_name]['stage']
+                    dst_layer_stage = self.model_handler.net_dict[dst_name]['stage']
+                    temp = out if not isinstance(out, list) else out[dst_idx]
+                    if current_layer_stage != dst_layer_stage:
+                        temp = temp.to(self.backend_device())
+                        if setup_phase:
+                            utils.send_shape(shape=temp.shape, dst=dst_rank, device=self.backend_device())
+                        dist.send(tensor=temp, dst=dst_rank)
+                        
+                        if key not in self.outputs.keys() or len(self.outputs[key]) != num_chunks:
+                            self.outputs[key] = [None]*num_chunks
+                        self.outputs[key][chunk_id] = temp.to(self.tensor_device)  
+                    else:
+                        reverse_key = dst_name+'_'+layer_name
+                        empty_at_the_end.append(reverse_key)
+                        print(f"Rank {self.rank}, sd{self.sd}, r{self.rep}, s{self.s} - saving output with shape {temp.shape} of {layer_name} to {reverse_key} in inputs")
+                        self.inputs[reverse_key] = [None]*num_chunks                         
+                        self.inputs[reverse_key][chunk_id] = temp                 
+            for key in empty_at_the_end:
+                del self.inputs[key]
+                self.inputs[key] = [None]*num_chunks
                 
-            # if is_in_pipeline:
-            #     if setup_phase:
-            #         input_shape = lambda z: [z]+list(shapes)[1:]
-            #         output_shape = lambda z: [z]+list(self.outputs[k].shape)[1:]
-            #         self.shapes = [input_shape, output_shape]
-            #         if self.next_layer_rank is not None:
-            #             utils.send_shape(self.outputs[k].shape, dst=self.next_layer_rank, device=self.backend_device(self.outputs[k]))
-            #     if self.next_layer_rank is not None:
-            #         self.outputs[k] = self.outputs[k].to(self.backend_device(self.outputs[k]))
-            #         dist.send(tensor=self.outputs[k], dst=self.next_layer_rank) # send the tensor
-            #         self.outputs[k] = self.outputs[k].to(self.tensor_device)
-            # return x
+            if layer_name == "finish":
+                return self.outputs                     
         
     def backward(self, loss=None, is_in_pipeline=False):
         if is_in_pipeline:

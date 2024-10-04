@@ -33,6 +33,7 @@ class ModelHandler():
         self._validate_network()
         self.organized_layers, self.num_ranks_per_model = self._organize_layers()
         self.stage_list = self._get_stage_list()
+        self.num_stages = len(self.stage_list)
         self.nn_structure = self.create_distributed_model_rank_structure()
 
         
@@ -45,13 +46,33 @@ class ModelHandler():
                 result.append(f"\t{layer}")
         return "\n".join(result)
 
+    def first_stage_ranks(self):
+        sd, rep, _ = self.rank_to_sd_rep_s()
+        return self.nn_structure[f"sd{sd}"][f"r{rep}"]["s0"]["ranks"]
 
+    def last_stage_ranks(self):
+        sd, rep, _ = self.rank_to_sd_rep_s()
+        s_final = self.num_stages - 1
+        return self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s_final}"]["ranks"]
+
+    def is_first_stage(self):
+        sd, rep, _ = self.rank_to_sd_rep_s()
+        return self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"]["s0"]["ranks"]
+
+    def is_last_stage(self):
+        sd, rep, _ = self.rank_to_sd_rep_s()
+        s_final = self.num_stages - 1
+        return self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s_final}"]["ranks"]
 
     def subdomain_ranks(self):
         for sd in range(self.num_subdomains):
             if self.rank in self.nn_structure[f"sd{sd}"]["ranks"]:
                 return self.nn_structure[f"sd{sd}"]["ranks"]
             
+    def get_replica_group(self):
+        sd, rep, _ = self.rank_to_sd_rep_s()
+        return self.nn_structure[f"sd{sd}"][f"r{rep}"]["group"]
+
     def stage_data(self):
         # Get the stage data corresponding to this rank
         for sd in range(self.num_subdomains):
@@ -70,7 +91,7 @@ class ModelHandler():
     
     def layer_name_to_ranks(self, layer_name): 
         # within the same subdomain and replica
-        sd, rep, _ = self.rank_to_sd_rep()
+        sd, rep, _ = self.rank_to_sd_rep_s()
         for s in range(self.num_stages):
             if layer_name in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["layers"]:
                 return self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]
@@ -96,7 +117,9 @@ class ModelHandler():
             nn_structure[f"sd{sd}"] = {"ranks": subdomain_ranks[sd]}
             for rep in range(self.num_replicas_per_subdomain):
                 # split the ranks into num_replicas_per_subdomain chunks
-                nn_structure[f"sd{sd}"][f"r{rep}"] = {"ranks": subdomain_ranks[sd][rep*self.num_ranks_per_model:(rep+1)*self.num_ranks_per_model]}
+                rep_ranks = subdomain_ranks[sd][rep*self.num_ranks_per_model:(rep+1)*self.num_ranks_per_model]
+                nn_structure[f"sd{sd}"][f"r{rep}"] = {"ranks": rep_ranks,
+                                                      "group": dist.new_group(rep_ranks, use_local_synchronization=True)}
                 model_ranks = nn_structure[f"sd{sd}"][f"r{rep}"]["ranks"]
                 old_ranks_per_this_stage = 0
                 for s, (stage, layers_in_stage) in enumerate(self.organized_layers.items()):
@@ -121,30 +144,7 @@ class ModelHandler():
                             "local_group": dist.new_group(local_ranks, use_local_synchronization=True), # Group for local synchronization
                         }
         return nn_structure
-
-        # This should be the output        # nn_structure = {
-        #     "sd0": {
-        #         "ranks": [],
-        #         "r0": {
-        #             "ranks": [],
-        #             "s0": {
-        #                 "is_main_rank": False,
-        #                 "global_ranks": [], # ranks that share this replica stage in every subdomain 
-        #                 "local_ranks": [], # ranks that share this replica stage in this subdomain
-        #                 "shard_ranks": [], # ranks on which this stage is sharded
-        #                 "global_group": [],
-        #                 "local_group": [],
-        #                 "shard_group": [],
-        #                 "l0": 'start', 
-        #                 "l1": '',
-        #                 "l2": 'finish',
-        #                 },
-        #             },
-        #         "r1": copy.deepcopy(self.net_dict),
-        #     },
-        # }
-        
-
+    
     def _get_stage_list(self):
         # Return a list of lists, where each sublist contains the layers in a stage
         stage_list = list(self.organized_layers.values())
@@ -259,8 +259,13 @@ class ModelHandler():
 
             # Check that 'rcv' sources exist
             rcv_sources = layer_info['rcv'].get('src', [])
+            rcv_strategy = layer_info['rcv'].get('strategy')
             if rcv_sources is None:
                 rcv_sources = []
+            else:
+                if len(rcv_sources) > 1 and rcv_strategy is None:
+                    errors.append(f"Layer '{layer_name}' has multiple receive sources but no strategy.")
+
             for src in rcv_sources:
                 if src not in net:
                     errors.append(
