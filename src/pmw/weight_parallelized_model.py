@@ -71,29 +71,6 @@ class WeightParallelizedModel(BaseModel):
         return self.subdomain.outputs if self.model_handler.is_last_stage() else [True]
 
     def backward(self, losses):
-        self.subdomain.grad_outputs = [None for _ in range(len(losses))] # len(losses) is the chunks_amount
-        counter = 0
-        for loss in losses: # Chunked loss
-            # print(f"Rank {self.rank} going through loss counter {counter}" )
-            counter += 1
-            self.subdomain.backward(loss, is_in_pipeline = True)
-            # if self.rank in self.rank_list[-1]: # End of the pipeline
-            #     grad_output = autograd.grad(loss, self.subdomain.outputs[c], retain_graph=True)[0]     # TODO: Update so that it takes into account sequential models
-            #     grad_data = autograd.grad(self.subdomain.outputs[c], self.subdomain.inputs[c], grad_outputs=grad_output, retain_graph=True)[0] # this is needed to compute the derivative at the previous stage
-            #     dist.send(tensor=grad_data.to(self.backend_device(grad_data)), dst=self.rank_list[-2][0]) # TODO make this async if possible
-                
-            # elif self.rank in self.rank_list[0]: # Beginning of the pipeline
-            #     grad_output = torch.empty(*self.shapes[1](chunk_size), device=self.backend_device(), requires_grad=True)
-            #     dist.recv(grad_output, src=self.rank_list[1][0])       
-
-            #     grad_output = grad_output.to(self.tensor_device).detach()
-            # else: # Middle of the pipeline
-            #     grad_output = torch.empty(*self.shapes[1](chunk_size), device=self.backend_device(), requires_grad=True)
-            #     dist.recv(grad_output, src=self.rank_list[self.layer_index+1][0])       
-
-            #     grad_output = grad_output.to(self.tensor_device).detach()
-            #     grad_data = autograd.grad(self.subdomain.outputs[c], self.subdomain.inputs[c], grad_outputs=grad_output, retain_graph=True)[0] # this is needed to compute the derivative at the previous stage
-            #     dist.send(tensor=grad_data.to(self.backend_device(grad_data)), dst=self.rank_list[self.layer_index-1][0]) # TODO make this async if possible
-                
-            
- 
+        num_chunks = len(losses)
+        for i, loss in enumerate(losses): # Chunked loss
+            self.subdomain.backward(loss, num_chunks=num_chunks, chunk_id=i, is_in_pipeline=True)

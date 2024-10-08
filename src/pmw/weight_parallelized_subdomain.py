@@ -33,8 +33,7 @@ class WeightParallelizedSubdomain(BaseModel):
                     chunk = layer.forward(chunk)
                 self.outputs[k] = chunk
             return self.outputs
-        else: # here we are in a pipeline and x is not None just for the first stage
-            # Write a list of receive function to get the needed tensors (async), store such information in self.inputs with correct keys. Set a "wait" before using received tensors.]
+        else: # Here we are in a pipeline and x is not None just for the first stage
             for layer_name in self.stage_data['layers']:
                 for src_name in self.model_handler.net_dict[layer_name]['rcv']['src']:
                     current_layer_stage = self.model_handler.net_dict[layer_name]['stage']
@@ -51,11 +50,7 @@ class WeightParallelizedSubdomain(BaseModel):
                         
                         if key not in self.inputs.keys() or len(self.inputs[key]) != num_chunks:
                             self.inputs[key] = [None]*num_chunks
-                        print(f"Rank {self.rank}, sd{self.sd}, r{self.rep}, s{self.s} - Saving received tensor with shape {temp.shape} from {src_name} to {key} in inputs")
                         self.inputs[key][chunk_id] = temp.to(self.tensor_device)
-                    # elif key not in self.inputs.keys():
-                    #     empty_at_the_end.append(key)
-                    #     self.inputs[key] = [None]*num_chunks
 
             for i, layer_name in enumerate(self.stage_data['layers']):
                 input_list = self.model_handler.net_dict[layer_name]['rcv']['src']
@@ -65,12 +60,7 @@ class WeightParallelizedSubdomain(BaseModel):
                         x = self.inputs[layer_name+'_'+input_list[0]][chunk_id]
                     else:
                         x = strategy_in(*[self.inputs[layer_name+'_'+src_name][chunk_id] for src_name in input_list])
-                try:
-                    out = self.sharded_layers[i].forward(x)
-                except Exception as e:
-                    print(f"Rank {self.rank}, sd{self.sd}, r{self.rep}, s{self.s} - Error {e} in layer {layer_name}")
-                    raise e
-                # Check that out is of type torch.Tensor or a list of torch.Tensor
+                out = self.sharded_layers[i].forward(x)
                 if isinstance(out, list) and len(self.model_handler.net_dict[layer_name]['dst']['to']) != len(out):
                     raise ValueError(f"Output of layer {layer_name} is a list of torch.Tensor with length different from the number of destination layers")
                 elif not isinstance(out, torch.Tensor) and not isinstance(out, list):
@@ -95,7 +85,6 @@ class WeightParallelizedSubdomain(BaseModel):
                     else:
                         reverse_key = dst_name+'_'+layer_name
                         empty_at_the_end.append(reverse_key)
-                        print(f"Rank {self.rank}, sd{self.sd}, r{self.rep}, s{self.s} - saving output with shape {temp.shape} of {layer_name} to {reverse_key} in inputs")
                         self.inputs[reverse_key] = [None]*num_chunks                         
                         self.inputs[reverse_key][chunk_id] = temp                 
             for key in empty_at_the_end:
@@ -105,11 +94,14 @@ class WeightParallelizedSubdomain(BaseModel):
             if layer_name == "finish":
                 return self.outputs                     
         
-    def backward(self, loss=None, is_in_pipeline=False):
+    def backward(self, loss=None, num_chunks=1, chunk_id=0, is_in_pipeline=False):
         if is_in_pipeline:
-            k = self.grad_outputs.index(None) if None in self.grad_outputs else len(self.grad_outputs) - 1
-            loop = [k]
-            chunk_size = self.outputs[k].shape[0]
+            for layer_name in reversed(self.stage_data['layers']):
+                for dst_idx, dst_name in enumerate(self.model_handler.net_dict[layer_name]['dst']['to']):
+                    key = layer_name+'_'+dst_name
+                    chunk_size = self.outputs[key][chunk_id].shape[0]
+                    
+
             if self.next_layer_rank is None: # End of the pipeline
                 grad_output = autograd.grad(loss, self.outputs[k], retain_graph=True)[0]     # TODO: Update so that it takes into account sequential models
             else: 
@@ -118,7 +110,7 @@ class WeightParallelizedSubdomain(BaseModel):
                     dist.recv(grad_output, src=self.next_layer_rank)       
                 grad_output = grad_output.to(self.tensor_device).detach()
             if self.previous_layer_rank is not None:
-                grad_data = autograd.grad(self.outputs[k], self.inputs[k], grad_outputs=grad_output, retain_graph=True)[0] # this is needed to compute the derivative at the previous stage
+                grad_data = autograd.grad(self.outputs[k], self.inputs[k], grad_outputs=grad_output, retain_graph=True)[0] # This is needed to compute the derivative at the previous stage
                 grad_data = grad_data.to(self.backend_device(grad_data))
                 dist.send(tensor=grad_data, dst=self.previous_layer_rank)
             self.grad_outputs[k] = grad_output
