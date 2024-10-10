@@ -78,7 +78,7 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
     #     raise ValueError('Model must be an instance of the "ParallelizedModel".')
     if isinstance(criterion, type):
         raise ValueError('Criterion must be an instance of a class.')
-    if model.rank in model.last_layers_main_shard:
+    if model.model_handler.is_last_stage():
         targets = targets.chunk(data_chunks_amount)
     # Compute loss
     def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount, sync_loss='global'):
@@ -93,29 +93,32 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
             outputs = model(inputs, chunks_amount=data_chunks_amount)
         losses = [0] * data_chunks_amount
         loss = torch.tensor(0.0).to(model.tensor_device)
-        if model.rank in model.last_layers_main_shard:
+        if model.model_handler.is_last_stage():
             for i, out in enumerate(outputs):
                 losses[i] = criterion(out, targets[i].to(out.device))
             loss = sum(losses)/len(losses)
         # Average losses across replicas
         if sync_loss == 'global':
-            if model.rank in model.all_final_stages_main_rank:
-                dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=model.all_final_stages_main_rank_group) # Summing the losses across final layers of each replicas
-                loss = loss/len(model.all_final_stages_main_rank)
-            loss_broadcast = dist.broadcast(tensor=loss.detach(), src=model.all_final_stages_main_rank[0], group=model.all_model_ranks_group, async_op=True) # each replica gets the average loss across all replicas (since we are averaging the losses first)
+            if model.model_handler.is_last_stage():
+                dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=model.model_handler.get_layers_copy_group(mode='global')) # Summing the losses across final layers of each replicas
+                loss = loss/model.model_handler.tot_replicas
+            loss_broadcast = dist.broadcast(tensor=loss.detach(), src=model.all_final_stages_main_rank[0], group=model.model_handler.global_model_group, async_op=True) # each replica gets the average loss across all replicas (since we are averaging the losses first)
             # -> all subdomains will have the same loss
         else:
-            if model.rank in model.replicas_in_subdomain_final_stages_main_rank:
-                dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=model.replicas_in_subdomain_final_stages_main_rank_group) # Summing the losses across shard 0 of final layers of each replicas within the same subdomain
+            if model.model_handler.is_last_stage():
+                dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=model.model_handler.get_layers_copy_group(mode='local')) # Summing the losses across shard 0 of final layers of each replicas within the same subdomain
                 loss = loss/model.num_replicas_per_subdomain
-            loss_broadcast = dist.broadcast(tensor=loss.detach(), src=model.last_layer_main_shard, group=model.subdomain_ranks_group, async_op=True) # shard 0 of last layer of first model replica broadcasts the loss to all other replicas within the same subdomain
+            last_stage_ranks = model.model_handler.get_stage_ranks(stage_name='last', mode='local')
+            if len(last_stage_ranks) > 1:
+                raise ValueError('Tensor sharding not implemented yet.')
+            loss_broadcast = dist.broadcast(tensor=loss.detach(), src=last_stage_ranks[0], group=model.model_handler.get_sd_group(), async_op=True) # shard 0 of last layer of first model replica broadcasts the loss to all other replicas within the same subdomain
             # -> each subdomains may have a different loss
         
         if compute_grad and torch.is_grad_enabled():
             model.backward(losses)
         loss_broadcast.wait()
         if return_output:
-            if model.rank in model.last_layers_main_shard:
+            if model.model_handler.is_last_stage():
                 # Returning outputs here in case we want to compute the accuracy afterwards
                 return loss.item(), [output for output in outputs]
             else:

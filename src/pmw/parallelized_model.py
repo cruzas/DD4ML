@@ -76,19 +76,17 @@ class ParallelizedModel(BaseModel):
     
     def sync_params(self, method='average'):
         if self.num_subdomains > 1:
+            if method not in ['average', 'sum']:
+                raise ValueError(f"Method {method} is not supported.")
             for param in self.subdomain_params():
-                dist.all_reduce(tensor=param.data, group=self.all_layer_copies_group, op=dist.ReduceOp.SUM)
+                dist.all_reduce(tensor=param.data, group=self.model_handler.get_layers_copy_group(mode='global'), op=dist.ReduceOp.SUM)
                 if method == 'average':
                     param.data /= self.tot_replicas
-                elif method == 'sum':
-                    pass # nothing to do since we already summed the parameters through all_reduce
-                else:
-                    raise ValueError(f"Method {method} is not supported.")
 
     def sync_grads(self):
         if self.num_subdomains > 1:
             for param in self.subdomain_params():
-                dist.all_reduce(tensor=param.grad, group=self.all_layer_copies_group, op=dist.ReduceOp.SUM)	
+                dist.all_reduce(tensor=param.grad, group=self.model_handler.get_layers_copy_group(mode='global'), op=dist.ReduceOp.SUM)	
                 param.grad /= self.tot_replicas
 
     def normalize_grads(self, p=torch.inf):

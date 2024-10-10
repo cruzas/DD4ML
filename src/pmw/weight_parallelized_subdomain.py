@@ -11,7 +11,7 @@ class WeightParallelizedSubdomain(BaseModel):
     def __init__(self, model_handler):
         super().__init__()
         self.model_handler = model_handler
-        self.sd, self.rep, self.s = self.model_handler.rank_to_sd_rep_s()
+        self.sd, self.rep, self.s, self.sh = self.model_handler.sd, self.model_handler.rep, self.model_handler.s, self.model_handler.sh
 
         self.inputs = {}
         self.outputs = {}
@@ -25,6 +25,9 @@ class WeightParallelizedSubdomain(BaseModel):
             for layer_name in self.stage_data['layers']:
                 self.sharded_layers.append(ShardedLayer(layer_dict=self.model_handler.net_dict[layer_name], layer_ranks=self.stage_data['ranks']))
     
+    def parameters(self):  
+        return [param for layer in self.sharded_layers for param in layer.parameters()]
+
     def forward(self, num_chunks, num_samples_in_chunk, chunk_id, x=None, is_in_pipeline=False, setup_phase=False):
         empty_at_the_end = []
         if x is None and not is_in_pipeline:

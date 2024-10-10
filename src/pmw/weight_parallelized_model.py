@@ -19,17 +19,17 @@ class WeightParallelizedModel(BaseModel):
         super().__init__()
         self.subdomain = WeightParallelizedSubdomain(model_handler) # Initialize the subdomain model
         self.model_handler = model_handler
-        self.first_stage_ranks = self.model_handler.first_stage_ranks()
+        self.first_stage_ranks = self.model_handler.get_stage_ranks(stage_name='first', mode='replica')
         self.do_setup_phase(sample)
         
     def do_setup_phase(self, sample):
         self.setup_phase = True
         loss = None
         out = self.forward(torch.randn(*sample.shape).to(self.tensor_device), chunks_amount=1, reset_grad=True, compute_grad=True)
-        if self.model_handler.is_last_stage():
-            loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
-        self.backward([loss])
-        self.zero_grad()
+        # if self.model_handler.is_last_stage():
+        #     loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
+        # self.backward([loss])
+        # self.zero_grad()
         self.setup_phase = False
 
     def zero_grad(self):
@@ -37,14 +37,14 @@ class WeightParallelizedModel(BaseModel):
     
     def grad(self, clone=False): # Returns the global gradient of the model
         gradient = [param.grad.clone() if clone else param.grad for param in self.parameters()]
-        return WeightParallelizedTensor(gradient, self.backend, self.master_group, self.rank)
+        return WeightParallelizedTensor(gradient, self.backend, self.model_handler.get_replica_group(), self.rank)
     
     def grad_norm(self, p=2): # Returns the global gradient norm of the model
         return self.grad().norm(p=p)
     
     def parameters(self, clone=False): # Returns the global parameters of the model
         params = [param.clone() if clone else param for param in self.subdomain.parameters()]
-        return WeightParallelizedTensor(params, self.backend, self.master_group, self.rank)
+        return WeightParallelizedTensor(params, self.backend, self.model_handler.get_replica_group(), self.rank)
     
     def subdomain_grad_norm(self, p=2): # Returns the subdomain gradient norm of the model
         return torch.norm(torch.cat([param.grad.flatten() for param in self.parameters()], dim=0), p=p).item()

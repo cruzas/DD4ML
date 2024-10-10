@@ -28,6 +28,7 @@ class ModelHandler():
         self.num_replicas_per_subdomain = num_replicas_per_subdomain
         self.tot_replicas = num_subdomains*num_replicas_per_subdomain
         self.available_ranks = sorted(available_ranks) if available_ranks is not None else list(range(dist.get_world_size()))
+        self.global_model_group = dist.new_group(self.available_ranks, use_local_synchronization=True)
         self.rank = dist.get_rank()
         
         self._validate_network()
@@ -35,8 +36,7 @@ class ModelHandler():
         self.stage_list = self._get_stage_list()
         self.num_stages = len(self.stage_list)
         self.nn_structure = self.create_distributed_model_rank_structure()
-
-        
+        self.rank_to_position() # Initializes self.sd, self.rep, self.s, self.sh
 
     def __str__(self):
         result = []
@@ -46,21 +46,37 @@ class ModelHandler():
                 result.append(f"\t{layer}")
         return "\n".join(result)
 
-    def first_stage_ranks(self):
-        sd, rep, _ = self.rank_to_sd_rep_s()
-        return self.nn_structure[f"sd{sd}"][f"r{rep}"]["s0"]["ranks"]
+    def get_stage_ranks(self, stage_name, mode):
+        assert mode in ['local', 'global', 'replica'], f"Invalid mode '{mode}'. Must be either 'global', 'local', or 'replica'."
+        assert stage_name in ['first', 'last'], f"Invalid stage '{stage_name}'. Must be either 'first' or 'last'."
+        stage = 0 if stage_name == 'first' else self.num_stages - 1
+        sd, rep, _, _ = self.rank_to_position()
+        stage_ranks = []
 
-    def last_stage_ranks(self):
-        sd, rep, _ = self.rank_to_sd_rep_s()
-        s_final = self.num_stages - 1
-        return self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s_final}"]["ranks"]
+        def _go_through_replicas(sd, stage, stage_ranks):
+            for rep in range(self.num_replicas_per_subdomain):
+                ranks = self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{stage}"]["ranks"]
+                assert len(ranks) == 1, f"Tensor sharding not implemented yet. Expected 1 rank, got {len(ranks)}."
+                stage_ranks.append(ranks[0])
+            return stage_ranks
 
+        if not hasattr(self, f'{stage_name}_stage_ranks_{mode}'):
+            if mode == 'replica':
+                stage_ranks = self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{stage}"]["ranks"]
+            elif mode == 'local':
+                stage_ranks = _go_through_replicas(sd, stage, stage_ranks)
+            elif mode == 'global':
+                for sd in range(self.num_subdomains):
+                    stage_ranks = _go_through_replicas(sd, stage, stage_ranks)
+            setattr(self, f'{stage_name}_stage_ranks_{mode}', stage_ranks)
+        return getattr(self, f'{stage_name}_stage_ranks_{mode}')
+    
     def is_first_stage(self):
-        sd, rep, _ = self.rank_to_sd_rep_s()
+        sd, rep, _, _ = self.rank_to_position()
         return self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"]["s0"]["ranks"]
 
     def is_last_stage(self):
-        sd, rep, _ = self.rank_to_sd_rep_s()
+        sd, rep, _, _ = self.rank_to_position()
         s_final = self.num_stages - 1
         return self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s_final}"]["ranks"]
 
@@ -68,11 +84,21 @@ class ModelHandler():
         for sd in range(self.num_subdomains):
             if self.rank in self.nn_structure[f"sd{sd}"]["ranks"]:
                 return self.nn_structure[f"sd{sd}"]["ranks"]
-            
-    def get_replica_group(self):
-        sd, rep, _ = self.rank_to_sd_rep_s()
-        return self.nn_structure[f"sd{sd}"][f"r{rep}"]["group"]
 
+    def get_sd_group(self):
+        sd, _, _, _ = self.rank_to_position()
+        return self.nn_structure[f"sd{sd}"]["group"]
+
+    def get_replica_group(self):
+        sd, rep, _, _ = self.rank_to_position()
+        return self.nn_structure[f"sd{sd}"][f"r{rep}"]["group"]
+        
+    def get_layers_copy_group(self, mode='global'):
+        if mode not in ['local', 'global']:
+            raise ValueError(f"Invalid mode '{mode}'. Must be either 'global' or 'local'.")
+        sd, rep, s, sh = self.rank_to_position()
+        return self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"][f"sh{sh}"][f"{mode}_group"]
+            
     def stage_data(self):
         # Get the stage data corresponding to this rank
         for sd in range(self.num_subdomains):
@@ -81,17 +107,24 @@ class ModelHandler():
                     if self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]:
                         return self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]
         
-    def rank_to_sd_rep_s(self):
+    def rank_to_position(self):
         # Get the subdomain and replica number correspoding to this rank
-        for sd in range(self.num_subdomains):
-            for rep in range(self.num_replicas_per_subdomain):
-                for s in range(self.num_stages):
-                    if self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]:
-                        return sd, rep, s
+        if hasattr(self, 'sd'):
+            return self.sd, self.rep, self.s, self.sh
+        else:
+            for sd in range(self.num_subdomains):
+                for rep in range(self.num_replicas_per_subdomain):
+                    for s in range(self.num_stages):
+                        layer_names = self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["layers"]
+                        num_shards = self.net_dict[layer_names[0]]["num_layer_shards"]
+                        for sh in range(num_shards):
+                            if self.rank == self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"][f"sh{sh}"]["rank"]:
+                                self.sd, self.rep, self.s, self.sh = sd, rep, s, sh
+                                return sd, rep, s, sh
     
     def layer_name_to_ranks(self, layer_name): 
         # within the same subdomain and replica
-        sd, rep, _ = self.rank_to_sd_rep_s()
+        sd, rep, _, _ = self.rank_to_position()
         for s in range(self.num_stages):
             if layer_name in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["layers"]:
                 return self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]
@@ -114,7 +147,8 @@ class ModelHandler():
         nn_structure = {}
         nc = self.num_subdomains*self.num_replicas_per_subdomain # network copies
         for sd in range(self.num_subdomains):
-            nn_structure[f"sd{sd}"] = {"ranks": subdomain_ranks[sd]}
+            nn_structure[f"sd{sd}"] = {"ranks": subdomain_ranks[sd],
+                                       "group": dist.new_group(subdomain_ranks[sd], use_local_synchronization=True)}
             for rep in range(self.num_replicas_per_subdomain):
                 # split the ranks into num_replicas_per_subdomain chunks
                 rep_ranks = subdomain_ranks[sd][rep*self.num_ranks_per_model:(rep+1)*self.num_ranks_per_model]
@@ -132,16 +166,24 @@ class ModelHandler():
                         ranks_on_this_stage = nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]  
                         if sd == 0 and rep == 0:
                             global_ranks = [rank + i*len(model_ranks) for i in range(nc)] # Ranks to synchronize stage with on all subdomains
-                            local_ranks = [rank + i*len(model_ranks) for i in range(self.num_replicas_per_subdomain)] # Ranks to synchronize stage with on this subdomain
+                            global_group = dist.new_group(global_ranks, use_local_synchronization=True)
                         else:
                             global_ranks = nn_structure[f"sd0"][f"r0"][f"s{s}"][f"sh{sh}"]["global_ranks"]
-                            local_ranks = nn_structure[f"sd0"][f"r0"][f"s{s}"][f"sh{sh}"]["local_ranks"]
+                            global_group = nn_structure[f"sd0"][f"r0"][f"s{s}"][f"sh{sh}"]["global_group"]
+                        if rep == 0:
+                            local_ranks = [rank + i*self.num_stages for i in range(self.num_replicas_per_subdomain)] # Ranks to synchronize stage with on this subdomain
+                            local_group = dist.new_group(local_ranks, use_local_synchronization=True)
+                        else:
+                            local_ranks = nn_structure[f"sd{sd}"][f"r0"][f"s{s}"][f"sh{sh}"]["local_ranks"]
+                            local_group = nn_structure[f"sd{sd}"][f"r0"][f"s{s}"][f"sh{sh}"]["local_group"]
+
                         nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"][f"sh{sh}"] = { 
                             "global_ranks": global_ranks,
                             "local_ranks": local_ranks,
                             "shard_ranks": ranks_on_this_stage, # Ranks to shard the stage with
-                            "global_group": dist.new_group(global_ranks, use_local_synchronization=True), # Group for global synchronization
-                            "local_group": dist.new_group(local_ranks, use_local_synchronization=True), # Group for local synchronization
+                            "rank": rank,
+                            "global_group": global_group, # Group for global synchronization
+                            "local_group": local_group, # Group for local synchronization
                         }
         return nn_structure
     
