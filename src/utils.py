@@ -96,13 +96,14 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
         if model.model_handler.is_last_stage():
             for i, out in enumerate(outputs):
                 losses[i] = criterion(out, targets[i].to(out.device))
-            loss = sum(losses)/len(losses)
+            loss = torch.tensor((sum(losses)/len(losses)).item()).to(model.tensor_device)
         # Average losses across replicas
         if sync_loss == 'global':
             if model.model_handler.is_last_stage():
                 dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=model.model_handler.get_layers_copy_group(mode='global')) # Summing the losses across final layers of each replicas
                 loss = loss/model.model_handler.tot_replicas
-            loss_broadcast = dist.broadcast(tensor=loss.detach(), src=model.all_final_stages_main_rank[0], group=model.model_handler.global_model_group, async_op=True) # each replica gets the average loss across all replicas (since we are averaging the losses first)
+            last_ranks = model.model_handler.get_stage_ranks(stage_name='last', mode='global')
+            loss_broadcast = dist.broadcast(tensor=loss.detach(), src=last_ranks[0], group=model.model_handler.global_model_group, async_op=True) # each replica gets the average loss across all replicas (since we are averaging the losses first)
             # -> all subdomains will have the same loss
         else:
             if model.model_handler.is_last_stage():

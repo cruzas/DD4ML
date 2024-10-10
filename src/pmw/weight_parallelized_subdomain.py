@@ -5,6 +5,7 @@ from torch import nn
 from torch import autograd
 import utils
 import torch.distributed as dist
+import copy
 
 class WeightParallelizedSubdomain(BaseModel):
     # This corresponds to a STAGE in a pipelined model.
@@ -35,7 +36,6 @@ class WeightParallelizedSubdomain(BaseModel):
                 for layer in self.sharded_layers:
                     chunk = layer.forward(chunk)
                 self.outputs[k] = chunk
-            return self.outputs
         else: # Here we are in a pipeline and x is not None just for the first stage
             for layer_name in self.stage_data['layers']:
                 for src_name in self.model_handler.net_dict[layer_name]['rcv']['src']:
@@ -47,8 +47,8 @@ class WeightParallelizedSubdomain(BaseModel):
                         src_rank = src_ranks[0] # TODO: maybe improve send/rcv when tensor sharding is implemented
                         if setup_phase:
                             rcv_shape = utils.receive_shape(src=src_rank, device=self.backend_device())
-                            self.shapes[src_name] = lambda z: [z]+list(rcv_shape)[1:]
-                        temp = torch.empty(*self.shapes[src_name](num_samples_in_chunk), device=self.backend_device(), requires_grad=True)
+                            self.shapes[key] = lambda z, temp_shape=copy.deepcopy(list(rcv_shape)[1:]): [z] + temp_shape
+                        temp = torch.empty(*self.shapes[key](num_samples_in_chunk), device=self.backend_device(), requires_grad=True)
                         dist.recv(src=src_rank, tensor=temp) # TODO: make it async to speed up communication
                         
                         if key not in self.inputs.keys() or len(self.inputs[key]) != num_chunks:
@@ -68,6 +68,11 @@ class WeightParallelizedSubdomain(BaseModel):
                     raise ValueError(f"Output of layer {layer_name} is a list of torch.Tensor with length different from the number of destination layers")
                 elif not isinstance(out, torch.Tensor) and not isinstance(out, list):
                     raise TypeError(f"Output of the callable object with label {layer_name} is of type {type(out)}. Only torch.Tensor or List (of torch.Tensor) is allowed.")
+                
+                if layer_name == 'finish': 
+                    if chunk_id == 0:
+                        self.outputs['finish'] = [None]*num_chunks
+                    self.outputs['finish'][chunk_id] = temp.to(self.tensor_device) 
 
                 for dst_idx, dst_name in enumerate(self.model_handler.net_dict[layer_name]['dst']['to']):
                     dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
@@ -94,8 +99,7 @@ class WeightParallelizedSubdomain(BaseModel):
                 del self.inputs[key]
                 self.inputs[key] = [None]*num_chunks
                 
-            if layer_name == "finish":
-                return self.outputs                     
+        return self.outputs if self.model_handler.is_last_stage() else [True]
         
     def backward(self, loss=None, num_chunks=1, chunk_id=0, is_in_pipeline=False):
         if is_in_pipeline:
