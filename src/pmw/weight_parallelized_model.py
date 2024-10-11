@@ -73,4 +73,4 @@ class WeightParallelizedModel(BaseModel):
     def backward(self, losses):
         num_chunks = len(losses)
         for i, loss in enumerate(losses): # Chunked loss
-            self.subdomain.backward(loss, num_chunks=num_chunks, chunk_id=i, is_in_pipeline=True)
+            self.subdomain.backward(loss, chunk_id=i, is_in_pipeline=True)

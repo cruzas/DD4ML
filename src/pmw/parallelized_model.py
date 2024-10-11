@@ -71,7 +71,7 @@ class ParallelizedModel(BaseModel):
         return self.subdomain.forward(x, chunks_amount=chunks_amount, reset_grad=reset_grad, compute_grad=compute_grad)
     
     def backward(self, losses):
-        self.subdomain.backward(losses=losses)
+        self.subdomain.backward(losses=losses, sync=False)
         self.sync_grads()  
     
     def sync_params(self, method='average'):

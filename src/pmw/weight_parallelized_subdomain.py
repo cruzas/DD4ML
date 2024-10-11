@@ -21,6 +21,11 @@ class WeightParallelizedSubdomain(BaseModel):
         
         self.stage_data = model_handler.stage_data()
         self.sharded_layers = []
+        self.connector_symbol = '|~|~|'
+        # make sure that in the model_handler there is no connector_symbol in the layer names
+        for layer_name in self.stage_data['layers']:
+            if self.connector_symbol in layer_name:
+                raise ValueError(f"Layer name {layer_name} contains the connector symbol {self.connector_symbol}. This is not allowed.")
 
         if self.rank in self.stage_data['ranks']:
             for layer_name in self.stage_data['layers']:
@@ -41,7 +46,7 @@ class WeightParallelizedSubdomain(BaseModel):
                 for src_name in self.model_handler.net_dict[layer_name]['rcv']['src']:
                     current_layer_stage = self.model_handler.net_dict[layer_name]['stage']
                     src_layer_stage = self.model_handler.net_dict[src_name]['stage']
-                    key = layer_name+'_'+src_name
+                    key = layer_name+self.connector_symbol+src_name
                     if current_layer_stage != src_layer_stage:
                         src_ranks = self.model_handler.layer_name_to_ranks(src_name) 
                         src_rank = src_ranks[0] # TODO: maybe improve send/rcv when tensor sharding is implemented
@@ -60,9 +65,9 @@ class WeightParallelizedSubdomain(BaseModel):
                 strategy_in = self.model_handler.net_dict[layer_name]['rcv']['strategy']
                 if layer_name != 'start':
                     if strategy_in is None:
-                        x = self.inputs[layer_name+'_'+input_list[0]][chunk_id]
+                        x = self.inputs[layer_name+self.connector_symbol+input_list[0]][chunk_id]
                     else:
-                        x = strategy_in(*[self.inputs[layer_name+'_'+src_name][chunk_id] for src_name in input_list])
+                        x = strategy_in(*[self.inputs[layer_name+self.connector_symbol+src_name][chunk_id] for src_name in input_list])
                 out = self.sharded_layers[i].forward(x)
                 if isinstance(out, list) and len(self.model_handler.net_dict[layer_name]['dst']['to']) != len(out):
                     raise ValueError(f"Output of layer {layer_name} is a list of torch.Tensor with length different from the number of destination layers")
@@ -77,7 +82,7 @@ class WeightParallelizedSubdomain(BaseModel):
                 for dst_idx, dst_name in enumerate(self.model_handler.net_dict[layer_name]['dst']['to']):
                     dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
                     dst_rank = dst_ranks[0] # TODO: maybe improve send/rcv when tensor sharding is implemented
-                    key = layer_name+'_'+dst_name 
+                    key = layer_name+self.connector_symbol+dst_name 
                     current_layer_stage = self.model_handler.net_dict[layer_name]['stage']
                     dst_layer_stage = self.model_handler.net_dict[dst_name]['stage']
                     temp = out if not isinstance(out, list) else out[dst_idx]
@@ -91,7 +96,7 @@ class WeightParallelizedSubdomain(BaseModel):
                             self.outputs[key] = [None]*num_chunks
                         self.outputs[key][chunk_id] = temp.to(self.tensor_device)  
                     else:
-                        reverse_key = dst_name+'_'+layer_name
+                        reverse_key = dst_name+self.connector_symbol+layer_name
                         empty_at_the_end.append(reverse_key)
                         self.inputs[reverse_key] = [None]*num_chunks                         
                         self.inputs[reverse_key][chunk_id] = temp                 
@@ -101,37 +106,53 @@ class WeightParallelizedSubdomain(BaseModel):
                 
         return self.outputs if self.model_handler.is_last_stage() else [True]
         
-    def backward(self, loss=None, num_chunks=1, chunk_id=0, is_in_pipeline=False):
+    def backward(self, loss=None, chunk_id=0, is_in_pipeline=False):
         if is_in_pipeline:
-            for layer_name in reversed(self.stage_data['layers']):
-                for dst_idx, dst_name in enumerate(self.model_handler.net_dict[layer_name]['dst']['to']):
-                    key = layer_name+'_'+dst_name
-                    chunk_size = self.outputs[key][chunk_id].shape[0]
-                    
-
-            if self.next_layer_rank is None: # End of the pipeline
-                grad_output = autograd.grad(loss, self.outputs[k], retain_graph=True)[0]     # TODO: Update so that it takes into account sequential models
-            else: 
-                grad_output = torch.empty(*self.shapes[1](chunk_size), device=self.backend_device(), requires_grad=True)
-                if self.next_layer_rank is not None:
-                    dist.recv(grad_output, src=self.next_layer_rank)       
+            # We are receiving the gradient from subsequent layers
+            for name, output in self.outputs.items():
+                rcv_name = name.split(self.connector_symbol)[1]
+                rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
+                assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                print(f'Rank {self.rank} receiving from {rcv_ranks[0]} a tensor with shape {list(output[chunk_id].shape)}')
+                grad_output = torch.empty(*output[chunk_id].shape, device=self.backend_device(), requires_grad=True)
+                dist.recv(tensor=grad_output, src=rcv_ranks[0])
                 grad_output = grad_output.to(self.tensor_device).detach()
-            if self.previous_layer_rank is not None:
-                grad_data = autograd.grad(self.outputs[k], self.inputs[k], grad_outputs=grad_output, retain_graph=True)[0] # This is needed to compute the derivative at the previous stage
-                grad_data = grad_data.to(self.backend_device(grad_data))
-                dist.send(tensor=grad_data, dst=self.previous_layer_rank)
-            self.grad_outputs[k] = grad_output
-        else:
-            loop = range(len(self.outputs))
+                if name not in self.grad_outputs.keys() or len(self.grad_outputs[name]) != len(self.outputs[name]):
+                    self.grad_outputs[name] = [None]*len(self.outputs[name])    
+                self.grad_outputs[name][chunk_id] = grad_output
             
-        for k in loop:
-            if len(self.sharded_on_ranks) > 1:
-                for layer in reversed(self.sharded_layers):
-                    layer.backward(self.outputs[k], self.grad_outputs[k], len(self.outputs))
+            if self.model_handler.is_last_stage(): # End of the pipeline
+                stage_grads = autograd.grad(
+                    outputs = loss,
+                    inputs = self.parameters(),
+                    retain_graph=True,
+                )
+                # Add stage gradients to param.grad (accumulate gradients in case of multiple chunks)
+                for i, param in enumerate(self.parameters()):
+                    param.grad = stage_grads[i] if param.grad is None else param.grad + stage_grads[i]
             else:
-                for param in self.parameters():
-                    grad = autograd.grad(self.outputs[k], param, grad_outputs=self.grad_outputs[k], retain_graph=True)[0] / len(self.outputs)
-                    param.grad = grad if param.grad is None else param.grad + grad
+                for name, grad_output in self.grad_outputs.items():
+                    stage_grads = autograd.grad(
+                        outputs = 
+                        inputs = self.parameters(),
+                        retain_graph=True,
+                    )
+            
+
+            
+            # Compute the gradients with respect to the inputs from other layers and send to those layers
+            for name, input in self.inputs.items():
+                if input[chunk_id] is not None:
+                    grad_output = autograd.grad(
+                        outputs = loss,
+                        inputs = input[chunk_id], # Every input received from other ranks
+                        retain_graph=True,
+                    )
+                    dst_layer_name = name.split(self.connector_symbol)[1]
+                    dst_ranks = self.model_handler.layer_name_to_ranks(dst_layer_name)
+                    assert len(dst_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                    dist.send(tensor=grad_output.to(self.backend_device()), dst=dst_ranks[0])
+
 
     def grad(self):
         # TODO: Implement sharded_layers.parameters()
