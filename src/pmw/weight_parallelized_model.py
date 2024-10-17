@@ -23,14 +23,15 @@ class WeightParallelizedModel(BaseModel):
         self.do_setup_phase(sample)
         
     def do_setup_phase(self, sample):
-        self.setup_phase = True
         loss = None
+        self.subdomain.setup_phase = True
         out = self.forward(torch.randn(*sample.shape).to(self.tensor_device), chunks_amount=1, reset_grad=True, compute_grad=True)
-        # if self.model_handler.is_last_stage():
-        #     loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
-        # self.backward([loss])
-        # self.zero_grad()
-        self.setup_phase = False
+        if self.model_handler.is_last_stage():
+            print(f'output norm: {out[0].norm().item()}')
+            loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
+        self.backward(losses=[loss])
+        self.zero_grad()
+        self.subdomain.setup_phase = False
 
     def zero_grad(self):
         self.subdomain.zero_grad()
@@ -66,7 +67,7 @@ class WeightParallelizedModel(BaseModel):
             # Go through the pipeline
             for c in range(chunks_amount):
                 temp = chunks[c].to(self.tensor_device) if self.model_handler.is_first_stage() else None 
-                self.subdomain.forward(num_chunks=chunks_amount, num_samples_in_chunk=chunk_shapes[c], chunk_id=c, x=temp, is_in_pipeline=True, setup_phase=self.setup_phase) 
+                self.subdomain.forward(num_chunks=chunks_amount, num_samples_in_chunk=chunk_shapes[c], chunk_id=c, x=temp, is_in_pipeline=True)
                 
         return self.subdomain.outputs['finish'] if self.model_handler.is_last_stage() else [True]
 
@@ -74,3 +75,7 @@ class WeightParallelizedModel(BaseModel):
         num_chunks = len(losses)
         for i, loss in enumerate(losses): # Chunked loss
             self.subdomain.backward(loss, chunk_id=i, is_in_pipeline=True)
+        
+        # Rescale the gradients by the number of chunks
+        for param in self.parameters():
+            param.grad /= num_chunks

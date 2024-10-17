@@ -13,12 +13,14 @@ class WeightParallelizedSubdomain(BaseModel):
         super().__init__()
         self.model_handler = model_handler
         self.sd, self.rep, self.s, self.sh = self.model_handler.sd, self.model_handler.rep, self.model_handler.s, self.model_handler.sh
+        self.setup_phase = False
 
         self.inputs = {}
         self.outputs = {}
         self.grad_outputs = {}
         self.shapes = {}
-        
+        self.backward_shapes = {}
+
         self.stage_data = model_handler.stage_data()
         self.sharded_layers = []
         self.connector_symbol = '|~|~|'
@@ -34,7 +36,7 @@ class WeightParallelizedSubdomain(BaseModel):
     def parameters(self):  
         return [param for layer in self.sharded_layers for param in layer.parameters()]
 
-    def forward(self, num_chunks, num_samples_in_chunk, chunk_id, x=None, is_in_pipeline=False, setup_phase=False):
+    def forward(self, num_chunks, num_samples_in_chunk, chunk_id, x=None, is_in_pipeline=False):
         empty_at_the_end = []
         if x is None and not is_in_pipeline:
             for k, chunk in enumerate(self.inputs):
@@ -50,23 +52,28 @@ class WeightParallelizedSubdomain(BaseModel):
                     if current_layer_stage != src_layer_stage:
                         src_ranks = self.model_handler.layer_name_to_ranks(src_name) 
                         src_rank = src_ranks[0] # TODO: maybe improve send/rcv when tensor sharding is implemented
-                        if setup_phase:
+                        if self.setup_phase:
                             rcv_shape = utils.receive_shape(src=src_rank, device=self.backend_device())
                             self.shapes[key] = lambda z, temp_shape=copy.deepcopy(list(rcv_shape)[1:]): [z] + temp_shape
-                        temp = torch.empty(*self.shapes[key](num_samples_in_chunk), device=self.backend_device(), requires_grad=True)
+                        temp = torch.empty(self.shapes[key](num_samples_in_chunk), device=self.backend_device(), requires_grad=True)
                         dist.recv(src=src_rank, tensor=temp) # TODO: make it async to speed up communication
-                        
-                        if key not in self.inputs.keys() or len(self.inputs[key]) != num_chunks:
+                        if chunk_id == 0 or key not in self.inputs.keys() or len(self.inputs[key]) != num_chunks:
                             self.inputs[key] = [None]*num_chunks
                         self.inputs[key][chunk_id] = temp.to(self.tensor_device)
-
+                        print(f'Layer {layer_name} receives tensor from {src_name} and stores it in inputs with key {key}')
+                        
             for i, layer_name in enumerate(self.stage_data['layers']):
                 input_list = self.model_handler.net_dict[layer_name]['rcv']['src']
                 strategy_in = self.model_handler.net_dict[layer_name]['rcv']['strategy']
                 if layer_name != 'start':
                     if strategy_in is None:
+                        print(f'(Forward - No Strategy) Layer {input_list[0]} passes thorugh {layer_name} and loaded from inputs with name {layer_name+self.connector_symbol+input_list[0]}')
                         x = self.inputs[layer_name+self.connector_symbol+input_list[0]][chunk_id]
                     else:
+                        x = 0
+                        for src_name in input_list:
+                            print(f'(Forward - With Strategy) Layer {src_name} passes thorugh {layer_name} and loaded from inputs with name {layer_name+self.connector_symbol+src_name}')
+                            # x += self.inputs[layer_name+self.connector_symbol+src_name][chunk_id]
                         x = strategy_in(*[self.inputs[layer_name+self.connector_symbol+src_name][chunk_id] for src_name in input_list])
                 out = self.sharded_layers[i].forward(x)
                 if isinstance(out, list) and len(self.model_handler.net_dict[layer_name]['dst']['to']) != len(out):
@@ -77,7 +84,7 @@ class WeightParallelizedSubdomain(BaseModel):
                 if layer_name == 'finish': 
                     if chunk_id == 0:
                         self.outputs['finish'] = [None]*num_chunks
-                    self.outputs['finish'][chunk_id] = temp.to(self.tensor_device) 
+                    self.outputs['finish'][chunk_id] = out.to(self.tensor_device) 
 
                 for dst_idx, dst_name in enumerate(self.model_handler.net_dict[layer_name]['dst']['to']):
                     dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
@@ -88,14 +95,15 @@ class WeightParallelizedSubdomain(BaseModel):
                     temp = out if not isinstance(out, list) else out[dst_idx]
                     if current_layer_stage != dst_layer_stage:
                         temp = temp.to(self.backend_device())
-                        if setup_phase:
+                        if self.setup_phase:
                             utils.send_shape(shape=temp.shape, dst=dst_rank, device=self.backend_device())
                         dist.send(tensor=temp, dst=dst_rank)
                         
-                        if key not in self.outputs.keys() or len(self.outputs[key]) != num_chunks:
+                        if chunk_id == 0 or key not in self.outputs.keys() or len(self.outputs[key]) != num_chunks:
                             self.outputs[key] = [None]*num_chunks
                         self.outputs[key][chunk_id] = temp.to(self.tensor_device)  
                     else:
+                        # Key: receiver is first, followed by the sender
                         reverse_key = dst_name+self.connector_symbol+layer_name
                         empty_at_the_end.append(reverse_key)
                         self.inputs[reverse_key] = [None]*num_chunks                         
@@ -107,52 +115,52 @@ class WeightParallelizedSubdomain(BaseModel):
         return self.outputs if self.model_handler.is_last_stage() else [True]
         
     def backward(self, loss=None, chunk_id=0, is_in_pipeline=False):
-        if is_in_pipeline:
-            # We are receiving the gradient from subsequent layers
-            for name, output in self.outputs.items():
-                rcv_name = name.split(self.connector_symbol)[1]
-                rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
-                assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
-                print(f'Rank {self.rank} receiving from {rcv_ranks[0]} a tensor with shape {list(output[chunk_id].shape)}')
-                grad_output = torch.empty(*output[chunk_id].shape, device=self.backend_device(), requires_grad=True)
-                dist.recv(tensor=grad_output, src=rcv_ranks[0])
-                grad_output = grad_output.to(self.tensor_device).detach()
-                if name not in self.grad_outputs.keys() or len(self.grad_outputs[name]) != len(self.outputs[name]):
-                    self.grad_outputs[name] = [None]*len(self.outputs[name])    
-                self.grad_outputs[name][chunk_id] = grad_output
-            
+        if is_in_pipeline:            
             if self.model_handler.is_last_stage(): # End of the pipeline
-                stage_grads = autograd.grad(
-                    outputs = loss,
-                    inputs = self.parameters(),
-                    retain_graph=True,
-                )
-                # Add stage gradients to param.grad (accumulate gradients in case of multiple chunks)
-                for i, param in enumerate(self.parameters()):
-                    param.grad = stage_grads[i] if param.grad is None else param.grad + stage_grads[i]
+                loss.backward(retain_graph=True)
+                for name, inputs in self.inputs.items():
+                    _, rcv_name = name.split(self.connector_symbol)
+                    rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
+                    assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                    if self.rank != rcv_ranks[0]:
+                        if chunk_id == 0:
+                            self.grad_outputs[name] = [None]*len(inputs)
+                        reverse_name = self.connector_symbol.join(reversed(name.split(self.connector_symbol)))
+                        if chunk_id == 0:
+                            self.grad_outputs[reverse_name] = [None]*len(inputs)
+                        print(f'(Backward, R={self.rank}) Computing gradient for LOSS for grad_outputs with key {reverse_name} for input with key {name} from R={rcv_ranks[0]}')
+                        self.grad_outputs[reverse_name][chunk_id] = torch.autograd.grad(outputs=loss, inputs=inputs[chunk_id], retain_graph=True)[0]
+                        if self.setup_phase:
+                            utils.send_shape(shape=self.grad_outputs[reverse_name][chunk_id].shape, dst=rcv_ranks[0], device=self.backend_device())
+                        dist.send(tensor=self.grad_outputs[reverse_name][chunk_id].to(self.backend_device()), dst=rcv_ranks[0])
             else:
-                for name, grad_output in self.grad_outputs.items():
-                    stage_grads = autograd.grad(
-                        outputs = 
-                        inputs = self.parameters(),
-                        retain_graph=True,
-                    )
-            
+                for name, outputs in self.outputs.items():
+                    _, rcv_name = name.split(self.connector_symbol)
+                    rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
+                    assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                    if self.rank != rcv_ranks[0]:
+                        if self.setup_phase:
+                            rcv_shape = utils.receive_shape(src=rcv_ranks[0], device=self.backend_device())
+                            self.backward_shapes[name] = lambda z, temp_shape=copy.deepcopy(list(rcv_shape)[1:]): [z] + temp_shape
+                        grad_output = torch.empty(self.backward_shapes[name](outputs[chunk_id].shape[0]), device=self.backend_device(), requires_grad=True)
+                        print(f'Rank {self.rank} receiving from {rcv_ranks[0]} a tensor with shape {self.backward_shapes[name](outputs[chunk_id].shape[0])}')
+                        dist.recv(tensor=grad_output, src=rcv_ranks[0])
+                        grad_output = grad_output.to(self.tensor_device).detach()
+                        if chunk_id == 0 or name not in self.grad_outputs.keys() or len(self.grad_outputs[name]) != len(self.outputs[name]):
+                            self.grad_outputs[name] = [None]*len(self.outputs[name])    
+                        self.grad_outputs[name][chunk_id] = grad_output
+                        outputs[chunk_id].backward(grad_output, retain_graph=True)
 
-            
-            # Compute the gradients with respect to the inputs from other layers and send to those layers
-            for name, input in self.inputs.items():
-                if input[chunk_id] is not None:
-                    grad_output = autograd.grad(
-                        outputs = loss,
-                        inputs = input[chunk_id], # Every input received from other ranks
-                        retain_graph=True,
-                    )
-                    dst_layer_name = name.split(self.connector_symbol)[1]
-                    dst_ranks = self.model_handler.layer_name_to_ranks(dst_layer_name)
-                    assert len(dst_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
-                    dist.send(tensor=grad_output.to(self.backend_device()), dst=dst_ranks[0])
+                # Collect all outputs and all gradients into one tensor each
+                all_outputs = [outputs[chunk_id] for outputs in self.outputs.values()]
+                all_grads = [grads[chunk_id] for grads in self.grad_outputs.values()]
 
+                for name, inputs in self.inputs.items():
+                    torch.autograd.grad(outputs=outputs[chunk_id], inputs=inputs[chunk_id], retain_graph=True)
+
+
+
+                    
 
     def grad(self):
         # TODO: Implement sharded_layers.parameters()
