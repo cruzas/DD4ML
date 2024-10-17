@@ -27,7 +27,6 @@ class WeightParallelizedModel(BaseModel):
         self.subdomain.setup_phase = True
         out = self.forward(torch.randn(*sample.shape).to(self.tensor_device), chunks_amount=1, reset_grad=True, compute_grad=True)
         if self.model_handler.is_last_stage():
-            print(f'output norm: {out[0].norm().item()}')
             loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
         self.backward(losses=[loss])
         self.zero_grad()
@@ -52,6 +51,8 @@ class WeightParallelizedModel(BaseModel):
 
     def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):        
         compute_grad = False if not torch.is_grad_enabled() else compute_grad # flag to avoid storing the tensors needed to compute the gradients
+        if self.model_handler.is_first_stage():
+            x.requires_grad = compute_grad
         with torch.set_grad_enabled(compute_grad):
             if reset_grad:
                 self.zero_grad() # Reset the gradients of the model before starting to accumulate them again
