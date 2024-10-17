@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch
 
 def preprocessing(batch):
     batch = nn.Flatten()(batch)
@@ -55,3 +56,34 @@ def get_model_dict():
     }
 
     return model
+
+class GlobalModel(nn.Module):
+    def __init__(self):
+        super(GlobalModel, self).__init__()
+        
+        # Define layers based on the provided structure
+        self.input_layer1_1 = nn.Linear(700, 256)
+        self.input_layer1_2 = nn.Linear(84, 32)
+        self.input_layer2_1 = nn.Linear(256, 128)
+        self.input_layer2_2 = nn.Linear(32, 128)
+        self.finish = nn.Linear(128, 10)
+        
+    def forward(self, x):
+        # Start: Preprocess the input
+        x1, x2 = preprocessing(x)  # Assuming the input can be preprocessed as needed
+        
+        # Stage 1
+        out1_1 = self.input_layer1_1(x1)  # Branch 1
+        out1_2 = self.input_layer1_2(x2)  # Branch 2
+        
+        # Stage 2
+        out2_1 = self.input_layer2_1(out1_1)  # Processed from input_layer1_1
+        out2_2 = self.input_layer2_2(out1_2)  # Processed from input_layer1_2
+        
+        # Combine outputs using the strategy (average_fun)
+        combined_output = average_fun(out2_1, out2_2)
+        
+        # Finish layer
+        output = self.finish(combined_output)
+        
+        return output

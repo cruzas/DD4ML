@@ -15,7 +15,7 @@ class DataAndWeightParallelizedSubdomain(BaseModel):
         self.model_handler = model_handler
         self.num_replicas_per_subdomain = self.model_handler.num_replicas_per_subdomain        
         self.weight_parallelized_model = WeightParallelizedModel(model_handler=model_handler, sample=sample)
-        
+
     def forward(self, x, chunks_amount=1, reset_grad = False, compute_grad = True):
         return self.weight_parallelized_model.forward(x, chunks_amount=chunks_amount, reset_grad=reset_grad, compute_grad=compute_grad)
     

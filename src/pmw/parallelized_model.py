@@ -36,6 +36,28 @@ class ParallelizedModel(BaseModel):
             self.subdomain = DataAndWeightParallelizedSubdomain(self.model_handler, sample)
             self.sync_params()
     
+    def save_state_dict(self, path):
+        # subdomain_state_dict = self.subdomain.weight_parallelized_model.subdomain.state_dict()
+        raise NotImplementedError("This function is not implemented yet.")
+        # TODO: Save to separate files in parallel and use a post processing on the main rank to merge them
+
+    def state_dict(self):
+        sd, rep, _, _ = self.model_handler.rank_to_position()
+        if sd == 0 and rep == 0:
+            replica_ranks = self.model_handler.replica_ranks()
+            subdomain_state_dict = self.subdomain.weight_parallelized_model.subdomain.state_dict()
+            if self.rank == replica_ranks[0]:
+                gathered_state_dicts = [None for _ in range(len(replica_ranks))]
+                dist.gather_object(subdomain_state_dict, gathered_state_dicts, dst=replica_ranks[0], group=self.model_handler.get_replica_group())
+            else:
+                dist.gather_object(subdomain_state_dict, dst=replica_ranks[0], group=self.model_handler.get_replica_group())
+            # Merge the gathered state_dicts
+            if self.rank == replica_ranks[0]:
+                for i in range(1, len(replica_ranks)):
+                    for key in gathered_state_dicts[i].keys():
+                        gathered_state_dicts[0][key] = gathered_state_dicts[i][key]
+                return gathered_state_dicts[0]
+        
     def parameters(self):
         return self.subdomain.weight_parallelized_model.subdomain.parameters()
 

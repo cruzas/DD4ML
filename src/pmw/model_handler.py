@@ -84,7 +84,11 @@ class ModelHandler():
         for sd in range(self.num_subdomains):
             if self.rank in self.nn_structure[f"sd{sd}"]["ranks"]:
                 return self.nn_structure[f"sd{sd}"]["ranks"]
-
+            
+    def replica_ranks(self):
+        sd, rep, _, _ = self.rank_to_position()
+        return self.nn_structure[f"sd{sd}"][f"r{rep}"]["ranks"]
+    
     def get_sd_group(self):
         sd, _, _, _ = self.rank_to_position()
         return self.nn_structure[f"sd{sd}"]["group"]

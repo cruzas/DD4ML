@@ -6,6 +6,7 @@ from torch import autograd
 import utils
 import torch.distributed as dist
 import copy
+from collections import OrderedDict
 
 class WeightParallelizedSubdomain(BaseModel):
     # This corresponds to a STAGE in a pipelined model.
@@ -32,7 +33,16 @@ class WeightParallelizedSubdomain(BaseModel):
         if self.rank in self.stage_data['ranks']:
             for layer_name in self.stage_data['layers']:
                 self.sharded_layers.append(ShardedLayer(layer_dict=self.model_handler.net_dict[layer_name], layer_ranks=self.stage_data['ranks']))
-    
+
+    def state_dict(self):
+        ordered_dict = OrderedDict()
+        temp = {layer_name: layer.state_dict() for layer_name, layer in zip(self.stage_data['layers'], self.sharded_layers)}
+        for key in temp.keys():
+            for subkey in temp[key].keys():
+                subkey2 = '.'.join(subkey.split('.')[1:])
+                ordered_dict[key+'.'+subkey2] = temp[key][subkey]
+        return ordered_dict
+
     def parameters(self):  
         return [param for layer in self.sharded_layers for param in layer.parameters()]
 
