@@ -41,7 +41,14 @@ class ParallelizedModel(BaseModel):
         raise NotImplementedError("This function is not implemented yet.")
         # TODO: Save to separate files in parallel and use a post processing on the main rank to merge them
 
-    def state_dict(self):
+    def state_dict(self, dst_rank=0):
+        def merger(gathered_state_dicts, replica_ranks):
+            # Merge the gathered state_dicts
+            for i in range(1, len(replica_ranks)):
+                for key in gathered_state_dicts[i].keys():
+                    gathered_state_dicts[0][key] = gathered_state_dicts[i][key]
+            return gathered_state_dicts[0]
+                
         sd, rep, _, _ = self.model_handler.rank_to_position()
         if sd == 0 and rep == 0:
             replica_ranks = self.model_handler.replica_ranks()
@@ -51,12 +58,17 @@ class ParallelizedModel(BaseModel):
                 dist.gather_object(subdomain_state_dict, gathered_state_dicts, dst=replica_ranks[0], group=self.model_handler.get_replica_group())
             else:
                 dist.gather_object(subdomain_state_dict, dst=replica_ranks[0], group=self.model_handler.get_replica_group())
-            # Merge the gathered state_dicts
+
             if self.rank == replica_ranks[0]:
-                for i in range(1, len(replica_ranks)):
-                    for key in gathered_state_dicts[i].keys():
-                        gathered_state_dicts[0][key] = gathered_state_dicts[i][key]
-                return gathered_state_dicts[0]
+                merged_state_dict = merger(gathered_state_dicts, replica_ranks)
+                if replica_ranks[0] != dst_rank:
+                    dist.send_object_list([merged_state_dict], dst=dst_rank)
+                else:
+                    return merged_state_dict
+                
+        if self.rank == dst_rank:
+            return dist.recv_object_list(src=replica_ranks[0])[0]
+
         
     def parameters(self):
         return self.subdomain.weight_parallelized_model.subdomain.parameters()
