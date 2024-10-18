@@ -69,7 +69,7 @@ class APTS(torch.optim.Optimizer):
             if key not in ['params']:
                 self.param_groups[0][key] = getattr(self, key)
             
-    def subdomain_steps(self, closure=None):
+    def subdomain_steps(self, final_subdomain_loss=None):
         """
         Perform subdomain steps.
 
@@ -85,40 +85,17 @@ class APTS(torch.optim.Optimizer):
         """
         # Set up the learning rate
         if self.max_subdomain_iter > 0:
-            if self.APTS_in_data_sync_strategy == 'sum' and self.step_strategy != 'weighted_mean':
-                self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/(self.model.num_subdomains*self.max_subdomain_iter)
-            else:
-                self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/self.max_subdomain_iter
+            self.subdomain_optimizer.param_groups[0]['lr'] = self.lr/self.max_subdomain_iter
             # Do subdomain steps
             for i in range(self.max_subdomain_iter):
                 # TODO: Add criterion to exit for-loop
                 self.subdomain_optimizer.step()
                 self.subdomain_optimizer.zero_grad()
                 if i != self.max_subdomain_iter - 1:
-                    self.model.subdomain_forward() 
-                    self.model.subdomain_backward()
-                    # self.model.normalize_grads() # through infinity norm
-                
-            # Check if TRAdam is used as the local optimizer
-            if 'tradam' in str(self.subdomain_optimizer).lower():
-                self.subdomain_optimizer.reset_momentum()
-                
-            if self.step_strategy == 'weighted_mean' and self.model.num_subdomains > 1:
-                # Loss seems to be synchronized because of data_and_weight_parallelized_subdomain
-                loss = closure(compute_grad=False, zero_grad=False, sync_loss='local')
-                loss = torch.tensor(loss).cuda()
-                ds_loss = loss.clone()
-                if self.model.rank in self.model.subdomain_final_stages_main_rank:
-                    dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=self.model.subdomain_final_stages_main_rank_group) # sums losses across all subdomains
-                dist.broadcast(tensor=loss, src=self.model.last_layer_main_shard, group=self.model.subdomain_ranks_group)
-                ds_loss_weight = ds_loss/loss
-                # Here premultiply every param by ds_loss weight
-                for param in self.model.parameters():
-                    param.data *= ds_loss_weight
-                self.model.sync_params(method='sum')
-            else:
-                self.model.sync_params(method='average') # if this is "sum" it doesn't work `\_(ツ)_/`
-
+                    outputs = self.model.subdomain_forward()
+                    losses = final_subdomain_loss(outputs) if self.model.model_handler.is_last_stage() else None
+                    self.model.subdomain_backward(losses)
+            self.model.sync_params(method='average') # if this is "sum" it doesn't work `\_(ツ)_/`
             self.update_param_group()
 
     def zero_timers(self):
@@ -131,7 +108,7 @@ class APTS(torch.optim.Optimizer):
         if 'zero_timers' in dir(self.subdomain_optimizer):
             self.subdomain_optimizer.zero_timers()
 
-    def step(self, closure):
+    def step(self, closure, final_subdomain_loss):
         """
         Performs a single optimization step.
         Args:
@@ -153,7 +130,7 @@ class APTS(torch.optim.Optimizer):
         
         # Do subdomain steps
         tic = time.time()
-        self.subdomain_steps(closure)
+        self.subdomain_steps(final_subdomain_loss)
             
         self.timings['precond'] += time.time() - tic
         with torch.no_grad():

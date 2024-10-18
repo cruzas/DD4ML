@@ -151,28 +151,30 @@ class WeightParallelizedSubdomain(BaseModel):
             del self.inputs[key]
             self.inputs[key] = [None]*num_chunks
                 
-        return self.outputs if self.model_handler.is_last_stage() else [True]
+        return self.outputs['finish'] if self.model_handler.is_last_stage() else [True]
         
     def backward(self, loss=None, chunk_id=0, is_in_pipeline=False):
         if not is_in_pipeline: # Not in a pipeline - subdomain independent backward (no communication)
-            if self.model_handler.is_last_stage(): # End of the pipeline
-                loss.backward(retain_graph=True)
-                for name, inputs in self.inputs.items():
-                    _, rcv_name = name.split(self.connector_symbol)
-                    rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
-                    assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
-                    if self.rank != rcv_ranks[0]:
-                        reverse_name = self.connector_symbol.join(reversed(name.split(self.connector_symbol)))
-                        if chunk_id == 0:
-                            self.grad_outputs[reverse_name] = [None]*len(inputs)
-                        self.grad_outputs[reverse_name][chunk_id] = torch.autograd.grad(outputs=loss, inputs=inputs[chunk_id], retain_graph=True)[0]
-            else:
-                for name, outputs in self.outputs.items():
-                    _, rcv_name = name.split(self.connector_symbol)
-                    rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
-                    assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
-                    if self.rank != rcv_ranks[0]:    
-                        outputs[chunk_id].backward(self.grad_outputs[name][chunk_id], retain_graph=True)
+            for chunk_id in range(len(self.outputs[list(self.outputs.keys())[0]])):
+                if self.model_handler.is_last_stage(): # End of the pipeline
+                    loss_ = loss[chunk_id]
+                    loss_.backward(retain_graph=True)
+                    for name, inputs in self.inputs.items():
+                        _, rcv_name = name.split(self.connector_symbol)
+                        rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
+                        assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                        if self.rank != rcv_ranks[0]:
+                            reverse_name = self.connector_symbol.join(reversed(name.split(self.connector_symbol)))
+                            if chunk_id == 0:
+                                self.grad_outputs[reverse_name] = [None]*len(inputs)
+                            self.grad_outputs[reverse_name][chunk_id] = torch.autograd.grad(outputs=loss_, inputs=inputs[chunk_id], retain_graph=True)[0]
+                else:
+                    for name, outputs in self.outputs.items():
+                        _, rcv_name = name.split(self.connector_symbol)
+                        rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
+                        assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                        if self.rank != rcv_ranks[0]:    
+                            outputs[chunk_id].backward(self.grad_outputs[name][chunk_id], retain_graph=True)
         else:        
             if self.model_handler.is_last_stage(): # End of the pipeline
                 loss.backward(retain_graph=True)

@@ -75,9 +75,12 @@ class ParallelizedModel(BaseModel):
     def subdomain_forward(self):
         return self.subdomain.weight_parallelized_model.subdomain.forward()
 
-    def subdomain_backward(self):
-        self.subdomain.weight_parallelized_model.subdomain.backward()
+    def subdomain_backward(self, losses):
+        self.subdomain.weight_parallelized_model.subdomain.backward(losses)
         self.subdomain.sync_grads() # This is needed in case there are multiple replicas per subdomain (exact data parallelism)
+
+    def subdomain_zero_grad(self):
+        self.subdomain.weight_parallelized_model.subdomain.zero_grad()
 
     def subdomain_params(self):
         return self.subdomain.weight_parallelized_model.subdomain.parameters()
