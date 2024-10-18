@@ -46,15 +46,48 @@ class WeightParallelizedSubdomain(BaseModel):
     def parameters(self):  
         return [param for layer in self.sharded_layers for param in layer.parameters()]
 
-    def forward(self, num_chunks, num_samples_in_chunk, chunk_id, x=None, is_in_pipeline=False):
+    def forward(self, x=None, num_chunks=None, num_samples_in_chunk=None, chunk_id=None, is_in_pipeline=False):
         empty_at_the_end = []
-        if x is None and not is_in_pipeline:
-            for k, chunk in enumerate(self.inputs):
-                for layer in self.sharded_layers:
-                    chunk = layer.forward(chunk)
-                self.outputs[k] = chunk
+        if not is_in_pipeline:
+            for chunk_id in range(len(self.outputs[list(self.outputs.keys())[0]])):
+                for i, layer_name in enumerate(self.stage_data['layers']):
+                    input_list = self.model_handler.net_dict[layer_name]['rcv']['src']
+                    strategy_in = self.model_handler.net_dict[layer_name]['rcv']['strategy']
+                    if strategy_in is None: 
+                        input_name = 'start' if layer_name == 'start' else input_list[0]
+                        x = self.inputs[layer_name+self.connector_symbol+input_name][chunk_id]
+                    else:
+                        x = strategy_in(*[self.inputs[layer_name+self.connector_symbol+src_name][chunk_id] for src_name in input_list])
+                    # Forward pass. Output may be a list in case of multiple outputs (each output goes to a different destination layer)
+                    x = self.sharded_layers[i].forward(x)
+
+                    if layer_name == 'finish': 
+                        if chunk_id == 0:
+                            self.outputs['finish'] = [None]*len(self.outputs['finish'])
+                        self.outputs['finish'][chunk_id] = x
+
+                    for dst_idx, dst_name in enumerate(self.model_handler.net_dict[layer_name]['dst']['to']):
+                        key = layer_name+self.connector_symbol+dst_name 
+                        current_layer_stage = self.model_handler.net_dict[layer_name]['stage']
+                        dst_layer_stage = self.model_handler.net_dict[dst_name]['stage']
+                        temp = x if not isinstance(x, list) else x[dst_idx]
+                        if current_layer_stage != dst_layer_stage:
+                            if chunk_id == 0:
+                                self.outputs[key] = [None]*len(self.outputs[key])
+                            self.outputs[key][chunk_id] = temp
+                        else:
+                            # Key: receiver is first, followed by the sender
+                            reverse_key = dst_name+self.connector_symbol+layer_name
+                            empty_at_the_end.append(reverse_key)
+                            self.inputs[reverse_key] = [None]*len(self.inputs[reverse_key])
+                            self.inputs[reverse_key][chunk_id] = temp    
+                        
         else: # Here we are in a pipeline and x is not None just for the first stage
             for layer_name in self.stage_data['layers']:
+                if layer_name == 'start':
+                    if chunk_id == 0:
+                        self.inputs['start'+self.connector_symbol+'start'] = [None]*num_chunks
+                    self.inputs['start'+self.connector_symbol+'start'][chunk_id] = x
                 for src_name in self.model_handler.net_dict[layer_name]['rcv']['src']:
                     current_layer_stage = self.model_handler.net_dict[layer_name]['stage']
                     src_layer_stage = self.model_handler.net_dict[src_name]['stage']
@@ -74,11 +107,11 @@ class WeightParallelizedSubdomain(BaseModel):
             for i, layer_name in enumerate(self.stage_data['layers']):
                 input_list = self.model_handler.net_dict[layer_name]['rcv']['src']
                 strategy_in = self.model_handler.net_dict[layer_name]['rcv']['strategy']
-                if layer_name != 'start':
-                    if strategy_in is None:
-                        x = self.inputs[layer_name+self.connector_symbol+input_list[0]][chunk_id]
-                    else:
-                        x = strategy_in(*[self.inputs[layer_name+self.connector_symbol+src_name][chunk_id] for src_name in input_list])
+                if strategy_in is None:
+                    input_name = 'start' if layer_name == 'start' else input_list[0]
+                    x = self.inputs[layer_name+self.connector_symbol+input_name][chunk_id]
+                else:
+                    x = strategy_in(*[self.inputs[layer_name+self.connector_symbol+src_name][chunk_id] for src_name in input_list])
                 out = self.sharded_layers[i].forward(x)
                 if isinstance(out, list) and len(self.model_handler.net_dict[layer_name]['dst']['to']) != len(out):
                     raise ValueError(f"Output of layer {layer_name} is a list of torch.Tensor with length different from the number of destination layers")
@@ -111,15 +144,17 @@ class WeightParallelizedSubdomain(BaseModel):
                         reverse_key = dst_name+self.connector_symbol+layer_name
                         empty_at_the_end.append(reverse_key)
                         self.inputs[reverse_key] = [None]*num_chunks                         
-                        self.inputs[reverse_key][chunk_id] = temp                 
-            for key in empty_at_the_end:
-                del self.inputs[key]
-                self.inputs[key] = [None]*num_chunks
+                        self.inputs[reverse_key][chunk_id] = temp 
+                                        
+        for key in empty_at_the_end:
+            num_chunks = len(self.inputs[key])
+            del self.inputs[key]
+            self.inputs[key] = [None]*num_chunks
                 
         return self.outputs if self.model_handler.is_last_stage() else [True]
         
     def backward(self, loss=None, chunk_id=0, is_in_pipeline=False):
-        if is_in_pipeline:            
+        if not is_in_pipeline: # Not in a pipeline - subdomain independent backward (no communication)
             if self.model_handler.is_last_stage(): # End of the pipeline
                 loss.backward(retain_graph=True)
                 for name, inputs in self.inputs.items():
@@ -127,8 +162,25 @@ class WeightParallelizedSubdomain(BaseModel):
                     rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
                     assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
                     if self.rank != rcv_ranks[0]:
+                        reverse_name = self.connector_symbol.join(reversed(name.split(self.connector_symbol)))
                         if chunk_id == 0:
-                            self.grad_outputs[name] = [None]*len(inputs)
+                            self.grad_outputs[reverse_name] = [None]*len(inputs)
+                        self.grad_outputs[reverse_name][chunk_id] = torch.autograd.grad(outputs=loss, inputs=inputs[chunk_id], retain_graph=True)[0]
+            else:
+                for name, outputs in self.outputs.items():
+                    _, rcv_name = name.split(self.connector_symbol)
+                    rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
+                    assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                    if self.rank != rcv_ranks[0]:    
+                        outputs[chunk_id].backward(self.grad_outputs[name][chunk_id], retain_graph=True)
+        else:        
+            if self.model_handler.is_last_stage(): # End of the pipeline
+                loss.backward(retain_graph=True)
+                for name, inputs in self.inputs.items():
+                    _, rcv_name = name.split(self.connector_symbol)
+                    rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
+                    assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                    if self.rank != rcv_ranks[0]:
                         reverse_name = self.connector_symbol.join(reversed(name.split(self.connector_symbol)))
                         if chunk_id == 0:
                             self.grad_outputs[reverse_name] = [None]*len(inputs)
@@ -165,7 +217,7 @@ class WeightParallelizedSubdomain(BaseModel):
                         grad_output = torch.autograd.grad(outputs=all_outputs, inputs=inputs[chunk_id], grad_outputs=all_grads, retain_graph=True)
                         if self.setup_phase:
                             utils.send_shape(shape=grad_output.shape, dst=src_ranks[0], device=self.backend_device())
-                        dist.send(tensor=grad_output.to(self.backend_device()), dst=src_ranks[0])    
+                        dist.send(tensor=grad_output.to(self.backend_device()), dst=src_ranks[0]) 
 
     def grad(self):
         # TODO: Implement sharded_layers.parameters()
