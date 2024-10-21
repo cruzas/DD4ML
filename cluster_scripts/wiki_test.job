@@ -9,6 +9,9 @@
 #SBATCH --constraint=gpu
 #SBATCH --partition=debug
 #SBATCH --exclusive
+#SBATCH --job-name=wiki_test
+#SBATCH --output=wiki_test.out
+#SBATCH --error=wiki_test.err
 
 module load daint-gpu
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
