@@ -1,6 +1,6 @@
 import torch
 import requests
-from torch.utils.data import random_split, DataSet, DataLoader
+from torch.utils.data import random_split, Dataset, DataLoader
 
 def download_shakespeare():
     url = 'https://github.com/jcjohnson/torch-rnn/blob/master/data/tiny-shakespeare.txt'  # tiny dataset for testing
@@ -8,10 +8,10 @@ def download_shakespeare():
     data = response.text
     return data
 
-def load_shakespeare(train_split=0.8, batch_size=32):
+def load_shakespeare(train_split=0.8, block_size=128):
     data = download_shakespeare()
     tokenizer = CharTokenizer(data)
-    dataset = ShakespeareDataset(data, tokenizer, block_size=128)
+    dataset = ShakespeareDataset(data, tokenizer, block_size=block_size)
 
     # Split dataset into training and testing
     train_size = int(train_split * len(dataset))

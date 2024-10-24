@@ -4,6 +4,16 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 
+@dataclass
+class GPTConfig:
+    block_size: int = 256
+    vocab_size: int = None  # Will set this later based on tokenizer
+    n_layer: int = 6        # Reduced layers for faster training
+    n_head: int = 6         # Reduced heads
+    n_embd: int = 384       # Reduced embedding size
+    dropout: float = 0.2
+    bias: bool = True       # Use bias in Linear and LayerNorm layers
+
 class LayerNorm(nn.Module):
     """LayerNorm with optional bias."""
     def __init__(self, ndim, bias):
@@ -82,15 +92,6 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
-@dataclass
-class GPTConfig:
-    block_size: int = 256
-    vocab_size: int = None  # Will set this later based on tokenizer
-    n_layer: int = 6        # Reduced layers for faster training
-    n_head: int = 6         # Reduced heads
-    n_embd: int = 384       # Reduced embedding size
-    dropout: float = 0.2
-    bias: bool = True       # Use bias in Linear and LayerNorm layers
 
 class StartLayer(nn.Module):
     """Initial layer that applies token and positional embeddings and dropout."""
@@ -159,14 +160,14 @@ def get_model_dict(config):
     # Final LayerNorm layer
     model['ln_f'] = {
         'callable': {'object': LNFLayer, 'settings': {'config': config}},
-        'dst': {'to': ['lm_head']},
+        'dst': {'to': ['finish']},
         'rcv': {'src': [f'block_{config.n_layer - 1}'], 'strategy': None},
         'stage': 1,
         'num_layer_shards': 1,
     }
 
     # Language Modeling Head
-    model['lm_head'] = {
+    model['finish'] = {
         'callable': {'object': LMHeadLayer, 'settings': {'config': config}},
         'dst': {'to': []},
         'rcv': {'src': ['ln_f'], 'strategy': None},
@@ -175,3 +176,46 @@ def get_model_dict(config):
     }
 
     return model
+
+
+class GPTModelFromDict(nn.Module):
+    def __init__(self, model_dict):
+        super().__init__()
+        self.model_dict = model_dict
+        self.layers = nn.ModuleDict()
+        self.build_model()
+
+        # Weight tying between token embeddings and lm_head
+        # self.layers['finish'].lm_head.weight = self.layers['start'].wte.weight
+
+    def build_model(self):
+        # Instantiate layers
+        for name, layer_info in self.model_dict.items():
+            callable_obj = layer_info['callable']['object']
+            settings = layer_info['callable']['settings']
+            self.layers[name] = callable_obj(**settings)
+
+    def forward(self, idx, targets=None):
+        layer_outputs = {}
+        # Forward pass through layers in order
+        for name in self.layers:
+            layer = self.layers[name]
+            # Get inputs from sources
+            src_names = self.model_dict[name]['rcv']['src']
+            if src_names:
+                inputs = [layer_outputs[src] for src in src_names]
+                # Apply strategy if any
+                strategy = self.model_dict[name]['rcv']['strategy']
+                if strategy:
+                    x = strategy(*inputs)
+                else:
+                    x = inputs[0]  # Assuming single input if no strategy
+            else:
+                # For 'start' layer, input is idx
+                x = idx
+            # Forward through the layer
+            x = layer(x)
+            layer_outputs[name] = x
+
+        logits = layer_outputs['finish']
+        return logits

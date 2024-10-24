@@ -283,6 +283,13 @@ class ModelHandler():
     def _validate_network(self):
 
         net = copy.deepcopy(self.net_dict)
+        
+        #first make sure that there are layers called 'start' and 'finish'
+        if 'start' not in net:
+            raise ValueError("Network must have a layer called 'start'.")
+        if 'finish' not in net:
+            raise ValueError("Network must have a layer called 'finish'.")
+        
         for k, v in net.items():
             v["stage"] = 1 # This is done to check for cycles in the network graph.
 

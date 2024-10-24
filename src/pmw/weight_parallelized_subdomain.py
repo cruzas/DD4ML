@@ -173,7 +173,7 @@ class WeightParallelizedSubdomain(BaseModel):
                         _, rcv_name = name.split(self.connector_symbol)
                         rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
                         assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
-                        if self.rank != rcv_ranks[0]:    
+                        if self.rank != rcv_ranks[0] and outputs[chunk_id].requires_grad:
                             outputs[chunk_id].backward(self.grad_outputs[name][chunk_id], retain_graph=True)
         else:        
             if self.model_handler.is_last_stage(): # End of the pipeline
@@ -205,7 +205,8 @@ class WeightParallelizedSubdomain(BaseModel):
                         if chunk_id == 0 or name not in self.grad_outputs.keys() or len(self.grad_outputs[name]) != len(self.outputs[name]):
                             self.grad_outputs[name] = [None]*len(self.outputs[name])    
                         self.grad_outputs[name][chunk_id] = grad_output
-                        outputs[chunk_id].backward(grad_output, retain_graph=True)
+                        if outputs[chunk_id].requires_grad:
+                            outputs[chunk_id].backward(grad_output, retain_graph=True)
 
                 # Collect all outputs and all gradients into one tensor each
                 assert self.outputs.keys() == self.grad_outputs.keys(), "The keys of the outputs and grad_outputs dictionaries are not the same"
