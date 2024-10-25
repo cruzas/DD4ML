@@ -113,6 +113,15 @@ class WeightParallelizedSubdomain(BaseModel):
                 else:
                     x = strategy_in(*[self.inputs[layer_name+self.connector_symbol+src_name][chunk_id] for src_name in input_list])
                 out = self.sharded_layers[i].forward(x)
+                
+                # # if 'start' in layer_name:
+                # if not self.setup_phase:
+                #     print(f'(PARALLEL) Layer {layer_name}, output shape: {out.shape}, output norm: {torch.norm(out)}, out dtype: {out.dtype}')
+                #     # print the norm of the parameters of self.sharded_layers[i]
+                #     for i,(name, param) in enumerate(self.sharded_layers[i].named_parameters()):
+                #         if i == 0:
+                #             print(f'(PARALLEL) Layer {layer_name}, param {name}, param norm: {torch.norm(param)}')
+                
                 if isinstance(out, list) and len(self.model_handler.net_dict[layer_name]['dst']['to']) != len(out):
                     raise ValueError(f"Output of layer {layer_name} is a list of torch.Tensor with length different from the number of destination layers")
                 elif not isinstance(out, torch.Tensor) and not isinstance(out, list):

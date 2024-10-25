@@ -81,7 +81,9 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
     
     # first check if the output of both models is the same using random_input
     if dist.get_world_size() == 1:
+        torch.manual_seed(0)
         par_outputs = par_model(random_input)
+        torch.manual_seed(0)
         global_outputs = global_model(random_input)
         print(torch.allclose(par_outputs[0], global_outputs, atol=1e-6))
         # print the norm of the difference
@@ -104,7 +106,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
             # Gather parallel model norm
             par_optimizer.zero_grad()
             counter_par += 1
-
+            torch.manual_seed(0)
             par_loss = par_optimizer.step(closure=utils.closure(
                 x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True)) 
 
@@ -126,6 +128,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
                 for data in test_loader:
                     images, labels = data
                     images, labels = images.to(device), labels.to(device)
+                    torch.manual_seed(0)
                     closuree = utils.closure(
                         images, labels, criterion, par_model, compute_grad=False, zero_grad=True, return_output=True)
                     _, test_outputs = closuree()
@@ -154,6 +157,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
 
                 def closure():
                     global_optimizer.zero_grad()
+                    torch.manual_seed(0)
                     global_outputs = global_model(x)
                     global_loss = criterion(global_outputs, y)
                     global_loss.backward()
@@ -174,6 +178,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
                     total = 0
                     for images, labels in sequential_test_loader:
                         images, labels = images.to(device), labels.to(device)
+                        torch.manual_seed(0)
                         outputs = global_model(images)
                         _, predicted = torch.max(outputs.data, 1)
                         total += labels.size(0)

@@ -162,7 +162,7 @@ def get_model_dict(config):
         'callable': {'object': LNFLayer, 'settings': {'config': config}},
         'dst': {'to': ['finish']},
         'rcv': {'src': [f'block_{config.n_layer - 1}'], 'strategy': None},
-        'stage': 1,
+        'stage': 2,
         'num_layer_shards': 1,
     }
 
@@ -171,7 +171,7 @@ def get_model_dict(config):
         'callable': {'object': LMHeadLayer, 'settings': {'config': config}},
         'dst': {'to': []},
         'rcv': {'src': ['ln_f'], 'strategy': None},
-        'stage': 1,
+        'stage': 3,
         'num_layer_shards': 1,
     }
 
@@ -213,8 +213,15 @@ class GPTModelFromDict(nn.Module):
             else:
                 # For 'start' layer, input is idx
                 x = idx
-            # Forward through the layer
+
             x = layer(x)
+            # if 'start' in name:
+            # print(f'(SEQUENTIAL) Layer {name}, output shape: {x.shape}, output norm: {torch.norm(x)}')
+            # # print the norm of the parameters of layer
+            # for i,(name2, param) in enumerate(layer.named_parameters()):
+            #     if i == 0:
+            #         print(f'(SEQUENTIAL) Layer {name}, param {name2} norm: {torch.norm(param)}, x dtype: {x.dtype}')
+            
             layer_outputs[name] = x
 
         logits = layer_outputs['finish']
