@@ -50,14 +50,14 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
         os.environ['MASTER_PORT'] = master_port if master_port is not None else find_free_port()
         dist.init_process_group(backend='gloo', rank=rank, world_size=world_size)
         
-def send_shape(shape: list, dst: int, device = None):
+def send_shape(shape: list, dst: int, device=None):
     if device is None:
         device = torch.device('cuda') if dist.get_backend() == 'nccl' else torch.device('cpu')
     for s in shape:
         dist.send(tensor=torch.tensor(s, dtype=torch.int32).to(device), dst=dst)
     dist.send(tensor=torch.tensor(-1, dtype=torch.int32).to(device), dst=dst)
 
-def receive_shape(src: int, device = None):
+def receive_shape(src: int, device=None):
     # Rest of the code...
     if device is None:
         device = torch.device('cuda') if dist.get_backend() == 'nccl' else torch.device('cpu')

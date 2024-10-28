@@ -37,6 +37,7 @@ class ModelHandler():
         self.num_stages = len(self.stage_list)
         self.nn_structure = self.create_distributed_model_rank_structure()
         self.rank_to_position() # Initializes self.sd, self.rep, self.s, self.sh
+        self._stage_data = self.stage_data()
 
     def __str__(self):
         result = []
@@ -46,6 +47,22 @@ class ModelHandler():
                 result.append(f"\t{layer}")
         return "\n".join(result)
 
+    def get_list_of_consecutive_layers(self):
+        lst = [[]]
+        consecutive_layer = True
+        for layer_name in self._stage_data['layers']:
+            if consecutive_layer:
+                lst[-1].append(layer_name)
+            else:
+                lst.append([layer_name])
+            consecutive_layer = False
+            for dst_name in self.net_dict[layer_name]['dst']['to']:
+                current_layer_stage = self.net_dict[layer_name]['stage']
+                src_layer_stage = self.net_dict[dst_name]['stage']
+                if current_layer_stage == src_layer_stage:
+                    consecutive_layer = True
+        return lst
+                    
     def get_stage_ranks(self, stage_name, mode):
         assert mode in ['local', 'global', 'replica'], f"Invalid mode '{mode}'. Must be either 'global', 'local', or 'replica'."
         assert stage_name in ['first', 'last'], f"Invalid stage '{stage_name}'. Must be either 'first' or 'last'."
@@ -213,10 +230,10 @@ class ModelHandler():
         '''
         net = self.net_dict
         organized_layers = {}
+        organized_layers_backward = {}
         
         dst = net['start']['dst']['to']
         organized_layers[net['start']['stage']] = ['start']
-        
         while dst:
             next_dst = []
             for layer_name in dst:
@@ -226,20 +243,30 @@ class ModelHandler():
                 next_dst.extend(net[layer_name]['dst']['to'])
             dst = next_dst
             
+        rcv = net['finish']['rcv']['src']
+        organized_layers_backward[net['finish']['stage']] = ['finish']
+        while rcv:
+            next_rcv = []
+            for layer_name in rcv:
+                organized_layers_backward.setdefault(net[layer_name]['stage'], [])
+                if layer_name not in organized_layers_backward[net[layer_name]['stage']]:
+                    organized_layers_backward[net[layer_name]['stage']].append(layer_name)
+                next_rcv.extend(net[layer_name]['rcv']['src'])
+            rcv = next_rcv
+            
         # make it so the 'start' layer is on key 0 and the 'finish' layer is on the last key
         dict2 = {}
-        dict2[0] = organized_layers[list(organized_layers.keys())[0]]
-        counter = 1
+        counter = 0
         for key, value in organized_layers.items():
             if 'start' in value:
-                continue
+                dict2[0] = value
             if 'finish' not in value:
                 dict2[counter] = value
             else:
                 finish_key = key
+                counter -= 1
             counter += 1
         dict2[counter] = organized_layers[finish_key]
-        
         return dict2, len(dict2.keys())
 
     def _topological_sort(self, graph):

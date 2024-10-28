@@ -71,7 +71,8 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
 
     def criterion(outputs, targets):
         B, T, C = outputs.size()
-        loss = F.cross_entropy(outputs.view(B*T, C), targets.view(-1), ignore_index=-1)
+        # loss = F.cross_entropy(outputs.view(B*T, C), targets.view(-1), ignore_index=-1)
+        loss = F.cross_entropy(outputs.reshape(B * T, C), targets.reshape(-1), ignore_index=-1)
         return loss
     
     torch.manual_seed(0)
