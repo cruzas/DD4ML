@@ -60,7 +60,7 @@ class WeightParallelizedSubdomain(BaseModel):
                         x = strategy_in(*[self.inputs[layer_name+self.connector_symbol+src_name][chunk_id] for src_name in input_list])
                     # Forward pass. Output may be a list in case of multiple outputs (each output goes to a different destination layer)
                     x = self.sharded_layers[i].forward(x)
-
+                    
                     if layer_name == 'finish': 
                         if chunk_id == 0:
                             self.outputs['finish'] = [None]*len(self.outputs['finish'])
@@ -83,6 +83,10 @@ class WeightParallelizedSubdomain(BaseModel):
                             self.inputs[reverse_key][chunk_id] = temp    
                         
         else: # Here we are in a pipeline and x is not None just for the first stage
+            if self.DEBUG:
+                print(f'(PAR rank={self.rank}) Layer order: {self.stage_data["layers"]}')
+            if self.rank == 3:
+                print('asd')
             for layer_name in self.stage_data['layers']:
                 if layer_name == 'start':
                     if chunk_id == 0:
@@ -96,8 +100,12 @@ class WeightParallelizedSubdomain(BaseModel):
                         src_ranks = self.model_handler.layer_name_to_ranks(src_name) 
                         src_rank = src_ranks[0] # TODO: maybe improve send/rcv when tensor sharding is implemented
                         if self.setup_phase:
+                            if self.DEBUG:
+                                print(f'(PAR rank={self.rank}) Layer {layer_name} waiting to receive from rank {src_rank} a tensor')
                             rcv_shape = utils.receive_shape(src=src_rank, device=self.backend_device())
                             self.shapes[key] = lambda z, temp_shape=copy.deepcopy(list(rcv_shape)[1:]): [z] + temp_shape
+                            if self.DEBUG:
+                                print(f'(PAR rank={self.rank}) Layer {layer_name} received a tensor from rank {src_rank} with shape {rcv_shape}')
                         temp = torch.empty(self.shapes[key](num_samples_in_chunk), device=self.backend_device(), requires_grad=True)
                         dist.recv(src=src_rank, tensor=temp) # TODO: make it async to speed up communication
                         if chunk_id == 0 or key not in self.inputs.keys() or len(self.inputs[key]) != num_chunks:
@@ -113,14 +121,6 @@ class WeightParallelizedSubdomain(BaseModel):
                 else:
                     x = strategy_in(*[self.inputs[layer_name+self.connector_symbol+src_name][chunk_id] for src_name in input_list])
                 out = self.sharded_layers[i].forward(x)
-                
-                # # if 'start' in layer_name:
-                # if not self.setup_phase:
-                #     print(f'(PARALLEL) Layer {layer_name}, output shape: {out.shape}, output norm: {torch.norm(out)}, out dtype: {out.dtype}')
-                #     # print the norm of the parameters of self.sharded_layers[i]
-                #     for i,(name, param) in enumerate(self.sharded_layers[i].named_parameters()):
-                #         if i == 0:
-                #             print(f'(PARALLEL) Layer {layer_name}, param {name}, param norm: {torch.norm(param)}')
                 
                 if isinstance(out, list) and len(self.model_handler.net_dict[layer_name]['dst']['to']) != len(out):
                     raise ValueError(f"Output of layer {layer_name} is a list of torch.Tensor with length different from the number of destination layers")
@@ -142,7 +142,11 @@ class WeightParallelizedSubdomain(BaseModel):
                     if current_layer_stage != dst_layer_stage:
                         temp = temp.to(self.backend_device())
                         if self.setup_phase:
+                            if self.DEBUG:
+                                print(f'(PAR rank={self.rank}) Layer {layer_name} sending to rank {dst_rank} a tensor with shape: {temp.shape}')
                             utils.send_shape(shape=temp.shape, dst=dst_rank, device=self.backend_device())
+                            if self.DEBUG:
+                                print(f'(PAR rank={self.rank}) Layer {layer_name} sent a tensor to rank {dst_rank}')
                         dist.send(tensor=temp, dst=dst_rank)
                         
                         if chunk_id == 0 or key not in self.outputs.keys() or len(self.outputs[key]) != num_chunks:
@@ -159,7 +163,9 @@ class WeightParallelizedSubdomain(BaseModel):
             num_chunks = len(self.inputs[key])
             del self.inputs[key]
             self.inputs[key] = [None]*num_chunks
-                
+            
+        if self.DEBUG:
+            print(f'(PAR rank={self.rank}) Layer {layer_name} finished forward pass')
         return self.outputs['finish'] if self.model_handler.is_last_stage() else [True]
         
     def backward(self, loss=None, chunk_id=0, is_in_pipeline=False):

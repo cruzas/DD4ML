@@ -212,50 +212,35 @@ class ModelHandler():
         Organize layers into stages and build dependency graph within each stage
         '''
         net = self.net_dict
-        stages = {}
-        # Group layers by stage
-        for layer_name, layer_info in net.items():
-            stage = layer_info.get('stage')
-            if stage is None:
-                continue
-            stages.setdefault(stage, []).append(layer_name)
-
         organized_layers = {}
-        num_ranks_per_model = 0
-        for stage, layers in stages.items():
-            # Build dependency graph for layers in this stage
-            graph = {layer: []
-                     for layer in layers}  # Initialize adjacency list
-            num_layer_shards = None
-            layer_name = ''
-            for layer in layers:
-                layer_info = net[layer]
-                rcv_sources = layer_info.get('rcv', {}).get('src', [])
-                if rcv_sources is None:
-                    rcv_sources = []
-                for src in rcv_sources:
-                    if src in layers:
-                        # Dependency within the same stage
-                        # Edge from src to layer (src -> layer)
-                        graph[src].append(layer)
-                old_num_layer_shards = layer_info['num_layer_shards'] if num_layer_shards is None else num_layer_shards
-                num_layer_shards = layer_info['num_layer_shards']
-                old_layer_name = layer_name
-                layer_name = layer
-                if num_layer_shards != old_num_layer_shards:
-                    raise ValueError(f"Layer '{layer}' has a different number of layer shards ({num_layer_shards}) than the previous layer '{old_layer_name}' ({old_num_layer_shards}). Note that every layer in a stage must have the same number of layer shards.")
-                    
-            num_ranks_per_model += num_layer_shards
-
-            # Perform topological sort on the graph
-            try:
-                ordered_layers = self._topological_sort(graph)
-            except Exception as e:
-                print(f"Error in stage {stage}: {e}")
-                ordered_layers = []
-            organized_layers[stage] = ordered_layers
-
-        return organized_layers, num_ranks_per_model
+        
+        dst = net['start']['dst']['to']
+        organized_layers[net['start']['stage']] = ['start']
+        
+        while dst:
+            next_dst = []
+            for layer_name in dst:
+                organized_layers.setdefault(net[layer_name]['stage'], [])
+                if layer_name not in organized_layers[net[layer_name]['stage']]:
+                    organized_layers[net[layer_name]['stage']].append(layer_name)
+                next_dst.extend(net[layer_name]['dst']['to'])
+            dst = next_dst
+            
+        # make it so the 'start' layer is on key 0 and the 'finish' layer is on the last key
+        dict2 = {}
+        dict2[0] = organized_layers[list(organized_layers.keys())[0]]
+        counter = 1
+        for key, value in organized_layers.items():
+            if 'start' in value:
+                continue
+            if 'finish' not in value:
+                dict2[counter] = value
+            else:
+                finish_key = key
+            counter += 1
+        dict2[counter] = organized_layers[finish_key]
+        
+        return dict2, len(dict2.keys())
 
     def _topological_sort(self, graph):
         visited = set()

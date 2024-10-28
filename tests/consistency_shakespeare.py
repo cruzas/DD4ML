@@ -12,9 +12,27 @@ from pmw.parallelized_model import ParallelizedModel
 from pmw.model_handler import *
 import utils
 
+
+block_size = 256
+
+CONFIG = GPTConfig(
+    num_stages=10,
+    block_size=256,
+    vocab_size=0,
+    n_layer=1,
+    n_head=2,
+    n_embd=384,
+    dropout=0.2,
+    bias=True
+)
+model_dict = get_model_dict(CONFIG)
+stages = set()
+for key in model_dict.keys():
+    stages.add(model_dict[key]['stage'])
+    
 num_subdomains = 1
 num_replicas_per_subdomain = 1
-num_stages = 1 # 1 or 2
+num_stages = len(stages)
 num_shards = 1
 TEST_ACCURACY = False
 
@@ -24,33 +42,39 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
     utils.check_gpus_per_rank()
     # _________ Some parameters __________
     batch_size = 64 # NOTE: Setting a bach size lower than the dataset size will cause the two dataloader (sequential and parallel) to have different batches, hence different losses and accuracies
-    block_size = 256
     data_chunks_amount = 1
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     seed = 2456456
     torch.manual_seed(seed)
+    import random
+    random.seed(0)
+    import numpy as np
+    np.random.seed(0)
     learning_rage = 0.1
     # ____________________________________
 
     rank = dist.get_rank() if dist.get_backend() == 'nccl' else rank
 
+    torch.manual_seed(0)
     train_dataset_par, test_dataset_par, tokenizer = load_shakespeare(train_split=0.8, block_size=block_size)
     
     config = GPTConfig(
-        block_size=block_size,
+        num_stages=CONFIG.num_stages,
+        block_size=CONFIG.block_size,
         vocab_size=tokenizer.vocab_size,
-        n_layer=6,
-        n_head=6,
-        n_embd=384,
-        dropout=0.2,
-        bias=True
+        n_layer=CONFIG.n_layer,
+        n_head=CONFIG.n_head,
+        n_embd=CONFIG.n_embd,
+        dropout=CONFIG.dropout,
+        bias=CONFIG.bias
     )
 
     def criterion(outputs, targets):
         B, T, C = outputs.size()
         loss = F.cross_entropy(outputs.view(B*T, C), targets.view(-1), ignore_index=-1)
         return loss
-        
+    
+    torch.manual_seed(0)
     model_dict = get_model_dict(config)
 
     if num_stages == 1:
@@ -59,13 +83,18 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
             model_dict[key]['stage'] = 0
     model_handler = ModelHandler(model_dict, num_subdomains, num_replicas_per_subdomain, available_ranks=None)
 
+    torch.manual_seed(0)
     train_loader = GeneralizedDistributedDataLoader(model_handler=model_handler, dataset=train_dataset_par, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
+    torch.manual_seed(0)
     test_loader = GeneralizedDistributedDataLoader(model_handler=model_handler, dataset=test_dataset_par, batch_size=len(test_dataset_par), shuffle=False, num_workers=0, pin_memory=True)
 
     # Sharded first layer into [0,1] -> dataloader should upload batch to 0 only
-    x_batch, y_batch = next(iter(train_loader))
+    torch.manual_seed(0)
+    x_batch, _ = next(iter(train_loader))
+    torch.manual_seed(0)
     random_input =  x_batch.to(device)
 
+    torch.manual_seed(0)
     par_model = ParallelizedModel(model_handler=model_handler, sample=random_input)
     # Save the par_model state_dict
     dst_rank = 0
@@ -78,7 +107,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
         sequential_train_loader = torch.utils.data.DataLoader(train_dataset_par, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
         sequential_test_loader = torch.utils.data.DataLoader(test_dataset_par, batch_size=len(test_dataset_par), shuffle=False, num_workers=0, pin_memory=True)
         global_optimizer = torch.optim.SGD(global_model.parameters(), lr=learning_rage)
-    
+
     # first check if the output of both models is the same using random_input
     if dist.get_world_size() == 1:
         torch.manual_seed(0)
@@ -87,7 +116,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
         global_outputs = global_model(random_input)
         print(torch.allclose(par_outputs[0], global_outputs, atol=1e-6))
         # print the norm of the difference
-        print(f"Difference in relative norm: {torch.norm(par_outputs[0] - global_outputs)/torch.norm(global_outputs)}")
+        print(f"Difference in relative norm: {torch.norm(par_outputs[0] - global_outputs)/torch.norm(global_outputs)}, norm of par_outputs: {torch.norm(par_outputs[0])}, norm of global_outputs: {torch.norm(global_outputs)}")
 
     par_optimizer = torch.optim.SGD(par_model.parameters(), lr=learning_rage)
     for epoch in range(40):

@@ -6,6 +6,7 @@ import torch.nn as nn
 
 @dataclass
 class GPTConfig:
+    num_stages: int = 10
     block_size: int = 256
     vocab_size: int = None  # Will set this later based on tokenizer
     n_layer: int = 6        # Reduced layers for faster training
@@ -24,44 +25,7 @@ class LayerNorm(nn.Module):
     def forward(self, input):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
 
-class CausalSelfAttention(nn.Module):
-    """Multi-head causal self-attention."""
-    def __init__(self, config):
-        super().__init__()
-        assert config.n_embd % config.n_head == 0
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        self.attn_dropout = nn.Dropout(config.dropout)
-        self.resid_dropout = nn.Dropout(config.dropout)
-        self.n_head = config.n_head
-        self.n_embd = config.n_embd
-        self.dropout = config.dropout
-        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
-        if not self.flash:
-            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
-            self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
-                                        .view(1, 1, config.block_size, config.block_size))
-
-    def forward(self, x):
-        B, T, C = x.size()
-        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        if self.flash:
-            y = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True
-            )
-        else:
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-            att = F.softmax(att, dim=-1)
-            att = self.attn_dropout(att)
-            y = att @ v
-        y = y.transpose(1, 2).contiguous().view(B, T, C)
-        y = self.resid_dropout(self.c_proj(y))
-        return y
-
+    
 class MLP(nn.Module):
     """Feed-forward neural network."""
     def __init__(self, config):
@@ -78,20 +42,93 @@ class MLP(nn.Module):
         x = self.dropout(x)
         return x
 
-class Block(nn.Module):
-    """Transformer block with attention and MLP."""
+class LayerNormBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
-        self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
-        self.mlp = MLP(config)
-
+        self.ln = LayerNorm(config.n_embd, bias=config.bias)
+    
     def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
-        x = x + self.mlp(self.ln_2(x))
+        return self.ln(x)
+
+class AttentionHead(nn.Module):
+    def __init__(self, config, head_index):
+        super().__init__()
+        self.attn = CausalSelfAttention(config, head_index)
+    
+    def forward(self, x):
+        return self.attn(x)
+
+def combine_heads(*inputs): 
+    return inputs
+
+class CombineHeadsBlock(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.resid_dropout = nn.Dropout(config.dropout)
+
+    # TODO: make our implementation work with something like this, i.e. with multiple inputs
+    def forward(self, data):
+        x = data[0]
+        head_outputs = data[1:]
+        # Concatenate outputs from all attention heads
+        y = torch.cat(head_outputs, dim=-1)  # shape: (B, T, n_embd)
+        y = self.c_proj(y)
+        y = self.resid_dropout(y)
+        # Residual connection
+        x = x + y
         return x
 
+class CausalSelfAttention(nn.Module):
+    """Causal self-attention with single head."""
+    def __init__(self, config, head_index):
+        super().__init__()
+        self.head_dim = config.n_embd // config.n_head
+        self.head_index = head_index
+        self.c_attn = nn.Linear(config.n_embd, 3 * self.head_dim, bias=config.bias)
+        self.attn_dropout = nn.Dropout(config.dropout)
+        self.resid_dropout = nn.Dropout(config.dropout)
+        self.dropout = config.dropout
+        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        if not self.flash:
+            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
+            self.register_buffer("mask", torch.tril(torch.ones(config.block_size, config.block_size))
+                                        .unsqueeze(0))  # shape (1, block_size, block_size)
+
+    def forward(self, x):
+        B, T, C = x.size()
+        # Compute query, key, and value vectors for this head
+        qkv = self.c_attn(x)  # shape (B, T, 3 * head_dim)
+        q, k, v = qkv.chunk(3, dim=2)  # shapes: (B, T, head_dim)
+        if self.flash:
+            # Use flash attention if available
+            y = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None,
+                dropout_p=self.dropout if self.training else 0, is_causal=True
+            )
+        else:
+            # Compute attention scores
+            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(self.head_dim))  # shape: (B, T, T)
+            # Apply causal mask
+            att = att.masked_fill(self.mask[:, :T, :T] == 0, float('-inf'))
+            # Apply softmax and dropout
+            att = F.softmax(att, dim=-1)
+            att = self.attn_dropout(att)
+            # Compute attention output
+            y = att @ v  # shape: (B, T, head_dim)
+        # Apply residual dropout
+        y = self.resid_dropout(y)  # shape: (B, T, head_dim)
+        return y  # Output is (B, T, head_dim)
+
+class LayerNormAndMLPBlock(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.ln = LayerNorm(config.n_embd, bias=config.bias)
+        self.mlp = MLP(config)
+    
+    def forward(self, x):
+        x = x + self.mlp(self.ln(x))
+        return x
 
 class StartLayer(nn.Module):
     """Initial layer that applies token and positional embeddings and dropout."""
@@ -131,51 +168,135 @@ class LMHeadLayer(nn.Module):
         logits = self.lm_head(x)
         return logits
 
-# -----------------------------
-# Model Dictionary Definition
-# -----------------------------
 
 def get_model_dict(config):
     model = {}
 
+    n_layer = config.n_layer
+    tot_stages=config.num_stages # TODO: this is for debugging. Put somewhere else.
+    def set_stage(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block):
+        '''
+        Assigns a stage number to a layer based on its position in the model.
+
+        Parameters:
+        - layer_idx: index of the layer in the entire model
+        - blk_idx: index of the block (-1 if not in a block)
+        - head_idx: index of the head within the block (None if not a head)
+        - tot_stages: total number of stages to divide the model into
+        - n_head: number of attention heads
+        - is_head: True if the layer is an attention head
+        - is_in_block: True if the layer is within a block
+
+        Returns:
+        - stage_num: the assigned stage number
+        '''
+        total_heads = n_head * n_layer
+        if total_heads > tot_stages:
+            total_heads = n_head
+            if total_heads > tot_stages:
+                raise ValueError("Not enough stages allocated for attention heads.")
+                
+        left_over_stages = tot_stages - total_heads
+        left_over_stages_for_middle_blocks = left_over_stages # non-head layers within blocks
+        left_over_stages_for_non_blocks = left_over_stages # non-block layers
+        do = False
+        if left_over_stages > 3:
+            do = True
+            left_over_stages_for_middle_blocks = left_over_stages - 3 # -3 b/c of start, ln_f, and finish
+            left_over_stages_for_non_blocks = 3 # start, ln_f, finish
+        
+        if is_in_block:
+            if is_head:
+                stage_num = (head_idx + blk_idx*n_head) % total_heads # Assign each head within a block to a unique stage
+            else:
+                if not do:
+                    stage_num = "block_"+str(layer_idx)
+                else:
+                    stage_num = (layer_idx % left_over_stages_for_middle_blocks) + total_heads
+        else:
+            if not do:
+                stage_num = "non_block_"+str(layer_idx)
+            else:
+                stage_num = (layer_idx % left_over_stages_for_non_blocks) + total_heads
+
+        return stage_num
+    
+    # ----------------------------------------- Model Layers -----------------------------------------
     # Start layer (embedding and positional encoding)
+    layer_idx = 0
     model['start'] = {
         'callable': {'object': StartLayer, 'settings': {'config': config}},
-        'dst': {'to': ['block_0']},
+        'dst': {'to': ['block_0_partA']},
         'rcv': {'src': [], 'strategy': None},
-        'stage': 1,
+        'stage': set_stage(layer_idx, None, None, tot_stages, config.n_head, False, False), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
         'num_layer_shards': 1,
     }
+    
+    # Transformer blocks using LayerNormBlock, AttentionHead, LayerNormAndMLPBlock
+    for blk_idx in range(config.n_layer):
+        # LayerNormBlock
+        layer_idx = blk_idx*3
+        model[f'block_{blk_idx}_partA'] = {
+            'callable': {'object': LayerNormBlock, 'settings': {'config': config}},
+            'dst': {'to': [f'block_{blk_idx}_head_{h}' for h in range(config.n_head)] + [f'block_{blk_idx}_combine_heads']},
+            'rcv': {'src': [f'block_{blk_idx-1}_partC'] if blk_idx > 0 else ['start'], 'strategy': None},
+            'stage': set_stage(layer_idx, blk_idx, None, tot_stages, config.n_head, False, True), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
+            'num_layer_shards': 1,
+        }
 
-    # Transformer blocks
-    for i in range(config.n_layer):
-        model[f'block_{i}'] = {
-            'callable': {'object': Block, 'settings': {'config': config}},
-            'dst': {'to': [f'block_{i+1}'] if i+1 < config.n_layer else ['ln_f']},
-            'rcv': {'src': [f'block_{i-1}'] if i > 0 else ['start'], 'strategy': None},
-            'stage': 1,
+        # Attention heads
+        for head_idx in range(config.n_head):
+            layer_idx = blk_idx*(3+config.n_head)+head_idx+1 
+            model[f'block_{blk_idx}_head_{head_idx}'] = {
+                'callable': {'object': AttentionHead, 'settings': {'config': config, 'head_index': head_idx}},
+                'dst': {'to': [f'block_{blk_idx}_combine_heads']},
+                'rcv': {'src': [f'block_{blk_idx}_partA'], 'strategy': None},
+                'stage': set_stage(layer_idx, blk_idx, head_idx, tot_stages, config.n_head, True, True), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
+                'num_layer_shards': 1,
+            }
+
+        # Combine heads
+        layer_idx = 1+blk_idx*3
+        model[f'block_{blk_idx}_combine_heads'] = {
+            'callable': {'object': CombineHeadsBlock, 'settings': {'config': config}},
+            'dst': {'to': [f'block_{blk_idx}_partC']},
+            'rcv': {'src': [f'block_{blk_idx}_partA'] + [f'block_{blk_idx}_head_{head_idx}' for head_idx in range(config.n_head)], 'strategy': combine_heads},
+            'stage': set_stage(layer_idx, blk_idx, None, tot_stages, config.n_head, False, True), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
+            'num_layer_shards': 1,
+        }
+
+        # LayerNormAndMLPBlock
+        layer_idx = 2+blk_idx*3
+        model[f'block_{blk_idx}_partC'] = {
+            'callable': {'object': LayerNormAndMLPBlock, 'settings': {'config': config}},
+            'dst': {'to': [f'block_{blk_idx+1}_partA'] if blk_idx + 1 < config.n_layer else ['ln_f']},
+            'rcv': {'src': [f'block_{blk_idx}_combine_heads'], 'strategy': None},
+            'stage': set_stage(layer_idx, blk_idx, None, tot_stages, config.n_head, False, True), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
             'num_layer_shards': 1,
         }
 
     # Final LayerNorm layer
+    layer_idx = 1
     model['ln_f'] = {
         'callable': {'object': LNFLayer, 'settings': {'config': config}},
         'dst': {'to': ['finish']},
-        'rcv': {'src': [f'block_{config.n_layer - 1}'], 'strategy': None},
-        'stage': 2,
+        'rcv': {'src': [f'block_{config.n_layer - 1}_partC'], 'strategy': None},
+        'stage': set_stage(layer_idx, None, None, tot_stages, config.n_head, False, False), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
         'num_layer_shards': 1,
     }
 
     # Language Modeling Head
+    layer_idx = 2
     model['finish'] = {
         'callable': {'object': LMHeadLayer, 'settings': {'config': config}},
         'dst': {'to': []},
         'rcv': {'src': ['ln_f'], 'strategy': None},
-        'stage': 3,
+        'stage': set_stage(layer_idx, None, None, tot_stages, config.n_head, False, False), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
         'num_layer_shards': 1,
     }
-
+    
     return model
+
 
 
 class GPTModelFromDict(nn.Module):
@@ -185,7 +306,7 @@ class GPTModelFromDict(nn.Module):
         self.layers = nn.ModuleDict()
         self.build_model()
 
-        # Weight tying between token embeddings and lm_head
+        # Example of weight tying if needed
         # self.layers['finish'].lm_head.weight = self.layers['start'].wte.weight
 
     def build_model(self):
@@ -197,32 +318,88 @@ class GPTModelFromDict(nn.Module):
 
     def forward(self, idx, targets=None):
         layer_outputs = {}
-        # Forward pass through layers in order
-        for name in self.layers:
-            layer = self.layers[name]
-            # Get inputs from sources
-            src_names = self.model_dict[name]['rcv']['src']
-            if src_names:
-                inputs = [layer_outputs[src] for src in src_names]
-                # Apply strategy if any
-                strategy = self.model_dict[name]['rcv']['strategy']
-                if strategy:
-                    x = strategy(*inputs)
-                else:
-                    x = inputs[0]  # Assuming single input if no strategy
-            else:
-                # For 'start' layer, input is idx
-                x = idx
+        processed_layers = set()
+        layer_queue = ['start']
+        
+        while layer_queue:
+            # print(layer_queue)
+            layer_name = layer_queue.pop(0)
+            if layer_name in processed_layers:
+                continue
 
-            x = layer(x)
-            # if 'start' in name:
-            # print(f'(SEQUENTIAL) Layer {name}, output shape: {x.shape}, output norm: {torch.norm(x)}')
-            # # print the norm of the parameters of layer
-            # for i,(name2, param) in enumerate(layer.named_parameters()):
-            #     if i == 0:
-            #         print(f'(SEQUENTIAL) Layer {name}, param {name2} norm: {torch.norm(param)}, x dtype: {x.dtype}')
+            layer_info = self.model_dict[layer_name]
+            layer = self.layers[layer_name]
+            src_names = layer_info['rcv']['src']
             
-            layer_outputs[name] = x
+            # Check if all inputs are ready
+            if all(src in layer_outputs for src in src_names):
+                # Gather inputs from source layers
+                if src_names:
+                    inputs = [layer_outputs[src] for src in src_names]
+                    # Apply strategy if specified
+                    strategy = layer_info['rcv']['strategy']
+                    if strategy:
+                        x = strategy(*inputs)
+                    else:
+                        if len(inputs) == 1:
+                            x = inputs[0]
+                        else:
+                            x = inputs  # Pass list of inputs directly to the layer
+                else:
+                    # For 'start' layer, input is idx
+                    x = idx
 
+                # Compute the output of the current layer
+                output = layer(x)
+                if layer_name in layer_outputs.keys():
+                    print('asd')
+                layer_outputs[layer_name] = output
+                processed_layers.add(layer_name)
+
+                # Add destination layers to the queue
+                dst_layers = layer_info['dst']['to']
+                for dst in dst_layers:
+                    if dst not in processed_layers and dst not in layer_queue:
+                        layer_queue.append(dst)
+            else:
+                # Re-queue the layer if inputs are not ready
+                layer_queue.append(layer_name)
+            # print the norm of the output
+            # try:
+            #     print(f'(SEQ) Layer {layer_name}, input norm {torch.norm(torch.tensor(x.clone.detach() ,dtype=torch.float32))}, output norm: {torch.norm(layer_outputs[layer_name])}, param norm: {torch.norm(next(self.layers[layer_name].parameters()))}')
+            # except: # x is tuple so sum it up
+            #     x_norm = 0
+            #     for i in x:
+            #         x_norm += torch.norm(i)
+            #     print(f'(SEQ) Layer {layer_name}, input norm {x_norm}, output norm: {torch.norm(layer_outputs[layer_name])}, param norm: {torch.norm(next(self.layers[layer_name].parameters()))}')
+        # Retrieve the final output
         logits = layer_outputs['finish']
         return logits
+    
+    
+    
+    
+# if __name__ == '__main__':
+#     config = GPTConfig(
+#         block_size=256,
+#         vocab_size=2,
+#         n_layer=6,
+#         n_head=6,
+#         n_embd=384,
+#         dropout=0.2,
+#         bias=True
+#     )
+#     a = get_model_dict(config)
+    
+#     # compute the amount of different stages in the model
+#     stages = set()
+#     for key in a.keys():
+#         stages.add(a[key]['stage'])
+    
+#     print(stages)
+    
+#     # create a model from the dictionary
+    
+#     model = GPTModelFromDict(a)
+    
+#     print('asd')
