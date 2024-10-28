@@ -13,6 +13,7 @@ class BaseModel(nn.Module):
         self.backend = dist.get_backend()
         self.tensor_device = torch.device('cuda')
         self.default_device = torch.device('cpu') # Default device to store scalars
+        self.DEBUG = True
     
     def backend_device(self, tensor=torch.tensor([0])):
         return torch.device('cpu') if dist.get_backend() == 'gloo' else (tensor.device if 'cuda' in str(tensor.device) else torch.device('cuda'))
