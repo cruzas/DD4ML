@@ -1,8 +1,10 @@
 from dataclasses import dataclass
-import math 
-import torch 
+import math
+import re
+import torch
 import torch.nn.functional as F
 import torch.nn as nn
+
 
 @dataclass
 class GPTConfig:
@@ -15,8 +17,10 @@ class GPTConfig:
     dropout: float = 0.2
     bias: bool = True       # Use bias in Linear and LayerNorm layers
 
+
 class LayerNorm(nn.Module):
     """LayerNorm with optional bias."""
+
     def __init__(self, ndim, bias):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(ndim))
@@ -25,14 +29,17 @@ class LayerNorm(nn.Module):
     def forward(self, input):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
 
-    
+
 class MLP(nn.Module):
     """Feed-forward neural network."""
+
     def __init__(self, config):
         super().__init__()
-        self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
-        self.gelu    = nn.GELU()
-        self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.c_fc = nn.Linear(
+            config.n_embd, 4 * config.n_embd, bias=config.bias)
+        self.gelu = nn.GELU()
+        self.c_proj = nn.Linear(
+            4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
@@ -42,24 +49,28 @@ class MLP(nn.Module):
         x = self.dropout(x)
         return x
 
+
 class LayerNormBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.ln = LayerNorm(config.n_embd, bias=config.bias)
-    
+
     def forward(self, x):
         return self.ln(x)
+
 
 class AttentionHead(nn.Module):
     def __init__(self, config, head_index):
         super().__init__()
         self.attn = CausalSelfAttention(config, head_index)
-    
+
     def forward(self, x):
         return self.attn(x)
 
-def combine_heads(*inputs): 
+
+def combine_heads(*inputs):
     return inputs
+
 
 class CombineHeadsBlock(nn.Module):
     def __init__(self, config):
@@ -79,21 +90,26 @@ class CombineHeadsBlock(nn.Module):
         x = x + y
         return x
 
+
 class CausalSelfAttention(nn.Module):
     """Causal self-attention with single head."""
+
     def __init__(self, config, head_index):
         super().__init__()
         self.head_dim = config.n_embd // config.n_head
         self.head_index = head_index
-        self.c_attn = nn.Linear(config.n_embd, 3 * self.head_dim, bias=config.bias)
+        self.c_attn = nn.Linear(
+            config.n_embd, 3 * self.head_dim, bias=config.bias)
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
         self.dropout = config.dropout
-        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        self.flash = hasattr(torch.nn.functional,
+                             'scaled_dot_product_attention')
         if not self.flash:
-            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
+            print(
+                "WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             self.register_buffer("mask", torch.tril(torch.ones(config.block_size, config.block_size))
-                                        .unsqueeze(0))  # shape (1, block_size, block_size)
+                                 .unsqueeze(0))  # shape (1, block_size, block_size)
 
     def forward(self, x):
         B, T, C = x.size()
@@ -108,7 +124,8 @@ class CausalSelfAttention(nn.Module):
             )
         else:
             # Compute attention scores
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(self.head_dim))  # shape: (B, T, T)
+            att = (q @ k.transpose(-2, -1)) * \
+                (1.0 / math.sqrt(self.head_dim))  # shape: (B, T, T)
             # Apply causal mask
             att = att.masked_fill(self.mask[:, :T, :T] == 0, float('-inf'))
             # Apply softmax and dropout
@@ -120,18 +137,21 @@ class CausalSelfAttention(nn.Module):
         y = self.resid_dropout(y)  # shape: (B, T, head_dim)
         return y  # Output is (B, T, head_dim)
 
+
 class LayerNormAndMLPBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.ln = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
-    
+
     def forward(self, x):
         x = x + self.mlp(self.ln(x))
         return x
 
+
 class StartLayer(nn.Module):
     """Initial layer that applies token and positional embeddings and dropout."""
+
     def __init__(self, config):
         super().__init__()
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
@@ -148,8 +168,10 @@ class StartLayer(nn.Module):
         x = self.drop(tok_emb + pos_emb)
         return x
 
+
 class LNFLayer(nn.Module):
     """Final LayerNorm layer."""
+
     def __init__(self, config):
         super().__init__()
         self.ln_f = LayerNorm(config.n_embd, bias=config.bias)
@@ -158,8 +180,10 @@ class LNFLayer(nn.Module):
         x = self.ln_f(x)
         return x
 
+
 class LMHeadLayer(nn.Module):
     """Language Modeling Head that projects embeddings to vocabulary size."""
+
     def __init__(self, config):
         super().__init__()
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
@@ -170,32 +194,82 @@ class LMHeadLayer(nn.Module):
 
 
 def set_stage(net_dict, max_stages):
-    tot_layers = len(net_dict)
-    
-    layers_per_stage = tot_layers // max_stages
+    def build_dependency_graph(net_dict):
+        in_degree = {}
+        successors = {}
 
-    
-    dst = net_dict['start']['dst']['to']
+        # Initialize in_degree and successors
+        for layer_name in net_dict:
+            in_degree[layer_name] = 0
+            successors[layer_name] = []
+
+        # Build in_degree and successors
+        for layer_name in net_dict:
+            # For each destination layer, update successors and in_degree
+            for dst_layer in net_dict[layer_name]['dst']['to']:
+                successors[layer_name].append(dst_layer)
+                in_degree[dst_layer] += 1
+
+        return in_degree, successors
+
+    def topological_sort(net_dict):
+        in_degree, successors = build_dependency_graph(net_dict)
+
+        # Initialize queue with layers with in-degree 0
+        queue = [layer_name for layer_name in net_dict if in_degree[layer_name] == 0]
+        topo_order = []
+
+        while queue:
+            current_layer = queue.pop(0)
+            topo_order.append(current_layer)
+
+            # Decrease in-degree of successors
+            for succ in successors[current_layer]:
+                in_degree[succ] -= 1
+                if in_degree[succ] == 0:
+                    queue.append(succ)
+
+        if len(topo_order) != len(net_dict):
+            raise ValueError("Graph has a cycle")
+
+        return topo_order
+
+    tot_layers = len(net_dict)
+    # Compute number of layers per stage, distributing the remainder
+    layers_per_stage_list = [tot_layers // max_stages] * max_stages
+    for i in range(tot_layers % max_stages):
+        layers_per_stage_list[i] += 1  # Distribute the remainder
+
+    topo_order = topological_sort(net_dict)
+
     stage = 0
-    net_dict['start']['stage'] = 0
-    layers_per_stage[0] -= 1
-    
-    while dst:
-        next_dst = []
-        for layer_name in dst:
-            if layer_name not in organized_layers[net_dict[layer_name]['stage']]:
-                organized_layers[net_dict[layer_name]['stage']].append(layer_name)
-            next_dst.extend(net_dict[layer_name]['dst']['to'])
-        dst = next_dst
+    layers_in_current_stage = 0
+    stage_capacity = layers_per_stage_list[stage]
+
+    for layer_name in topo_order:
+        net_dict[layer_name]['stage'] = stage
+        layers_in_current_stage += 1
+
+        if layers_in_current_stage >= stage_capacity:
+            # Move to next stage if not the last one
+            if stage + 1 < max_stages:
+                stage += 1
+                layers_in_current_stage = 0
+                stage_capacity = layers_per_stage_list[stage]
+            else:
+                # All remaining layers are assigned to the last stage
+                pass
 
     return net_dict
+
 
 def get_model_dict(config):
     model = {}
 
     n_layer = config.n_layer
-    tot_stages=config.num_stages # TODO: this is for debugging. Put somewhere else.
-    
+    # TODO: this is for debugging. Put somewhere else.
+    tot_stages = config.num_stages
+
     # ----------------------------------------- Model Layers -----------------------------------------
     # Start layer (embedding and positional encoding)
     layer_idx = 0
@@ -206,7 +280,7 @@ def get_model_dict(config):
         'stage': 0,
         'num_layer_shards': 1,
     }
-    
+
     # Transformer blocks using LayerNormBlock, AttentionHead, LayerNormAndMLPBlock
     for blk_idx in range(config.n_layer):
         # LayerNormBlock
@@ -221,7 +295,7 @@ def get_model_dict(config):
 
         # Attention heads
         for head_idx in range(config.n_head):
-            layer_idx = blk_idx*(3+config.n_head)+head_idx+1 
+            layer_idx = blk_idx*(3+config.n_head)+head_idx+1
             model[f'block_{blk_idx}_head_{head_idx}'] = {
                 'callable': {'object': AttentionHead, 'settings': {'config': config, 'head_index': head_idx}},
                 'dst': {'to': [f'block_{blk_idx}_combine_heads']},
@@ -269,9 +343,8 @@ def get_model_dict(config):
         'stage': 0,
         'num_layer_shards': 1,
     }
-    
-    return model
 
+    return model
 
 
 class GPTModelFromDict(nn.Module):
@@ -295,7 +368,7 @@ class GPTModelFromDict(nn.Module):
         layer_outputs = {}
         processed_layers = set()
         layer_queue = ['start']
-        
+
         while layer_queue:
             # print(layer_queue)
             layer_name = layer_queue.pop(0)
@@ -305,7 +378,7 @@ class GPTModelFromDict(nn.Module):
             layer_info = self.model_dict[layer_name]
             layer = self.layers[layer_name]
             src_names = layer_info['rcv']['src']
-            
+
             # Check if all inputs are ready
             if all(src in layer_outputs for src in src_names):
                 # Gather inputs from source layers
@@ -350,31 +423,34 @@ class GPTModelFromDict(nn.Module):
         # Retrieve the final output
         logits = layer_outputs['finish']
         return logits
-    
-    
-    
-    
-# if __name__ == '__main__':
-#     config = GPTConfig(
-#         block_size=256,
-#         vocab_size=2,
-#         n_layer=6,
-#         n_head=6,
-#         n_embd=384,
-#         dropout=0.2,
-#         bias=True
-#     )
-#     a = get_model_dict(config)
-    
-#     # compute the amount of different stages in the model
-#     stages = set()
-#     for key in a.keys():
-#         stages.add(a[key]['stage'])
-    
-#     print(stages)
-    
-#     # create a model from the dictionary
-    
-#     model = GPTModelFromDict(a)
-    
-#     print('asd')
+
+
+if __name__ == '__main__':
+    config = GPTConfig(
+        block_size=256,
+        vocab_size=2,
+        n_layer=6,
+        n_head=6,
+        n_embd=384,
+        dropout=0.2,
+        bias=True
+    )
+    a = get_model_dict(config)
+    b = set_stage(a, 5)
+    for layer_name, layer_info in b.items():
+        print(f"Layer: {layer_name}")
+        print(f"  Destinations: {layer_info['dst']['to']}")
+        print(f"  Stage: {layer_info['stage']}")
+        print()  # Blank line for readability
+    print('asd')
+
+    # # compute the amount of different stages in the model
+    # stages = set()
+    # for key in a.keys():
+    #     stages.add(a[key]['stage'])
+
+    # print(stages)
+
+    # # create a model from the dictionary
+
+    # model = GPTModelFromDict(a)
