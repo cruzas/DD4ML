@@ -16,7 +16,7 @@ import utils
 block_size = 256
 
 CONFIG = GPTConfig(
-    num_stages=10,
+    num_stages=6,
     block_size=256,
     vocab_size=0,
     n_layer=1,
@@ -26,6 +26,12 @@ CONFIG = GPTConfig(
     bias=True
 )
 model_dict = get_model_dict(CONFIG)
+for layer_name, layer_info in model_dict.items():
+    print(f"{layer_name}")
+    print(f"  Destinations: {layer_info['dst']['to']}")
+    print(f"  Stage: {layer_info['stage']}")
+    print()  # Blank line for readability
+
 stages = set()
 for key in model_dict.keys():
     stages.add(model_dict[key]['stage'])

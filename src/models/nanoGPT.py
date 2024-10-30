@@ -1,6 +1,6 @@
 from dataclasses import dataclass
+import copy
 import math
-import re
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -194,74 +194,61 @@ class LMHeadLayer(nn.Module):
 
 
 def set_stage(net_dict, max_stages):
-    def build_dependency_graph(net_dict):
-        in_degree = {}
-        successors = {}
-
-        # Initialize in_degree and successors
-        for layer_name in net_dict:
-            in_degree[layer_name] = 0
-            successors[layer_name] = []
-
-        # Build in_degree and successors
-        for layer_name in net_dict:
-            # For each destination layer, update successors and in_degree
-            for dst_layer in net_dict[layer_name]['dst']['to']:
-                successors[layer_name].append(dst_layer)
-                in_degree[dst_layer] += 1
-
-        return in_degree, successors
-
-    def topological_sort(net_dict):
-        in_degree, successors = build_dependency_graph(net_dict)
-
-        # Initialize queue with layers with in-degree 0
-        queue = [layer_name for layer_name in net_dict if in_degree[layer_name] == 0]
-        topo_order = []
-
-        while queue:
-            current_layer = queue.pop(0)
-            topo_order.append(current_layer)
-
-            # Decrease in-degree of successors
-            for succ in successors[current_layer]:
-                in_degree[succ] -= 1
-                if in_degree[succ] == 0:
-                    queue.append(succ)
-
-        if len(topo_order) != len(net_dict):
-            raise ValueError("Graph has a cycle")
-
-        return topo_order
+    '''
+    Randomly assign stages to the layers in the model following the path such that the stages only have connected layers.
+    '''
+    if max_stages < 1: return ValueError('Number of stages should be at least 1')
+    if max_stages > len(net_dict): return ValueError('Number of stages should be less than the number of layers in the model')
+    for key in net_dict.keys(): net_dict[key]['stage'] = None if max_stages > 1 else 0
+    if max_stages == 1: return net_dict
 
     tot_layers = len(net_dict)
-    # Compute number of layers per stage, distributing the remainder
-    layers_per_stage_list = [tot_layers // max_stages] * max_stages
-    for i in range(tot_layers % max_stages):
-        layers_per_stage_list[i] += 1  # Distribute the remainder
+    layers_per_stage = [tot_layers // max_stages] * max_stages
+    if tot_layers % max_stages != 0:
+        for i in range(tot_layers % max_stages):
+            layers_per_stage[i] += 1
 
-    topo_order = topological_sort(net_dict)
+    net2 = copy.deepcopy(net_dict)
+    stage_idx = 0
+    def _get_available_layer_closest_to_start(net):
+        '''
+        Follows the flow of the model and returns the next layer that can be assigned a stage.
+        '''        
+        if net['start']['stage'] is None:
+            return 'start'
+        dst = net['start']['dst']['to']
+        while dst:
+            next_dst = []
+            for layer_name in dst:
+                if net[layer_name]['stage'] is None:
+                    return layer_name
+                next_dst.extend(net[layer_name]['dst']['to'])
+            dst = next_dst
 
-    stage = 0
-    layers_in_current_stage = 0
-    stage_capacity = layers_per_stage_list[stage]
-
-    for layer_name in topo_order:
-        net_dict[layer_name]['stage'] = stage
-        layers_in_current_stage += 1
-
-        if layers_in_current_stage >= stage_capacity:
-            # Move to next stage if not the last one
-            if stage + 1 < max_stages:
-                stage += 1
-                layers_in_current_stage = 0
-                stage_capacity = layers_per_stage_list[stage]
-            else:
-                # All remaining layers are assigned to the last stage
-                pass
-
-    return net_dict
-
+    while stage_idx != max_stages - 1:
+        stage_idx = 0
+        for key in net2.keys(): net2[key]['stage'] = None # setting all stages to None
+        while any([net2[key]['stage'] is None for key in net2.keys()]): # while there are layers that have not been assigned a stage
+            closest_layer = _get_available_layer_closest_to_start(net2) # get the next layer that can be assigned a stage
+            net2[closest_layer]['stage'] = stage_idx 
+            counter = 1
+            while counter < layers_per_stage[stage_idx]: # assign the rest of the layers in the stage
+                # One-level look-ahead to see if there are any free connections, as we still need nodes linked to the same base structure
+                free_connections = []
+                layers_with_same_stage_idx = [layer for layer in net2.keys() if net2[layer]['stage'] == stage_idx]
+                for layer in layers_with_same_stage_idx:
+                    for dst in net2[layer]['dst']['to'] + net2[layer]['rcv']['src']:
+                        if net2[dst]['stage'] is None:
+                            free_connections.append(dst)
+                if not free_connections:
+                    break
+                else: # Choose next layer at random
+                    closest_layer = free_connections[torch.randint(0, len(free_connections), (1,)).item()]
+                    free_connections.remove(closest_layer)
+                    net2[closest_layer]['stage'] = stage_idx
+                    counter += 1
+            stage_idx += 1
+    return net2
 
 def get_model_dict(config):
     model = {}
@@ -344,7 +331,7 @@ def get_model_dict(config):
         'num_layer_shards': 1,
     }
 
-    return model
+    return set_stage(model, tot_stages)
 
 
 class GPTModelFromDict(nn.Module):
