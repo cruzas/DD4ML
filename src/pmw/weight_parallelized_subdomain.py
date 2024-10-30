@@ -166,7 +166,27 @@ class WeightParallelizedSubdomain(BaseModel):
             print(f'(FWD rank={self.rank}) Layer {layer_name} finished forward pass')
         return self.outputs['finish'] if self.model_handler.is_last_stage() else [True]
 
-    # TODO: check if someone is sending to us  
+    
+    def backward_setup(self):
+        self.DEBUG = True
+        for i, consecutive_block in enumerate(reversed(self.consec_layers)):
+            bottom = True if 'finish' in consecutive_block else False
+            if bottom: # End of the pipeline
+                rcv_dict = {}
+                for name, inputs in self.inputs.items():
+                    _, rcv_name = name.split(self.connector_symbol)
+                    rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
+                    assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                    if self.rank != rcv_ranks[0] and any([element in name for element in consecutive_block]):
+                        reverse_name = self.connector_symbol.join(reversed(name.split(self.connector_symbol)))#+self.connector_symbol+'consec_block_'+str(i)
+                        if self.DEBUG:
+                            print(f'(BWD rank={self.rank}) Layer {_} sending to rank {rcv_ranks[0]}')
+                        
+                        rcv_dict.setdefault(rcv_ranks[0], []).append(name)
+            print(f'RANK {self.rank} rcv_dict: {rcv_dict}')
+            gathered_dicts = utils.all_gather_dict(rcv_dict, group=self.model_handler.get_replica_group())
+            print('asd')
+    
     def backward(self, loss=None, chunk_id=0, is_in_pipeline=False):
         self.DEBUG = True
         if not is_in_pipeline: # Not in a pipeline - subdomain independent backward (no communication)
