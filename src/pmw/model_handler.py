@@ -8,7 +8,70 @@ import os
 import sys
 import copy
 import utils
+from collections import deque
 
+def max_path_length(model, layer):
+    '''
+    Maximum distance between "layer" and "finish" in the model
+    '''
+    if layer == 'finish':
+        return 0
+    return 1 + max([max_path_length(model, dst) for dst in model[layer]['dst']['to']])
+
+def resolve_backward_dependencies(model):
+    start = 'finish'
+    max_distances = {layer: max_path_length(model, layer) for layer in model.keys()}
+    max_distances = list(dict(sorted(max_distances.items(), key=lambda item: item[1], reverse=False)).keys())
+    done = []
+    while True:
+        dst_layers = model[start]['rcv']['src']
+        max_path_lengths = {layer: max_path_length(model, layer) for layer in dst_layers}
+        max_path_lengths_decreasing = dict(sorted(max_path_lengths.items(), key=lambda item: item[1], reverse=True))
+        max_path_lengths_decreasing = list(max_path_lengths_decreasing.keys())
+        model[start]['bwd_dst'] = {'to': max_path_lengths_decreasing}
+        for layer in max_path_lengths_decreasing:
+            model[layer].setdefault('bwd_rcv', {'src': []})
+            model[layer]['bwd_rcv']['src'].append(start)
+        done.append(start)
+        max_distances.pop(0)
+        if not max_distances:
+            break
+        start = max_distances[0]
+    return model
+
+def resolve_layer_dependencies(model):
+    # Build a dependency graph and count incoming edges (src dependencies) for each node
+    dependencies = {layer: set(info['rcv']['src']) for layer, info in model.items()}
+    dependents = {layer: set(info['dst']['to']) for layer, info in model.items()}
+    incoming_edges_count = {layer: len(srcs) for layer, srcs in dependencies.items()}
+
+    # Start with nodes with no incoming edges (no dependencies)
+    to_process = deque([layer for layer, count in incoming_edges_count.items() if count == 0])
+    ordered_layers = []
+    
+    # Perform topological sort
+    while to_process:
+        layer = to_process.popleft()
+        ordered_layers.append(layer)
+        
+        # Reduce incoming edges for each dependent layer
+        for dependent in dependents[layer]:
+            incoming_edges_count[dependent] -= 1
+            if incoming_edges_count[dependent] == 0:
+                to_process.append(dependent)
+    
+    if len(ordered_layers) != len(model):
+        raise ValueError("Dependency cycle detected in the model layers.")
+    
+    # Reorder `dst['to']` and `rcv['src']` based on the topological sort
+    layer_position = {layer: pos for pos, layer in enumerate(ordered_layers)}
+    for layer, info in model.items():
+        # Sort `dst['to']` based on order in the topological sort
+        info['dst']['to'].sort(key=lambda x: layer_position[x])
+        # Sort `rcv['src']` based on order in the topological sort
+        info['rcv']['src'].sort(key=lambda x: layer_position[x])
+
+    return model
 
 def preprocessing(batch):
     # flatten the batch
@@ -23,7 +86,7 @@ def average_fun(input1, input2):
 class ModelHandler():
     def __init__(self, net_dict, num_subdomains, num_replicas_per_subdomain, available_ranks=None):
         # TODO: Add a security check to ensure that the network has valid "to", "src", and stage numbers
-        self.net_dict = net_dict
+        self.net_dict = resolve_layer_dependencies(net_dict)
         self.num_subdomains = num_subdomains
         self.num_replicas_per_subdomain = num_replicas_per_subdomain
         self.tot_replicas = num_subdomains*num_replicas_per_subdomain
@@ -39,6 +102,8 @@ class ModelHandler():
         self.rank_to_position() # Initializes self.sd, self.rep, self.s, self.sh
         self._stage_data = self.stage_data()
         self.get_list_of_consecutive_layers()
+        self.net_dict = resolve_backward_dependencies(net_dict)
+    
 
     def __str__(self):
         result = []
