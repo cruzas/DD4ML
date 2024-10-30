@@ -169,57 +169,32 @@ class LMHeadLayer(nn.Module):
         return logits
 
 
+def set_stage(net_dict, max_stages):
+    tot_layers = len(net_dict)
+    
+    layers_per_stage = tot_layers // max_stages
+
+    
+    dst = net_dict['start']['dst']['to']
+    stage = 0
+    net_dict['start']['stage'] = 0
+    layers_per_stage[0] -= 1
+    
+    while dst:
+        next_dst = []
+        for layer_name in dst:
+            if layer_name not in organized_layers[net_dict[layer_name]['stage']]:
+                organized_layers[net_dict[layer_name]['stage']].append(layer_name)
+            next_dst.extend(net_dict[layer_name]['dst']['to'])
+        dst = next_dst
+
+    return net_dict
+
 def get_model_dict(config):
     model = {}
 
     n_layer = config.n_layer
     tot_stages=config.num_stages # TODO: this is for debugging. Put somewhere else.
-    def set_stage(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block):
-        '''
-        Assigns a stage number to a layer based on its position in the model.
-
-        Parameters:
-        - layer_idx: index of the layer in the entire model
-        - blk_idx: index of the block (-1 if not in a block)
-        - head_idx: index of the head within the block (None if not a head)
-        - tot_stages: total number of stages to divide the model into
-        - n_head: number of attention heads
-        - is_head: True if the layer is an attention head
-        - is_in_block: True if the layer is within a block
-
-        Returns:
-        - stage_num: the assigned stage number
-        '''
-        total_heads = n_head * n_layer
-        if total_heads > tot_stages:
-            total_heads = n_head
-            if total_heads > tot_stages:
-                raise ValueError("Not enough stages allocated for attention heads.")
-                
-        left_over_stages = tot_stages - total_heads
-        left_over_stages_for_middle_blocks = left_over_stages # non-head layers within blocks
-        left_over_stages_for_non_blocks = left_over_stages # non-block layers
-        do = False
-        if left_over_stages > 3:
-            do = True
-            left_over_stages_for_middle_blocks = left_over_stages - 3 # -3 b/c of start, ln_f, and finish
-            left_over_stages_for_non_blocks = 3 # start, ln_f, finish
-        
-        if is_in_block:
-            if is_head:
-                stage_num = (head_idx + blk_idx*n_head) % total_heads # Assign each head within a block to a unique stage
-            else:
-                if not do:
-                    stage_num = "block_"+str(layer_idx)
-                else:
-                    stage_num = (layer_idx % left_over_stages_for_middle_blocks) + total_heads
-        else:
-            if not do:
-                stage_num = "non_block_"+str(layer_idx)
-            else:
-                stage_num = (layer_idx % left_over_stages_for_non_blocks) + total_heads
-
-        return stage_num
     
     # ----------------------------------------- Model Layers -----------------------------------------
     # Start layer (embedding and positional encoding)
@@ -228,7 +203,7 @@ def get_model_dict(config):
         'callable': {'object': StartLayer, 'settings': {'config': config}},
         'dst': {'to': ['block_0_partA']},
         'rcv': {'src': [], 'strategy': None},
-        'stage': set_stage(layer_idx, None, None, tot_stages, config.n_head, False, False), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
+        'stage': 0,
         'num_layer_shards': 1,
     }
     
@@ -240,7 +215,7 @@ def get_model_dict(config):
             'callable': {'object': LayerNormBlock, 'settings': {'config': config}},
             'dst': {'to': [f'block_{blk_idx}_head_{h}' for h in range(config.n_head)] + [f'block_{blk_idx}_combine_heads']},
             'rcv': {'src': [f'block_{blk_idx-1}_partC'] if blk_idx > 0 else ['start'], 'strategy': None},
-            'stage': set_stage(layer_idx, blk_idx, None, tot_stages, config.n_head, False, True), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
+            'stage': 0,
             'num_layer_shards': 1,
         }
 
@@ -251,7 +226,7 @@ def get_model_dict(config):
                 'callable': {'object': AttentionHead, 'settings': {'config': config, 'head_index': head_idx}},
                 'dst': {'to': [f'block_{blk_idx}_combine_heads']},
                 'rcv': {'src': [f'block_{blk_idx}_partA'], 'strategy': None},
-                'stage': set_stage(layer_idx, blk_idx, head_idx, tot_stages, config.n_head, True, True), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
+                'stage': 0,
                 'num_layer_shards': 1,
             }
 
@@ -261,7 +236,7 @@ def get_model_dict(config):
             'callable': {'object': CombineHeadsBlock, 'settings': {'config': config}},
             'dst': {'to': [f'block_{blk_idx}_partC']},
             'rcv': {'src': [f'block_{blk_idx}_partA'] + [f'block_{blk_idx}_head_{head_idx}' for head_idx in range(config.n_head)], 'strategy': combine_heads},
-            'stage': set_stage(layer_idx, blk_idx, None, tot_stages, config.n_head, False, True), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
+            'stage': 0,
             'num_layer_shards': 1,
         }
 
@@ -271,7 +246,7 @@ def get_model_dict(config):
             'callable': {'object': LayerNormAndMLPBlock, 'settings': {'config': config}},
             'dst': {'to': [f'block_{blk_idx+1}_partA'] if blk_idx + 1 < config.n_layer else ['ln_f']},
             'rcv': {'src': [f'block_{blk_idx}_combine_heads'], 'strategy': None},
-            'stage': set_stage(layer_idx, blk_idx, None, tot_stages, config.n_head, False, True), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
+            'stage': 0,
             'num_layer_shards': 1,
         }
 
@@ -281,7 +256,7 @@ def get_model_dict(config):
         'callable': {'object': LNFLayer, 'settings': {'config': config}},
         'dst': {'to': ['finish']},
         'rcv': {'src': [f'block_{config.n_layer - 1}_partC'], 'strategy': None},
-        'stage': set_stage(layer_idx, None, None, tot_stages, config.n_head, False, False), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
+        'stage': 0,
         'num_layer_shards': 1,
     }
 
@@ -291,7 +266,7 @@ def get_model_dict(config):
         'callable': {'object': LMHeadLayer, 'settings': {'config': config}},
         'dst': {'to': []},
         'rcv': {'src': ['ln_f'], 'strategy': None},
-        'stage': set_stage(layer_idx, None, None, tot_stages, config.n_head, False, False), #(layer_idx, blk_idx, head_idx, tot_stages, n_head, is_head, is_in_block)
+        'stage': 0,
         'num_layer_shards': 1,
     }
     

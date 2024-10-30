@@ -1,5 +1,6 @@
 import os  
 import torch
+import pickle
 import socket
 import subprocess
 import torch.distributed as dist
@@ -50,6 +51,12 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
         os.environ['MASTER_PORT'] = master_port if master_port is not None else find_free_port()
         dist.init_process_group(backend='gloo', rank=rank, world_size=world_size)
         
+# def send_dict(device=None):
+#     pass
+
+# def receive_dict(device=None):
+#     pass
+
 def send_shape(shape: list, dst: int, device=None):
     if device is None:
         device = torch.device('cuda') if dist.get_backend() == 'nccl' else torch.device('cpu')
@@ -185,3 +192,36 @@ def list_flattener(l):
         l = [item for sublist in l for item in sublist]
     return l
     
+def all_gather_dict(local_dict, group=None):
+    """
+    Gather dictionaries from all ranks and combine them into a list where each entry
+    is the dictionary from a different rank.
+
+    Args:
+    - local_dict (dict): Dictionary on each rank to gather.
+
+    Returns:
+    - list of dict: List of dictionaries from all ranks.
+    """
+    # Serialize local_dict to a byte tensor
+    serialized_dict = pickle.dumps(local_dict)
+    tensor_dict = torch.ByteTensor(list(serialized_dict))
+    
+    # Determine the maximum length of serialized dictionaries across all ranks
+    local_length = torch.tensor([tensor_dict.size(0)], dtype=torch.int64, device=tensor_dict.device)
+    max_length = torch.tensor([0], dtype=torch.int64, device=tensor_dict.device)
+    dist.all_reduce(local_length, op=dist.ReduceOp.MAX)
+    max_length = local_length.item()
+
+    # Pad tensor_dict to match the maximum length if necessary
+    if tensor_dict.size(0) < max_length:
+        tensor_dict = torch.cat([tensor_dict, torch.zeros(max_length - tensor_dict.size(0), dtype=torch.uint8)])
+    
+    # Gather the padded byte tensors from all ranks
+    group_size = dist.get_world_size() if group is None else len(dist.get_process_group_ranks(group))
+    gathered_tensors = [torch.empty(max_length, dtype=torch.uint8, device=tensor_dict.device) for _ in range(group_size)]
+    dist.all_gather(gathered_tensors, tensor_dict, group=group)
+
+    # Deserialize each gathered tensor into a dictionary
+    gathered_dicts = [pickle.loads(bytes(t.tolist())) for t in gathered_tensors]
+    return gathered_dicts

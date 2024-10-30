@@ -38,6 +38,7 @@ class ModelHandler():
         self.nn_structure = self.create_distributed_model_rank_structure()
         self.rank_to_position() # Initializes self.sd, self.rep, self.s, self.sh
         self._stage_data = self.stage_data()
+        self._validate_consecutiveness()
 
     def __str__(self):
         result = []
@@ -47,7 +48,10 @@ class ModelHandler():
                 result.append(f"\t{layer}")
         return "\n".join(result)
 
-    def get_list_of_consecutive_layers(self):
+    def _validate_consecutiveness(self):
+        '''
+        Checking for non-consecutive layers in a stage. This is not allowed as it would increase the complexity of the implementation and CPU time.
+        '''
         lst = [[]]
         consecutive_layer = True
         for layer_name in self._stage_data['layers']:
@@ -61,6 +65,8 @@ class ModelHandler():
                 src_layer_stage = self.net_dict[dst_name]['stage']
                 if current_layer_stage == src_layer_stage:
                     consecutive_layer = True
+        if len(lst) != 1:
+            raise ValueError("The layers in a stage are not consecutive.")
         return lst
                     
     def get_stage_ranks(self, stage_name, mode):
@@ -224,13 +230,13 @@ class ModelHandler():
                     break
         return stage_list
 
+
     def _organize_layers(self):
         '''
         Organize layers into stages and build dependency graph within each stage
         '''
         net = self.net_dict
         organized_layers = {}
-        organized_layers_backward = {}
         
         dst = net['start']['dst']['to']
         organized_layers[net['start']['stage']] = ['start']
@@ -242,17 +248,6 @@ class ModelHandler():
                     organized_layers[net[layer_name]['stage']].append(layer_name)
                 next_dst.extend(net[layer_name]['dst']['to'])
             dst = next_dst
-            
-        rcv = net['finish']['rcv']['src']
-        organized_layers_backward[net['finish']['stage']] = ['finish']
-        while rcv:
-            next_rcv = []
-            for layer_name in rcv:
-                organized_layers_backward.setdefault(net[layer_name]['stage'], [])
-                if layer_name not in organized_layers_backward[net[layer_name]['stage']]:
-                    organized_layers_backward[net[layer_name]['stage']].append(layer_name)
-                next_rcv.extend(net[layer_name]['rcv']['src'])
-            rcv = next_rcv
             
         # make it so the 'start' layer is on key 0 and the 'finish' layer is on the last key
         dict2 = {}
