@@ -28,7 +28,6 @@ class WeightParallelizedModel(BaseModel):
         out = self.forward(sample.to(self.tensor_device), chunks_amount=1, reset_grad=True, compute_grad=True)
         if self.model_handler.is_last_stage():
             loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
-        self.subdomain.backward_setup()
         self.backward(losses=[loss])
         self.zero_grad()
         self.subdomain.setup_phase = False

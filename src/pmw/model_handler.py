@@ -38,7 +38,7 @@ class ModelHandler():
         self.nn_structure = self.create_distributed_model_rank_structure()
         self.rank_to_position() # Initializes self.sd, self.rep, self.s, self.sh
         self._stage_data = self.stage_data()
-        self._validate_consecutiveness()
+        self.get_list_of_consecutive_layers()
 
     def __str__(self):
         result = []
@@ -47,8 +47,8 @@ class ModelHandler():
             for layer in layers:
                 result.append(f"\t{layer}")
         return "\n".join(result)
-
-    def _validate_consecutiveness(self):
+    
+    def get_list_of_consecutive_layers(self):
         '''
         Checking for non-consecutive layers in a stage. This is not allowed as it would increase the complexity of the implementation and CPU time.
         '''
