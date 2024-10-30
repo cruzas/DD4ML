@@ -224,15 +224,18 @@ def set_stage(net_dict, max_stages):
                     return layer_name
                 next_dst.extend(net[layer_name]['dst']['to'])
             dst = next_dst
-
-    while stage_idx != max_stages - 1:
+    c = 0
+    while stage_idx != max_stages:
+        c += 1
+        if c % 100 == 0:
+            layers_per_stage = [layers_per_stage[i] + 1 for i in range(max_stages)]
         stage_idx = 0
         for key in net2.keys(): net2[key]['stage'] = None # setting all stages to None
         while any([net2[key]['stage'] is None for key in net2.keys()]): # while there are layers that have not been assigned a stage
             closest_layer = _get_available_layer_closest_to_start(net2) # get the next layer that can be assigned a stage
             net2[closest_layer]['stage'] = stage_idx 
             counter = 1
-            while counter < layers_per_stage[stage_idx]: # assign the rest of the layers in the stage
+            while stage_idx < max_stages - 1 and counter < layers_per_stage[stage_idx]: # assign the rest of the layers in the stage
                 # One-level look-ahead to see if there are any free connections, as we still need nodes linked to the same base structure
                 free_connections = []
                 layers_with_same_stage_idx = [layer for layer in net2.keys() if net2[layer]['stage'] == stage_idx]
@@ -259,7 +262,6 @@ def get_model_dict(config):
 
     # ----------------------------------------- Model Layers -----------------------------------------
     # Start layer (embedding and positional encoding)
-    layer_idx = 0
     model['start'] = {
         'callable': {'object': StartLayer, 'settings': {'config': config}},
         'dst': {'to': ['block_0_partA']},
@@ -271,7 +273,6 @@ def get_model_dict(config):
     # Transformer blocks using LayerNormBlock, AttentionHead, LayerNormAndMLPBlock
     for blk_idx in range(config.n_layer):
         # LayerNormBlock
-        layer_idx = blk_idx*3
         model[f'block_{blk_idx}_partA'] = {
             'callable': {'object': LayerNormBlock, 'settings': {'config': config}},
             'dst': {'to': [f'block_{blk_idx}_head_{h}' for h in range(config.n_head)] + [f'block_{blk_idx}_combine_heads']},
@@ -292,17 +293,15 @@ def get_model_dict(config):
             }
 
         # Combine heads
-        layer_idx = 1+blk_idx*3
         model[f'block_{blk_idx}_combine_heads'] = {
             'callable': {'object': CombineHeadsBlock, 'settings': {'config': config}},
             'dst': {'to': [f'block_{blk_idx}_partC']},
-            'rcv': {'src': [f'block_{blk_idx}_partA'] + [f'block_{blk_idx}_head_{head_idx}' for head_idx in range(config.n_head)], 'strategy': combine_heads},
+            'rcv': {'src': [f'block_{blk_idx}_head_{head_idx}' for head_idx in range(config.n_head)]+[f'block_{blk_idx}_partA'], 'strategy': combine_heads},
             'stage': 0,
             'num_layer_shards': 1,
         }
 
         # LayerNormAndMLPBlock
-        layer_idx = 2+blk_idx*3
         model[f'block_{blk_idx}_partC'] = {
             'callable': {'object': LayerNormAndMLPBlock, 'settings': {'config': config}},
             'dst': {'to': [f'block_{blk_idx+1}_partA'] if blk_idx + 1 < config.n_layer else ['ln_f']},
@@ -312,7 +311,6 @@ def get_model_dict(config):
         }
 
     # Final LayerNorm layer
-    layer_idx = 1
     model['ln_f'] = {
         'callable': {'object': LNFLayer, 'settings': {'config': config}},
         'dst': {'to': ['finish']},
@@ -322,7 +320,6 @@ def get_model_dict(config):
     }
 
     # Language Modeling Head
-    layer_idx = 2
     model['finish'] = {
         'callable': {'object': LMHeadLayer, 'settings': {'config': config}},
         'dst': {'to': []},
@@ -332,7 +329,6 @@ def get_model_dict(config):
     }
 
     return set_stage(model, tot_stages)
-
 
 class GPTModelFromDict(nn.Module):
     def __init__(self, model_dict):
@@ -412,32 +408,33 @@ class GPTModelFromDict(nn.Module):
         return logits
 
 
+
+
+
+
+
+
+
+
+
+
 if __name__ == '__main__':
-    config = GPTConfig(
+    CONFIG = GPTConfig(
+        num_stages=6,
         block_size=256,
-        vocab_size=2,
-        n_layer=6,
-        n_head=6,
+        vocab_size=0,
+        n_layer=1,
+        n_head=2,
         n_embd=384,
         dropout=0.2,
         bias=True
     )
-    a = get_model_dict(config)
-    b = set_stage(a, 5)
-    for layer_name, layer_info in b.items():
-        print(f"Layer: {layer_name}")
-        print(f"  Destinations: {layer_info['dst']['to']}")
-        print(f"  Stage: {layer_info['stage']}")
-        print()  # Blank line for readability
-    print('asd')
-
-    # # compute the amount of different stages in the model
-    # stages = set()
-    # for key in a.keys():
-    #     stages.add(a[key]['stage'])
-
-    # print(stages)
-
-    # # create a model from the dictionary
-
-    # model = GPTModelFromDict(a)
+    model = get_model_dict(CONFIG)
+    
+    # Example of usage
+    try:
+        ordered_layers = resolve_layer_dependencies(model)
+        print("Model connections are set up correctly.")
+        print("Order of layers for execution:", ordered_layers)
+    except ValueError as e:
+        print("Error in model connections:", e)
