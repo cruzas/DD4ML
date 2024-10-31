@@ -1,9 +1,12 @@
 from dataclasses import dataclass
 import copy
 import math
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+import torch.distributed as dist
+import utils
 
 
 @dataclass
@@ -80,8 +83,8 @@ class CombineHeadsBlock(nn.Module):
 
     # TODO: make our implementation work with something like this, i.e. with multiple inputs
     def forward(self, data):
-        x = data[0]
-        head_outputs = data[1:]
+        x = data[-1]
+        head_outputs = data[0:-1]
         # Concatenate outputs from all attention heads
         y = torch.cat(head_outputs, dim=-1)  # shape: (B, T, n_embd)
         y = self.c_proj(y)
@@ -197,61 +200,68 @@ def set_stage(net_dict, max_stages):
     '''
     Randomly assign stages to the layers in the model following the path such that the stages only have connected layers.
     '''
-    if max_stages < 1: return ValueError('Number of stages should be at least 1')
-    if max_stages > len(net_dict): return ValueError('Number of stages should be less than the number of layers in the model')
-    for key in net_dict.keys(): net_dict[key]['stage'] = None if max_stages > 1 else 0
-    if max_stages == 1: return net_dict
+    original_net_dict = copy.deepcopy(net_dict)
+    net3 = {}
+    if dist.get_rank() == 0:
+        if max_stages < 1: return ValueError('Number of stages should be at least 1')
+        if max_stages > len(net_dict): return ValueError('Number of stages should be less than the number of layers in the model')
+        for key in net_dict.keys(): net_dict[key]['stage'] = None if max_stages > 1 else 0
+        if max_stages == 1: return net_dict
 
-    tot_layers = len(net_dict)
-    layers_per_stage = [tot_layers // max_stages] * max_stages
-    if tot_layers % max_stages != 0:
-        for i in range(tot_layers % max_stages):
-            layers_per_stage[i] += 1
+        tot_layers = len(net_dict)
+        layers_per_stage = [tot_layers // max_stages] * max_stages
+        if tot_layers % max_stages != 0:
+            for i in range(tot_layers % max_stages):
+                layers_per_stage[i] += 1
 
-    net2 = copy.deepcopy(net_dict)
-    stage_idx = 0
-    def _get_available_layer_closest_to_start(net):
-        '''
-        Follows the flow of the model and returns the next layer that can be assigned a stage.
-        '''        
-        if net['start']['stage'] is None:
-            return 'start'
-        dst = net['start']['dst']['to']
-        while dst:
-            next_dst = []
-            for layer_name in dst:
-                if net[layer_name]['stage'] is None:
-                    return layer_name
-                next_dst.extend(net[layer_name]['dst']['to'])
-            dst = next_dst
-    c = 0
-    while stage_idx != max_stages:
-        c += 1
-        if c % 100 == 0:
-            layers_per_stage = [layers_per_stage[i] + 1 for i in range(max_stages)]
         stage_idx = 0
-        for key in net2.keys(): net2[key]['stage'] = None # setting all stages to None
-        while any([net2[key]['stage'] is None for key in net2.keys()]): # while there are layers that have not been assigned a stage
-            closest_layer = _get_available_layer_closest_to_start(net2) # get the next layer that can be assigned a stage
-            net2[closest_layer]['stage'] = stage_idx 
-            counter = 1
-            while stage_idx < max_stages - 1 and counter < layers_per_stage[stage_idx]: # assign the rest of the layers in the stage
-                # One-level look-ahead to see if there are any free connections, as we still need nodes linked to the same base structure
-                free_connections = []
-                layers_with_same_stage_idx = [layer for layer in net2.keys() if net2[layer]['stage'] == stage_idx]
-                for layer in layers_with_same_stage_idx:
-                    for dst in net2[layer]['dst']['to'] + net2[layer]['rcv']['src']:
-                        if net2[dst]['stage'] is None:
-                            free_connections.append(dst)
-                if not free_connections:
-                    break
-                else: # Choose next layer at random
-                    closest_layer = free_connections[torch.randint(0, len(free_connections), (1,)).item()]
-                    free_connections.remove(closest_layer)
-                    net2[closest_layer]['stage'] = stage_idx
-                    counter += 1
-            stage_idx += 1
-    return net2
+        def _get_available_layer_closest_to_start(net):
+            '''
+            Follows the flow of the model and returns the next layer that can be assigned a stage.
+            '''        
+            if net['start']['stage'] is None:
+                return 'start'
+            dst = net['start']['dst']['to']
+            while dst:
+                next_dst = []
+                for layer_name in dst:
+                    if net[layer_name]['stage'] is None:
+                        return layer_name
+                    next_dst.extend(net[layer_name]['dst']['to'])
+                dst = next_dst
+        c = 0
+        while stage_idx != max_stages:
+            c += 1
+            if c % 100 == 0:
+                layers_per_stage = [layers_per_stage[i] + 1 for i in range(max_stages)]
+            stage_idx = 0
+            for key in net_dict.keys(): net_dict[key]['stage'] = None # setting all stages to None
+            while any([net_dict[key]['stage'] is None for key in net_dict.keys()]): # while there are layers that have not been assigned a stage
+                closest_layer = _get_available_layer_closest_to_start(net_dict) # get the next layer that can be assigned a stage
+                net_dict[closest_layer]['stage'] = stage_idx 
+                counter = 1
+                while stage_idx < max_stages - 1 and counter < layers_per_stage[stage_idx]: # assign the rest of the layers in the stage
+                    # One-level look-ahead to see if there are any free connections, as we still need nodes linked to the same base structure
+                    free_connections = []
+                    layers_with_same_stage_idx = [layer for layer in net_dict.keys() if net_dict[layer]['stage'] == stage_idx]
+                    for layer in layers_with_same_stage_idx:
+                        for dst in net_dict[layer]['dst']['to'] + net_dict[layer]['rcv']['src']:
+                            if net_dict[dst]['stage'] is None:
+                                free_connections.append(dst)
+                    if not free_connections:
+                        break
+                    else: # Choose next layer at random
+                        closest_layer = free_connections[torch.randint(0, len(free_connections), (1,)).item()]
+                        free_connections.remove(closest_layer)
+                        net_dict[closest_layer]['stage'] = stage_idx
+                        counter += 1
+                stage_idx += 1
+    
+        net3 = {key: net_dict[key]['stage'] for key in net_dict.keys()}
+        
+    net3 = utils.broadcast_dict(d=net3, src=0)
+    for key in net_dict.keys(): net_dict[key]['stage'] = net3[key]
+    return net_dict
 
 def get_model_dict(config):
     model = {}
@@ -288,7 +298,7 @@ def get_model_dict(config):
                 'callable': {'object': AttentionHead, 'settings': {'config': config, 'head_index': head_idx}},
                 'dst': {'to': [f'block_{blk_idx}_combine_heads']},
                 'rcv': {'src': [f'block_{blk_idx}_partA'], 'strategy': None},
-                'stage': 0,
+                'stage': head_idx+1,
                 'num_layer_shards': 1,
             }
 
@@ -297,7 +307,7 @@ def get_model_dict(config):
             'callable': {'object': CombineHeadsBlock, 'settings': {'config': config}},
             'dst': {'to': [f'block_{blk_idx}_partC']},
             'rcv': {'src': [f'block_{blk_idx}_head_{head_idx}' for head_idx in range(config.n_head)]+[f'block_{blk_idx}_partA'], 'strategy': combine_heads},
-            'stage': 0,
+            'stage': 1,
             'num_layer_shards': 1,
         }
 
@@ -306,7 +316,7 @@ def get_model_dict(config):
             'callable': {'object': LayerNormAndMLPBlock, 'settings': {'config': config}},
             'dst': {'to': [f'block_{blk_idx+1}_partA'] if blk_idx + 1 < config.n_layer else ['ln_f']},
             'rcv': {'src': [f'block_{blk_idx}_combine_heads'], 'strategy': None},
-            'stage': 0,
+            'stage': 3,
             'num_layer_shards': 1,
         }
 
@@ -315,7 +325,7 @@ def get_model_dict(config):
         'callable': {'object': LNFLayer, 'settings': {'config': config}},
         'dst': {'to': ['finish']},
         'rcv': {'src': [f'block_{config.n_layer - 1}_partC'], 'strategy': None},
-        'stage': 0,
+        'stage': 4,
         'num_layer_shards': 1,
     }
 
@@ -324,9 +334,13 @@ def get_model_dict(config):
         'callable': {'object': LMHeadLayer, 'settings': {'config': config}},
         'dst': {'to': []},
         'rcv': {'src': ['ln_f'], 'strategy': None},
-        'stage': 0,
+        'stage': 5,
         'num_layer_shards': 1,
     }
+    
+    # set every stage to 0
+    for key in model.keys():
+        model[key]['stage'] = 0
 
     return set_stage(model, tot_stages)
 
@@ -418,23 +432,23 @@ class GPTModelFromDict(nn.Module):
 
 
 
-if __name__ == '__main__':
-    CONFIG = GPTConfig(
-        num_stages=6,
-        block_size=256,
-        vocab_size=0,
-        n_layer=1,
-        n_head=2,
-        n_embd=384,
-        dropout=0.2,
-        bias=True
-    )
-    model = get_model_dict(CONFIG)
+# if __name__ == '__main__':
+#     CONFIG = GPTConfig(
+#         num_stages=6,
+#         block_size=256,
+#         vocab_size=0,
+#         n_layer=1,
+#         n_head=2,
+#         n_embd=384,
+#         dropout=0.2,
+#         bias=True
+#     )
+#     model = get_model_dict(CONFIG)
     
-    # Example of usage
-    try:
-        ordered_layers = resolve_layer_dependencies(model)
-        print("Model connections are set up correctly.")
-        print("Order of layers for execution:", ordered_layers)
-    except ValueError as e:
-        print("Error in model connections:", e)
+#     # Example of usage
+#     try:
+#         ordered_layers = resolve_layer_dependencies(model)
+#         print("Model connections are set up correctly.")
+#         print("Order of layers for execution:", ordered_layers)
+#     except ValueError as e:
+#         print("Error in model connections:", e)

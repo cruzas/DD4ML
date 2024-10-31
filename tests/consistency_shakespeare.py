@@ -12,33 +12,24 @@ from pmw.parallelized_model import ParallelizedModel
 from pmw.model_handler import *
 import utils
 
+##########
+# TODO: REMOVE AFTER
+import warnings
+warnings.filterwarnings("ignore")
+#########
 
-block_size = 256
 
-CONFIG = GPTConfig(
-    num_stages=6,
-    block_size=256,
-    vocab_size=0,
-    n_layer=1,
-    n_head=2,
-    n_embd=384,
-    dropout=0.2,
-    bias=True
-)
-model_dict = get_model_dict(CONFIG)
-for layer_name, layer_info in model_dict.items():
-    print(f"{layer_name}")
-    print(f"  Destinations: {layer_info['dst']['to']}")
-    print(f"  Stage: {layer_info['stage']}")
-    print()  # Blank line for readability
-
-stages = set()
-for key in model_dict.keys():
-    stages.add(model_dict[key]['stage'])
+block_size=256
+vocab_size=0
+n_layer=1
+n_head=2
+n_embd=384
+dropout=0.2
+bias=True
     
 num_subdomains = 1
 num_replicas_per_subdomain = 1
-num_stages = len(stages)
+num_stages = 6
 num_shards = 1
 TEST_ACCURACY = False
 
@@ -65,14 +56,14 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
     train_dataset_par, test_dataset_par, tokenizer = load_shakespeare(train_split=0.8, block_size=block_size)
     
     config = GPTConfig(
-        num_stages=CONFIG.num_stages,
-        block_size=CONFIG.block_size,
+        num_stages=num_stages,
+        block_size=block_size,
         vocab_size=tokenizer.vocab_size,
-        n_layer=CONFIG.n_layer,
-        n_head=CONFIG.n_head,
-        n_embd=CONFIG.n_embd,
-        dropout=CONFIG.dropout,
-        bias=CONFIG.bias
+        n_layer=n_layer,
+        n_head=n_head,
+        n_embd=n_embd,
+        dropout=dropout,
+        bias=bias
     )
 
     def criterion(outputs, targets):
@@ -89,7 +80,8 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
         for key in model_dict.keys():
             model_dict[key]['stage'] = 0
     model_handler = ModelHandler(model_dict, num_subdomains, num_replicas_per_subdomain, available_ranks=None)
-
+    # print the stages of the model
+    print(f'(rank {rank}) Model stage_list: {model_handler.stage_list}\n')
     torch.manual_seed(0)
     train_loader = GeneralizedDistributedDataLoader(model_handler=model_handler, dataset=train_dataset_par, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
     torch.manual_seed(0)
@@ -237,3 +229,4 @@ if __name__ == '__main__':
         WORLD_SIZE = num_subdomains*num_replicas_per_subdomain*num_stages*num_shards
         mp.spawn(main, args=(MASTER_ADDR, MASTER_PORT, WORLD_SIZE),
                  nprocs=WORLD_SIZE, join=True)
+        

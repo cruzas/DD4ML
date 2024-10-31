@@ -191,7 +191,13 @@ def list_flattener(l):
     while any(isinstance(i, list) for i in l):
         l = [item for sublist in l for item in sublist]
     return l
-    
+
+def broadcast_dict(d, src, group=None):
+    l = [d]
+    dist.broadcast_object_list(l, src=src, group=group)
+    n = l[0]    
+    return n
+
 def all_gather_dict(local_dict, group=None):
     """
     Gather dictionaries from all ranks and combine them into a list where each entry

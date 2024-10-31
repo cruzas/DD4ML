@@ -27,6 +27,8 @@ class WeightParallelizedSubdomain(BaseModel):
         self.sharded_layers = []
         self.connector_symbol = '|~|~|'
         # make sure that in the model_handler there is no connector_symbol in the layer names
+        if self.DEBUG:
+            print(f'(WeightParallelizedSubdomain INIT) rank={self.rank}) Layer order: {self.stage_data["layers"]}')
         for layer_name in self.stage_data['layers']:
             if self.connector_symbol in layer_name:
                 raise ValueError(f"Layer name {layer_name} contains the connector symbol {self.connector_symbol}. This is not allowed.")
@@ -91,7 +93,7 @@ class WeightParallelizedSubdomain(BaseModel):
                     if chunk_id == 0:
                         self.inputs['start'+self.connector_symbol+'start'] = [None]*num_chunks
                     self.inputs['start'+self.connector_symbol+'start'][chunk_id] = x
-                for src_name in self.model_handler.net_dict[layer_name]['rcv']['src']:
+                for src_name in self.model_handler.net_dict[layer_name]['fwd_rcv']['src']:
                     current_layer_stage = self.model_handler.net_dict[layer_name]['stage']
                     src_layer_stage = self.model_handler.net_dict[src_name]['stage']
                     key = layer_name+self.connector_symbol+src_name
@@ -118,9 +120,13 @@ class WeightParallelizedSubdomain(BaseModel):
                     x = self.inputs[layer_name+self.connector_symbol+input_name][chunk_id]
                 else:
                     x = strategy_in(*[self.inputs[layer_name+self.connector_symbol+src_name][chunk_id] for src_name in input_list])
-                out = self.sharded_layers[i].forward(x)
+                try:
+                    out = self.sharded_layers[i].forward(x)
+                except Exception as e:
+                    print(f'Error in layer {layer_name}: shapes in tuple x are: {list(x[0].shape)}, {list(x[1].shape)}, {list(x[2].shape)}')
+                    raise e
                 
-                if isinstance(out, list) and len(self.model_handler.net_dict[layer_name]['dst']['to']) != len(out):
+                if isinstance(out, list) and len(self.model_handler.net_dict[layer_name]['fwd_dst']['to']) != len(out):
                     raise ValueError(f"Output of layer {layer_name} is a list of torch.Tensor with length different from the number of destination layers")
                 elif not isinstance(out, torch.Tensor) and not isinstance(out, list):
                     raise TypeError(f"Output of the callable object with label {layer_name} is of type {type(out)}. Only torch.Tensor or List (of torch.Tensor) is allowed.")
@@ -130,7 +136,7 @@ class WeightParallelizedSubdomain(BaseModel):
                         self.outputs['finish'] = [None]*num_chunks
                     self.outputs['finish'][chunk_id] = out.to(self.tensor_device) 
 
-                for dst_idx, dst_name in enumerate(self.model_handler.net_dict[layer_name]['dst']['to']):
+                for dst_idx, dst_name in enumerate(self.model_handler.net_dict[layer_name]['fwd_dst']['to']):
                     dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
                     dst_rank = dst_ranks[0] # TODO: maybe improve send/rcv when tensor sharding is implemented
                     key = layer_name+self.connector_symbol+dst_name 
@@ -167,28 +173,7 @@ class WeightParallelizedSubdomain(BaseModel):
         return self.outputs['finish'] if self.model_handler.is_last_stage() else [True]
 
     
-    # def backward_setup(self):
-    #     self.DEBUG = True
-    #     for i, consecutive_block in enumerate(reversed(self.consec_layers)):
-    #         bottom = True if 'finish' in consecutive_block else False
-    #         if bottom: # End of the pipeline
-    #             rcv_dict = {}
-    #             for name, inputs in self.inputs.items():
-    #                 _, rcv_name = name.split(self.connector_symbol)
-    #                 rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
-    #                 assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
-    #                 if self.rank != rcv_ranks[0] and any([element in name for element in consecutive_block]):
-    #                     reverse_name = self.connector_symbol.join(reversed(name.split(self.connector_symbol)))#+self.connector_symbol+'consec_block_'+str(i)
-    #                     if self.DEBUG:
-    #                         print(f'(BWD rank={self.rank}) Layer {_} sending to rank {rcv_ranks[0]}')
-                        
-    #                     rcv_dict.setdefault(rcv_ranks[0], []).append(name)
-    #         print(f'RANK {self.rank} rcv_dict: {rcv_dict}')
-    #         gathered_dicts = utils.all_gather_dict(rcv_dict, group=self.model_handler.get_replica_group())
-    #         print('asd')
-    
     def backward(self, loss=None, chunk_id=0, is_in_pipeline=False):
-        self.DEBUG = True
         if not is_in_pipeline: # Not in a pipeline - subdomain independent backward (no communication)
             for chunk_id in range(len(self.outputs[list(self.outputs.keys())[0]])):
                 if self.model_handler.is_last_stage(): # End of the pipeline
