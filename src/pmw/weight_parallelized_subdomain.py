@@ -50,6 +50,7 @@ class WeightParallelizedSubdomain(BaseModel):
         return [param for layer in self.sharded_layers for param in layer.parameters()]
 
     def forward(self, x=None, num_chunks=None, num_samples_in_chunk=None, chunk_id=None, is_in_pipeline=False):
+        self.DEBUG=False
         empty_at_the_end = []
         if not is_in_pipeline:
             for chunk_id in range(len(self.outputs[list(self.outputs.keys())[0]])):
@@ -123,8 +124,10 @@ class WeightParallelizedSubdomain(BaseModel):
                 try:
                     out = self.sharded_layers[i].forward(x)
                 except Exception as e:
-                    print(f'Error in layer {layer_name}: shapes in tuple x are: {list(x[0].shape)}, {list(x[1].shape)}, {list(x[2].shape)}')
-                    raise e
+                    if strategy_in is None:
+                        raise ValueError(f"Error {e} in layer {layer_name} during the forward pass.")
+                    else:
+                        raise ValueError(f"Error {e} in layer {layer_name} during the forward pass. Are you sure that the strategy function takes inputs in the correct order?")
                 
                 if isinstance(out, list) and len(self.model_handler.net_dict[layer_name]['fwd_dst']['to']) != len(out):
                     raise ValueError(f"Output of layer {layer_name} is a list of torch.Tensor with length different from the number of destination layers")
@@ -198,68 +201,74 @@ class WeightParallelizedSubdomain(BaseModel):
         else:        
             for i, consecutive_block in enumerate(reversed(self.consec_layers)):
                 bottom = True if 'finish' in consecutive_block else False
-
                 if bottom: # End of the pipeline
-                    loss.backward(retain_graph=True)
-                    for name, inputs in self.inputs.items():
-                        _, rcv_name = name.split(self.connector_symbol)
-                        rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
-                        assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
-                        # Check if this block of consecutive layers is linked to "name"
-                        # I.e. check that an external layer is actually connected to a layer in our current block
-                        # (NOTE: this is to allow to have independent non consecutive blocks of layers on the same stage)
-                        if self.rank != rcv_ranks[0] and any([element in name for element in consecutive_block]):
-                            reverse_name = self.connector_symbol.join(reversed(name.split(self.connector_symbol)))#+self.connector_symbol+'consec_block_'+str(i)
-                            if chunk_id == 0:
-                                self.grad_outputs[reverse_name] = [None]*len(inputs)
-                            self.grad_outputs[reverse_name][chunk_id] = torch.autograd.grad(outputs=loss, inputs=inputs[chunk_id], retain_graph=True)[0]
-                            if self.setup_phase:
-                                if self.DEBUG:
-                                    print(f'(BWD rank={self.rank}) Layer {name} sending to rank {rcv_ranks[0]} shape: {self.grad_outputs[reverse_name][chunk_id].shape}')
-                                utils.send_shape(shape=self.grad_outputs[reverse_name][chunk_id].shape, dst=rcv_ranks[0], device=self.backend_device())
-                                if self.DEBUG:
-                                    print(f'(BWD rank={self.rank}) Layer {name} sent to rank {rcv_ranks[0]}')
-                            dist.send(tensor=self.grad_outputs[reverse_name][chunk_id].to(self.backend_device()), dst=rcv_ranks[0])  
-                else:
-                    for name, outputs in self.outputs.items():
-                        if any([element in name for element in consecutive_block]):
-                            _, rcv_name = name.split(self.connector_symbol)
-                            rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
-                            assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
-                            if self.rank != rcv_ranks[0]:
+                    if i == 0: loss.backward(retain_graph=True)
+                    for current_layer in reversed(consecutive_block):
+                        dst_names = [name for name in self.model_handler.net_dict[current_layer]['bwd_dst']['to']]
+                        for dst_name in dst_names:
+                            dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
+                            assert len(dst_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                            # Check if this block of consecutive layers is linked to "name"
+                            # I.e. check that an external layer is actually connected to a layer in our current block
+                            # (NOTE: this is to allow to have independent non consecutive blocks of layers on the same stage)
+                            if self.rank != dst_ranks[0] and any([element in current_layer for element in consecutive_block]):
+                                inputs = self.inputs[current_layer + self.connector_symbol + dst_name]
+                                reverse_name = dst_name + self.connector_symbol + current_layer
+                                if chunk_id == 0:
+                                    self.grad_outputs[reverse_name] = [None]*len(inputs)
+                                self.grad_outputs[reverse_name][chunk_id] = torch.autograd.grad(outputs=loss, inputs=inputs[chunk_id], retain_graph=True)[0]
                                 if self.setup_phase:
                                     if self.DEBUG:
-                                        print(f'(BWD rank={self.rank}) Layer {name} waiting to receive from rank {rcv_ranks[0]} the shape')
-                                    rcv_shape = utils.receive_shape(src=rcv_ranks[0], device=self.backend_device())
+                                        print(f'(BWD rank={self.rank}) Layer {current_layer} sending to rank {dst_ranks[0]} shape: {self.grad_outputs[reverse_name][chunk_id].shape}')
+                                    utils.send_shape(shape=self.grad_outputs[reverse_name][chunk_id].shape, dst=dst_ranks[0], device=self.backend_device())
                                     if self.DEBUG:
-                                        print(f'(BWD rank={self.rank}) Layer {name} received from rank {rcv_ranks[0]} shape {rcv_shape}')
-                                    self.backward_shapes[name] = lambda z, temp_shape=copy.deepcopy(list(rcv_shape)[1:]): [z] + temp_shape
-                                grad_output = torch.empty(self.backward_shapes[name](outputs[chunk_id].shape[0]), device=self.backend_device(), requires_grad=True)
-                                dist.recv(tensor=grad_output, src=rcv_ranks[0])
-                                grad_output = grad_output.to(self.tensor_device).detach()
-                                if chunk_id == 0 or name not in self.grad_outputs.keys() or len(self.grad_outputs[name]) != len(self.outputs[name]):
-                                    self.grad_outputs[name] = [None]*len(self.outputs[name])    
-                                self.grad_outputs[name][chunk_id] = grad_output
-                                if outputs[chunk_id].requires_grad:
-                                    outputs[chunk_id].backward(grad_output, retain_graph=True)
+                                        print(f'(BWD rank={self.rank}) Layer {current_layer} sent to rank {dst_ranks[0]}')
+                                dist.send(tensor=self.grad_outputs[reverse_name][chunk_id].to(self.backend_device()), dst=dst_ranks[0])  
+                else:
+                    for current_layer in reversed(consecutive_block):
+                        rcv_names = [name for name in self.model_handler.net_dict[current_layer]['bwd_rcv']['src']]
+                        for rcv_name in rcv_names:
+                            key = current_layer + self.connector_symbol + rcv_name
+                            if any([element in current_layer for element in consecutive_block]):
+                                rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
+                                assert len(rcv_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                                if self.rank != rcv_ranks[0]:
+                                    outputs = self.outputs[key]
+                                    if self.setup_phase:
+                                        if self.DEBUG:
+                                            print(f'(BWD rank={self.rank}) Layer {current_layer} waiting to receive from rank {rcv_ranks[0]} the shape')
+                                        rcv_shape = utils.receive_shape(src=rcv_ranks[0], device=self.backend_device())
+                                        if self.DEBUG:
+                                            print(f'(BWD rank={self.rank}) Layer {current_layer} received from rank {rcv_ranks[0]} shape {rcv_shape}')
+                                        self.backward_shapes[key] = lambda z, temp_shape=copy.deepcopy(list(rcv_shape)[1:]): [z] + temp_shape
+                                    grad_output = torch.empty(self.backward_shapes[key](outputs[chunk_id].shape[0]), device=self.backend_device(), requires_grad=True)
+                                    dist.recv(tensor=grad_output, src=rcv_ranks[0])
+                                    grad_output = grad_output.to(self.tensor_device).detach()
+                                    if chunk_id == 0 or key not in self.grad_outputs.keys() or len(self.grad_outputs[key]) != len(outputs):
+                                        self.grad_outputs[key] = [None]*len(outputs)    
+                                    self.grad_outputs[key][chunk_id] = grad_output
+                                    if outputs[chunk_id].requires_grad:
+                                        outputs[chunk_id].backward(grad_output, retain_graph=True)
 
                     # Collect all outputs and all gradients into one tensor each
                     all_outputs = [outputs[chunk_id] for key, outputs in self.outputs.items() if any([element in key for element in consecutive_block])]
                     all_grads = [self.grad_outputs[key][chunk_id] for key in self.outputs.keys() if any([element in key for element in consecutive_block])]
-                    for name, inputs in self.inputs.items():
-                        _, src_name = name.split(self.connector_symbol)
-                        src_ranks = self.model_handler.layer_name_to_ranks(src_name)
-                        assert len(src_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
-                        if self.rank != src_ranks[0] and any([element in name for element in consecutive_block]):
-                            grad_output = torch.autograd.grad(outputs=all_outputs, inputs=inputs[chunk_id], grad_outputs=all_grads, retain_graph=True)[0]
-                            if self.setup_phase:
-                                if self.DEBUG:
-                                    print(f'(BWD rank={self.rank}) Layer {name} sending to rank {src_ranks[0]} shape: {grad_output.shape}')
-                                utils.send_shape(shape=grad_output.shape, dst=src_ranks[0], device=self.backend_device())
-                                if self.DEBUG:
-                                    print(f'(BWD rank={self.rank}) Layer {name} sent shape to rank {src_ranks[0]}')
-                            dist.send(tensor=grad_output.to(self.backend_device()), dst=src_ranks[0]) 
-            # assert self.outputs.keys() == self.grad_outputs.keys(), "The keys of the outputs and grad_outputs dictionaries are not the same"
+                    for current_layer in reversed(consecutive_block):
+                        dst_names = [name for name in self.model_handler.net_dict[current_layer]['bwd_dst']['to']]
+                        for dst_name in dst_names:
+                            
+                            dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
+                            assert len(dst_ranks) == 1, "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                            if self.rank != dst_ranks[0] and any([element in current_layer for element in consecutive_block]):
+                                inputs = self.inputs[current_layer + self.connector_symbol + dst_name]
+                                grad_output = torch.autograd.grad(outputs=all_outputs, inputs=inputs[chunk_id], grad_outputs=all_grads, retain_graph=True)[0]
+                                if self.setup_phase:
+                                    if self.DEBUG:
+                                        print(f'(BWD rank={self.rank}) Layer {current_layer} sending to rank {dst_ranks[0]} shape: {grad_output.shape}')
+                                    utils.send_shape(shape=grad_output.shape, dst=dst_ranks[0], device=self.backend_device())
+                                    if self.DEBUG:
+                                        print(f'(BWD rank={self.rank}) Layer {current_layer} sent shape to rank {dst_ranks[0]}')
+                                dist.send(tensor=grad_output.to(self.backend_device()), dst=dst_ranks[0]) 
 
     def grad(self):
         # TODO: Implement sharded_layers.parameters()
