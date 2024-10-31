@@ -29,7 +29,7 @@ bias=True
     
 num_subdomains = 1
 num_replicas_per_subdomain = 1
-num_stages = 6
+num_stages = 9
 num_shards = 1
 TEST_ACCURACY = False
 
