@@ -46,12 +46,12 @@ def resolve_layer_dependencies(model):
     incoming_edges_count = {layer: len(srcs) for layer, srcs in dependencies.items()}
 
     # Start with nodes with no incoming edges (no dependencies)
-    to_process = deque([layer for layer, count in incoming_edges_count.items() if count == 0])
+    to_process = [layer for layer, count in incoming_edges_count.items() if count == 0]
     ordered_layers = []
     
     # Perform topological sort
     while to_process:
-        layer = to_process.popleft()
+        layer = to_process.pop(0)  # Remove the first element, similar to popleft()
         ordered_layers.append(layer)
         
         # Reduce incoming edges for each dependent layer
@@ -66,12 +66,12 @@ def resolve_layer_dependencies(model):
     # Reorder `dst['to']` and `rcv['src']` based on the topological sort
     layer_position = {layer: pos for pos, layer in enumerate(ordered_layers)}
     for layer, info in model.items():
-        # Sort `dst['to']` based on order in the topological sort
-        info['dst']['to'].sort(key=lambda x: layer_position[x])
-        # Sort `rcv['src']` based on order in the topological sort
-        info['rcv']['src'].sort(key=lambda x: layer_position[x])
-
+        info['fwd_dst'] = {'to': copy.deepcopy(info['dst']['to'])}
+        info['fwd_rcv'] = {'src': copy.deepcopy(info['rcv']['src'])}
+        info['fwd_dst']['to'].sort(key=lambda x: layer_position[x])
+        info['fwd_rcv']['src'].sort(key=lambda x: layer_position[x])
     return model
+
 
 def preprocessing(batch):
     # flatten the batch
@@ -86,23 +86,30 @@ def average_fun(input1, input2):
 class ModelHandler():
     def __init__(self, net_dict, num_subdomains, num_replicas_per_subdomain, available_ranks=None):
         # TODO: Add a security check to ensure that the network has valid "to", "src", and stage numbers
-        self.net_dict = resolve_layer_dependencies(net_dict)
-        self.num_subdomains = num_subdomains
-        self.num_replicas_per_subdomain = num_replicas_per_subdomain
-        self.tot_replicas = num_subdomains*num_replicas_per_subdomain
         self.available_ranks = sorted(available_ranks) if available_ranks is not None else list(range(dist.get_world_size()))
         self.global_model_group = dist.new_group(self.available_ranks, use_local_synchronization=True)
         self.rank = dist.get_rank()
+        self.num_subdomains = num_subdomains
+        self.num_replicas_per_subdomain = num_replicas_per_subdomain
+        self.tot_replicas = num_subdomains*num_replicas_per_subdomain
         
-        self._validate_network()
-        self.organized_layers, self.num_ranks_per_model = self._organize_layers()
-        self.stage_list = self._get_stage_list()
-        self.num_stages = len(self.stage_list)
+        dicti = {}
+        if dist.get_rank() == 0:
+            self.net_dict = resolve_layer_dependencies(net_dict)
+            self._validate_network()
+            self.organized_layers, self.num_ranks_per_model = self._organize_layers() # maybe not needed
+            self.stage_list = self._get_stage_list() # maybe not needed 
+            self.num_stages = len(self.stage_list) # maybe not needed
+            dicti = {'net_dict': self.net_dict, 'organized_layers': self.organized_layers, 'stage_list': self.stage_list, 'num_stages': self.num_stages, 'num_ranks_per_model': self.num_ranks_per_model}
+        dicti = utils.broadcast_dict(dicti, src=0)
+        for key, value in dicti.items():
+            setattr(self, key, value)
+            
         self.nn_structure = self.create_distributed_model_rank_structure()
         self.rank_to_position() # Initializes self.sd, self.rep, self.s, self.sh
         self._stage_data = self.stage_data()
         self.get_list_of_consecutive_layers()
-        self.net_dict = resolve_backward_dependencies(net_dict)
+        self.net_dict = resolve_backward_dependencies(self.net_dict)
     
 
     def __str__(self):
@@ -226,8 +233,7 @@ class ModelHandler():
             raise ValueError(
                 f"Number of available ranks ({len(self.available_ranks)}) is less than the required number of ranks ({self.num_subdomains*self.num_replicas_per_subdomain*self.num_ranks_per_model}).")
         elif len(self.available_ranks) > self.num_subdomains*self.num_replicas_per_subdomain*self.num_ranks_per_model:
-            print(
-                f"Warning: Number of available ranks ({len(self.available_ranks)}) is more than the required number of ranks ({self.num_subdomains*self.num_replicas_per_subdomain})... some will be idle.")
+            print(f"Warning: Number of available ranks ({len(self.available_ranks)}) is more than the required number of ranks ({self.num_subdomains*self.num_replicas_per_subdomain*self.num_ranks_per_model})... some will be idle.")
             self.available_ranks = self.available_ranks[:self.num_subdomains *
                                               self.num_replicas_per_subdomain*self.num_ranks_per_model]
 
@@ -353,7 +359,6 @@ class ModelHandler():
         return result
 
     def _validate_network(self):
-
         net = copy.deepcopy(self.net_dict)
         
         #first make sure that there are layers called 'start' and 'finish'
