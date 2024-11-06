@@ -37,9 +37,23 @@ class ParallelizedModel(BaseModel):
             self.sync_params()
     
     def save_state_dict(self, path):
-        # subdomain_state_dict = self.subdomain.weight_parallelized_model.subdomain.state_dict()
-        raise NotImplementedError("This function is not implemented yet.")
-        # TODO: Save to separate files in parallel and use a post processing on the main rank to merge them
+        params_dict = self.state_dict(dst_rank=0)
+        if self.rank == 0:
+            torch.save(params_dict, path)
+
+    def load_state_dict(self, path):
+        params_dict = torch.load(path)
+        local_layers = self.model_handler.stage_data()['layers']
+        local_dict = {}
+        for layer in local_layers:
+            for key in params_dict.keys():
+                if layer in key:
+                    if layer not in local_dict:
+                        local_dict[layer] = {}
+                    key2 = '.'.join(key.split('.')[1:])
+                    key2 = 'layer.' + key2
+                    local_dict[layer][key2] = params_dict[key]
+        self.subdomain.weight_parallelized_model.subdomain.load_state_dict(local_dict)
 
     def state_dict(self, dst_rank=0):
         def merger(gathered_state_dicts, replica_ranks):

@@ -24,12 +24,12 @@ vocab_size=0
 n_layer=1
 n_head=2
 n_embd=384
-dropout=0.2
+dropout=0.0
 bias=True
     
 num_subdomains = 1
 num_replicas_per_subdomain = 1
-num_stages = 9
+num_stages = 8
 num_shards = 1
 TEST_ACCURACY = False
 
@@ -39,7 +39,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
     utils.check_gpus_per_rank()
     # _________ Some parameters __________
     batch_size = 64 # NOTE: Setting a bach size lower than the dataset size will cause the two dataloader (sequential and parallel) to have different batches, hence different losses and accuracies
-    data_chunks_amount = 1
+    data_chunks_amount = 2
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     seed = 2456456
     torch.manual_seed(seed)
@@ -124,56 +124,59 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None):
             print(f'____________ EPOCH {epoch} ____________')
         loss_total_par = 0
         counter_par = 0
-        # Parallel training loop
-        for i, (x, y) in enumerate(train_loader):
-            dist.barrier()
-            # dist.barrier()
-            x = x.to(device)
-            y = y.to(device)
 
-            # Gather parallel model norm
-            par_optimizer.zero_grad()
-            counter_par += 1
-            torch.manual_seed(0)
-            par_loss = par_optimizer.step(closure=utils.closure(
-                x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True)) 
+        PARALLEL = False
+        if PARALLEL:
+            # Parallel training loop
+            for i, (x, y) in enumerate(train_loader):
+                dist.barrier()
+                # dist.barrier()
+                x = x.to(device)
+                y = y.to(device)
 
-            loss_total_par += par_loss
-            par_model.sync_params()
-            
-            if i > 10:
-                break
-            # print(f"(ACTUAL PARALLEL) {rank} param norm: {torch.norm(torch.cat([p.flatten() for p in par_model.parameters()]))}, grad norm: {torch.norm(torch.cat([p.grad.flatten() for p in par_model.parameters()]))}")
+                # Gather parallel model norm
+                par_optimizer.zero_grad()
+                counter_par += 1
+                torch.manual_seed(0)
+                par_loss = par_optimizer.step(closure=utils.closure(
+                    x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True)) 
 
-        if rank == 0:
-            print(f'Epoch {epoch}, Parallel avg loss: {loss_total_par/counter_par}')
-            
-        # Parallel testing loop
-        if TEST_ACCURACY:
-            with torch.no_grad():  # TODO: Make this work also with NCCL
-                correct = 0
-                total = 0
-                for data in test_loader:
-                    images, labels = data
-                    images, labels = images.to(device), labels.to(device)
-                    torch.manual_seed(0)
-                    closuree = utils.closure(
-                        images, labels, criterion, par_model, compute_grad=False, zero_grad=True, return_output=True)
-                    _, test_outputs = closuree()
+                loss_total_par += par_loss
+                par_model.sync_params()
+                
+                if i > 10:
+                    break
+                # print(f"(ACTUAL PARALLEL) {rank} param norm: {torch.norm(torch.cat([p.flatten() for p in par_model.parameters()]))}, grad norm: {torch.norm(torch.cat([p.grad.flatten() for p in par_model.parameters()]))}")
+
+            if rank == 0:
+                print(f'Epoch {epoch}, Parallel avg loss: {loss_total_par/counter_par}')
+                
+            # Parallel testing loop
+            if TEST_ACCURACY:
+                with torch.no_grad():  # TODO: Make this work also with NCCL
+                    correct = 0
+                    total = 0
+                    for data in test_loader:
+                        images, labels = data
+                        images, labels = images.to(device), labels.to(device)
+                        torch.manual_seed(0)
+                        closuree = utils.closure(
+                            images, labels, criterion, par_model, compute_grad=False, zero_grad=True, return_output=True)
+                        _, test_outputs = closuree()
+                        if model_handler.is_last_stage():
+                            test_outputs = torch.cat(test_outputs)
+                            _, predicted = torch.max(test_outputs.data, 1)
+                            total += labels.size(0)
+                            correct += (predicted ==
+                                        labels.to(predicted.device)).sum().item()
+
                     if model_handler.is_last_stage():
-                        test_outputs = torch.cat(test_outputs)
-                        _, predicted = torch.max(test_outputs.data, 1)
-                        total += labels.size(0)
-                        correct += (predicted ==
-                                    labels.to(predicted.device)).sum().item()
-
-                if model_handler.is_last_stage():
-                    accuracy = 100 * correct / total
-                    # here we dist all reduce the accuracy
-                    accuracy = torch.tensor(accuracy).to(device)
-                    dist.all_reduce(accuracy, op=dist.ReduceOp.SUM, group=model_handler.get_layers_copy_group(mode='global'))
-                    accuracy /= len(model_handler.get_stage_ranks(stage_name='last', mode='global'))
-                    print(f'Epoch {epoch}, Parallel accuracy: {accuracy}')
+                        accuracy = 100 * correct / total
+                        # here we dist all reduce the accuracy
+                        accuracy = torch.tensor(accuracy).to(device)
+                        dist.all_reduce(accuracy, op=dist.ReduceOp.SUM, group=model_handler.get_layers_copy_group(mode='global'))
+                        accuracy /= len(model_handler.get_stage_ranks(stage_name='last', mode='global'))
+                        print(f'Epoch {epoch}, Parallel accuracy: {accuracy}')
 
         # -------------------------------------- Sequential training loop --------------------------------------
         if rank == dst_rank:

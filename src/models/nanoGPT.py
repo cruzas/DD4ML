@@ -17,7 +17,7 @@ class GPTConfig:
     n_layer: int = 6        # Reduced layers for faster training
     n_head: int = 6         # Reduced heads
     n_embd: int = 384       # Reduced embedding size
-    dropout: float = 0.2
+    dropout: float = 0.0
     bias: bool = True       # Use bias in Linear and LayerNorm layers
 
 
@@ -70,10 +70,8 @@ class AttentionHead(nn.Module):
     def forward(self, x):
         return self.attn(x)
 
-
 def combine_heads(*inputs):
     return inputs
-
 
 class CombineHeadsBlock(nn.Module):
     def __init__(self, config):
@@ -200,11 +198,11 @@ def set_stage(net_dict, max_stages):
     '''
     Randomly assign stages to the layers in the model following the path such that the stages only have connected layers.
     '''
-    original_net_dict = copy.deepcopy(net_dict)
+    # original_net_dict = copy.deepcopy(net_dict)
     net3 = {}
     if dist.get_rank() == 0:
-        if max_stages < 1: return ValueError('Number of stages should be at least 1')
-        if max_stages > len(net_dict): return ValueError('Number of stages should be less than the number of layers in the model')
+        if max_stages < 1: raise ValueError('Number of stages should be at least 1')
+        if max_stages > len(net_dict): raise ValueError('Number of stages should be less than the number of layers in the model')
         for key in net_dict.keys(): net_dict[key]['stage'] = None if max_stages > 1 else 0
         if max_stages == 1: return net_dict
 
