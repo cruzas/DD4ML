@@ -37,6 +37,10 @@ class WeightParallelizedSubdomain(BaseModel):
             for layer_name in self.stage_data['layers']:
                 self.sharded_layers.append(ShardedLayer(layer_dict=self.model_handler.net_dict[layer_name], layer_ranks=self.stage_data['ranks']))
 
+    def load_state_dict(self, state_dict):
+        for layer_name in self.stage_data['layers']:
+            self.sharded_layers[self.stage_data['layers'].index(layer_name)].load_state_dict(state_dict[layer_name])
+
     def state_dict(self):
         ordered_dict = OrderedDict()
         temp = {layer_name: layer.state_dict() for layer_name, layer in zip(self.stage_data['layers'], self.sharded_layers)}
@@ -50,7 +54,7 @@ class WeightParallelizedSubdomain(BaseModel):
         return [param for layer in self.sharded_layers for param in layer.parameters()]
 
     def forward(self, x=None, num_chunks=None, num_samples_in_chunk=None, chunk_id=None, is_in_pipeline=False):
-        self.DEBUG=False
+        self.DEBUG = False
         empty_at_the_end = []
         if not is_in_pipeline:
             for chunk_id in range(len(self.outputs[list(self.outputs.keys())[0]])):

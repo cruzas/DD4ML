@@ -69,7 +69,7 @@ class APTS(torch.optim.Optimizer):
             if key not in ['params']:
                 self.param_groups[0][key] = getattr(self, key)
             
-    def subdomain_steps(self, final_subdomain_loss=None):
+    def subdomain_steps(self, final_subdomain_closure=None):
         """
         Perform subdomain steps.
 
@@ -93,7 +93,7 @@ class APTS(torch.optim.Optimizer):
                 self.subdomain_optimizer.zero_grad()
                 if i != self.max_subdomain_iter - 1:
                     outputs = self.model.subdomain_forward()
-                    losses = final_subdomain_loss(outputs) if self.model.model_handler.is_last_stage() else None
+                    losses = final_subdomain_closure(outputs) if self.model.model_handler.is_last_stage() else []
                     self.model.subdomain_backward(losses)
             self.model.sync_params(method='average') # if this is "sum" it doesn't work `\_(ツ)_/`
             self.update_param_group()
@@ -108,7 +108,7 @@ class APTS(torch.optim.Optimizer):
         if 'zero_timers' in dir(self.subdomain_optimizer):
             self.subdomain_optimizer.zero_timers()
 
-    def step(self, closure, final_subdomain_loss):
+    def step(self, closure, final_subdomain_closure):
         """
         Performs a single optimization step.
         Args:
@@ -130,7 +130,7 @@ class APTS(torch.optim.Optimizer):
         
         # Do subdomain steps
         tic = time.time()
-        self.subdomain_steps(final_subdomain_loss)
+        self.subdomain_steps(final_subdomain_closure)
             
         self.timings['precond'] += time.time() - tic
         with torch.no_grad():
