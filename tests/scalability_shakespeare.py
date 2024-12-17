@@ -1,3 +1,7 @@
+import os
+import sys
+import argparse
+import time 
 import torch
 import numpy as np
 import random
@@ -5,6 +9,9 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 from torchvision import datasets, transforms
+
+# Add src to path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src')) # Necessary on Daint
 
 from dataloaders import GeneralizedDistributedDataLoader
 from optimizers import APTS, TR

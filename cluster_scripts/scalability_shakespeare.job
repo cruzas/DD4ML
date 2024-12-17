@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --account=c24
-#SBATCH --time=00:30:00
+#SBATCH --time=00:10:00
 #SBATCH --ntasks-per-core=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
@@ -17,7 +17,7 @@ export NCCL_DEBUG=INFO
 export NCCL_IB_HCA=ipogif0
 export NCCL_IB_CUDA_SUPPORT=1
 
-RUNPATH=/scratch/snx3000/scruzale/ML_APTS/
+RUNPATH=/scratch/snx3000/scruzale/ML_APTS/tests/
 cd $RUNPATH || exit
 
 # Retrieve parameters from the command line
@@ -55,7 +55,10 @@ echo "Dropout: $dropout"
 echo "Learning rate: $learning_rate"
 
 # Run the training script
-python train.py \
+echo "Activating llms $(date)"
+source activate llms
+echo "Calling python script $(date)"
+srun python3 -u scalability_shakespeare.py \
     --trial $trial \
     --num_epochs $num_epochs \
     --num_subdomains $num_subdomains \
@@ -71,3 +74,4 @@ python train.py \
     --n_embd $n_embd \
     --dropout $dropout \
     --learning_rate $learning_rate
+echo "Test done $(date)"
