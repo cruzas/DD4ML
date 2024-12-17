@@ -15,10 +15,10 @@ DROPOUT=0.0
 LEARNING_RATE=0.01
 
 # Arrays of parameters that change
-TRIALS=(0 1 2)
-NUM_SUBDOMAINS_LIST=(2 4 8)
-NUM_REPLICAS_PER_SUBDOMAIN_LIST=(2 4 8)
-NUM_STAGES_LIST=(2 4 8)
+TRIALS=(0)
+NUM_SUBDOMAINS_LIST=(1)
+NUM_REPLICAS_PER_SUBDOMAIN_LIST=(1)
+NUM_STAGES_LIST=(2)
 BATCH_SIZES=(64)
 
 #!/bin/bash
@@ -55,6 +55,8 @@ submit_job() {
 
     # Calculate number of nodes
     nodes=$((num_subdomains * num_replicas_per_subdomain * num_stages))
+    
+    echo "Submitting job with $nodes nodes."
 
     sbatch --nodes="$nodes" \
            --job-name="$job_name" \
