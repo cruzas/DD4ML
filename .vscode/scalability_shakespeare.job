@@ -1,0 +1,73 @@
+#!/bin/bash
+#SBATCH --account=c24
+#SBATCH --time=00:30:00
+#SBATCH --ntasks-per-core=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --gres=gpu:1
+#SBATCH --hint=nomultithread
+#SBATCH --constraint=gpu
+#SBATCH --partition=debug
+#SBATCH --exclusive
+
+module load daint-gpu
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export NCCL_DEBUG=INFO
+export NCCL_IB_HCA=ipogif0
+export NCCL_IB_CUDA_SUPPORT=1
+
+RUNPATH=/scratch/snx3000/scruzale/ML_APTS/
+cd $RUNPATH || exit
+
+# Retrieve parameters from the command line
+trial=$1
+num_epochs=$2
+num_subdomains=$3
+num_replicas_per_subdomain=$4
+num_stages=$5
+seed=$6
+batch_size=$7
+data_chunks_amount=$8
+block_size=$9
+vocab_size=${10}
+n_layer=${11}
+n_head=${12}
+n_embd=${13}
+dropout=${14}
+learning_rate=${15}
+
+# Echo all of the above
+echo "Trial: $trial"
+echo "Number of epochs: $num_epochs"
+echo "Number of subdomains: $num_subdomains"
+echo "Number of replicas per subdomain: $num_replicas_per_subdomain"
+echo "Number of stages: $num_stages"
+echo "Seed: $seed"
+echo "Batch size: $batch_size"
+echo "Data chunks amount: $data_chunks_amount"
+echo "Block size: $block_size"
+echo "Vocab size: $vocab_size"
+echo "Number of layers: $n_layer"
+echo "Number of heads: $n_head"
+echo "Embedding size: $n_embd"
+echo "Dropout: $dropout"
+echo "Learning rate: $learning_rate"
+
+# Run the training script
+python train.py \
+    --trial $trial \
+    --num_epochs $num_epochs \
+    --num_subdomains $num_subdomains \
+    --num_replicas_per_subdomain $num_replicas_per_subdomain \
+    --num_stages $num_stages \
+    --seed $seed \
+    --batch_size $batch_size \
+    --data_chunks_amount $data_chunks_amount \
+    --block_size $block_size \
+    --vocab_size $vocab_size \
+    --n_layer $n_layer \
+    --n_head $n_head \
+    --n_embd $n_embd \
+    --dropout $dropout \
+    --learning_rate $learning_rate
