@@ -29,11 +29,14 @@ TEST_ACCURACY = True
 
 
 def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwargs):
-    trial = kwargs.get("trial", 0)
-    num_epochs = kwargs.get("num_epochs", 40)
+    # Scalability testing values & CSV file name relevant parameters
     num_subdomains = kwargs.get("num_subdomains", 1)
     num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 1)
     num_stages = kwargs.get("num_stages", 2)
+    trial = kwargs.get("trial", 0)
+    learning_rate = kwargs.get("learning_rate", 0.01)
+    # Other values
+    num_epochs = kwargs.get("num_epochs", 40)
     seed = kwargs.get("seed", 0)  # Default seed if not provided
     batch_size = kwargs.get("batch_size", 64)
     data_chunks_amount = kwargs.get("data_chunks_amount", 1)
@@ -43,7 +46,6 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     n_head = kwargs.get("n_head", 2)
     n_embd = kwargs.get("n_embd", 256)
     dropout = kwargs.get("dropout", 0.0)
-    learning_rate = kwargs.get("learning_rate", 0.01)
 
     utils.prepare_distributed_environment(
         rank, master_addr, master_port, world_size, is_cuda_enabled=True)
@@ -214,6 +216,9 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     # Save results to CSV
     if rank == 0:
         df_results = pd.DataFrame(epoch_results)
+        # Make CSV file name
+        csv_file_name = f"tshak_trial_{trial}_subdomains_{num_subdomains}_replicas_{num_replicas_per_subdomain}_stages_{num_stages}.csv"
+
         df_results.to_csv("training_results.csv", index=False)
         print("Results saved to 'training_results.csv'")
 
