@@ -148,10 +148,16 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         # Measure epoch time
         start_time = time.time()
 
+        # Make CSV file name
+        csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}.csv"
+        model_dict_file_name = csv_file_name.replace('.csv', '.pth')
+
         # Parallel training loop
+        model_saved = False
         for i, (x, y) in enumerate(train_loader):
             # Print progress in percentage rounded to two decimal places in the print using .2f
             if rank == 0:
+                progress = 100*(i/len(train_loader))
                 print(f"Progress: {100*(i/len(train_loader)):.2f}%")
 
             dist.barrier()
@@ -180,8 +186,20 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
             loss_total_par += par_loss
             par_model.sync_params()
 
-            if i > 9:
-                break
+            # Check if progress is a multiple of 10 or if it is the last iteration
+            if rank == 0 and progress > 50 and not model_saved:
+                # Print memory usage in GB
+                print(
+                    f"Memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
+                print(
+                    f"Memory cached: {torch.cuda.memory_reserved()/1e9:.2f} GB")
+
+                par_model.save_state_dict(model_dict_file_name)
+                model_saved = True
+
+            dist.barrier()
+            # if i > 9:
+            #     break
             # print(f"(ACTUAL PARALLEL) {rank} param norm: {torch.norm(torch.cat([p.flatten() for p in par_model.parameters()]))}, grad norm: {torch.norm(torch.cat([p.grad.flatten() for p in par_model.parameters()]))}")
 
         avg_loss = -1
@@ -229,26 +247,15 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
                         dist.send(tensor=accuracy, dst=0)
         else:
             accuracy = -1
-            
+        
         # Save epoch results
         if rank == 0:
             epoch_results.append(
                 {'epoch': epoch, 'time': epoch_time, 'loss': avg_loss, 'accuracy': accuracy})
-
-    # Make CSV file name
-    csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}.csv"
-
-    # Save results to CSV
-    if rank == 0:
-        df_results = pd.DataFrame(epoch_results)
-
-        df_results.to_csv(csv_file_name, index=False)
-        print(f"Results saved to {csv_file_name}")
-
-    # Make path file csv_file_name but with .pth instead of .csv
-    model_dict_file_name = csv_file_name.replace('.csv', '.pth')
-    par_model.save_state_dict(model_dict_file_name)
-
+            df_results = pd.DataFrame(epoch_results)
+            df_results.to_csv(csv_file_name, index=False)
+            print(f"Results saved to {csv_file_name}")
+        par_model.save_state_dict(model_dict_file_name)
 
 if __name__ == '__main__':
     if 1 == 1:
