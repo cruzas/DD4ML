@@ -209,13 +209,18 @@ def set_stage(net_dict, max_stages):
         for i, key in enumerate(net_dict.keys()): 
             net_dict[key]['stage'] = i
         return net_dict
+    elif max_stages == 1:
+        # all layers on the same stage
+        if dist.get_rank() == 0:
+            print("All layers on the same stage.")
+        for key in net_dict.keys(): net_dict[key]['stage'] = 0
+        return net_dict
     
     if dist.get_rank() == 0:
         if max_stages < 1: raise ValueError('Number of stages should be at least 1')
         if max_stages > len(net_dict): raise ValueError('Number of stages should be less than the number of layers in the model')
             
         for key in net_dict.keys(): net_dict[key]['stage'] = None if max_stages > 1 else 0
-        if max_stages == 1: return net_dict
 
         tot_layers = len(net_dict)
         layers_per_stage = [tot_layers // max_stages] * max_stages
