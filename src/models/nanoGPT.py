@@ -201,8 +201,19 @@ def set_stage(net_dict, max_stages):
     # original_net_dict = copy.deepcopy(net_dict)
     net3 = {}
     if dist.get_rank() == 0:
+        print(f"len dict: {len(net_dict)}, amount of stages {max_stages}")
+    if max_stages == len(net_dict):
+        # every layer on a different stage
+        if dist.get_rank() == 0:
+            print("Every layer on a different stage.")
+        for i, key in enumerate(net_dict.keys()): 
+            net_dict[key]['stage'] = i
+        return net_dict
+    
+    if dist.get_rank() == 0:
         if max_stages < 1: raise ValueError('Number of stages should be at least 1')
         if max_stages > len(net_dict): raise ValueError('Number of stages should be less than the number of layers in the model')
+            
         for key in net_dict.keys(): net_dict[key]['stage'] = None if max_stages > 1 else 0
         if max_stages == 1: return net_dict
 
@@ -256,7 +267,8 @@ def set_stage(net_dict, max_stages):
                 stage_idx += 1
     
         net3 = {key: net_dict[key]['stage'] for key in net_dict.keys()}
-        
+    
+    # TODO: make sure every rank gets the correct dictionary
     net3 = utils.broadcast_dict(d=net3, src=0)
     for key in net_dict.keys(): net_dict[key]['stage'] = net3[key]
     return net_dict
@@ -268,6 +280,7 @@ def get_model_dict(config):
     # TODO: this is for debugging. Put somewhere else.
     tot_stages = config.num_stages
 
+    # TOTAL LAYERS : 3+n_layer*(3+n_head) 
     # ----------------------------------------- Model Layers -----------------------------------------
     # Start layer (embedding and positional encoding)
     model['start'] = {

@@ -2,6 +2,7 @@ import os
 import sys
 import argparse
 import time 
+import pandas as pd 
 import torch
 import numpy as np
 import random
@@ -68,6 +69,9 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     rank = dist.get_rank() if dist.get_backend() == 'nccl' else rank
     train_dataset_par, test_dataset_par, tokenizer = load_shakespeare(
         train_split=0.8, block_size=block_size)
+
+    if rank == 0:
+        print(f"World size: {dist.get_world_size()}")
 
     config = GPTConfig(
         num_stages=num_stages,
@@ -262,6 +266,9 @@ if __name__ == '__main__':
 
         MASTER_ADDR = 'localhost'
         MASTER_PORT = '12345'
+        num_subdomains = 2
+        num_replicas_per_subdomain = 2
+        num_stages = 2 
         WORLD_SIZE = num_subdomains*num_replicas_per_subdomain*num_stages*num_shards
         mp.spawn(main, args=(MASTER_ADDR, MASTER_PORT, WORLD_SIZE),
                  nprocs=WORLD_SIZE, join=True)
