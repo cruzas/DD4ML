@@ -38,9 +38,9 @@ TEST_ACCURACY = False
 
 def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwargs):
     # Scalability testing values & CSV file name relevant parameters
-    num_subdomains = kwargs.get("num_subdomains", 1)
-    num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 1)
-    num_stages = kwargs.get("num_stages", 2)
+    num_subdomains = kwargs.get("num_subdomains", 2)
+    num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 2)
+    num_stages = kwargs.get("num_stages", 1)
     trial = kwargs.get("trial", 0)
     learning_rate = kwargs.get("learning_rate", 0.1)
     # Other values
@@ -270,8 +270,8 @@ if __name__ == '__main__':
         MASTER_ADDR = 'localhost'
         MASTER_PORT = '12345'
         num_subdomains = 1
-        num_replicas_per_subdomain = 1
-        num_stages = 2 
+        num_replicas_per_subdomain = 4
+        num_stages = 1 
         WORLD_SIZE = num_subdomains*num_replicas_per_subdomain*num_stages*num_shards
         mp.spawn(main, args=(MASTER_ADDR, MASTER_PORT, WORLD_SIZE),
                  nprocs=WORLD_SIZE, join=True)
