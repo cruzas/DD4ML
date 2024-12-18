@@ -272,7 +272,7 @@ class WeightParallelizedSubdomain(BaseModel):
                                     utils.send_shape(shape=grad_output.shape, dst=dst_ranks[0], device=self.backend_device())
                                     if self.DEBUG:
                                         print(f'(BWD rank={self.rank}) Layer {current_layer} sent shape to rank {dst_ranks[0]}')
-                                dist.send(tensor=grad_output.to(self.backend_device()), dst=dst_ranks[0]) 
+                                dist.send(tensor=grad_output.contiguous().to(self.backend_device()), dst=dst_ranks[0]) 
 
     def grad(self):
         # TODO: Implement sharded_layers.parameters()
