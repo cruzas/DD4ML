@@ -4,7 +4,7 @@ RUNPATH=/scratch/snx3000/scruzale/ML_APTS/
 cd $RUNPATH || exit
 
 # Fixed parameters
-NUM_EPOCHS=40
+NUM_EPOCHS=50
 DATA_CHUNKS_AMOUNT=1
 BLOCK_SIZE=256
 VOCAB_SIZE=0
@@ -16,10 +16,10 @@ LEARNING_RATE=0.1
 
 # Arrays of parameters that change
 TRIALS=(0)
-NUM_SUBDOMAINS_LIST=(1)
+NUM_SUBDOMAINS_LIST=(2)
 NUM_REPLICAS_PER_SUBDOMAIN_LIST=(1)
 NUM_STAGES_LIST=(18)
-BATCH_SIZES=(64)
+BATCH_SIZES=(512)
 
 #!/bin/bash
 
@@ -49,7 +49,7 @@ submit_job() {
 
     echo "Submitting job with trial=$trial, num_epochs=$num_epochs, num_subdomains=$num_subdomains, num_replicas_per_subdomain=$num_replicas_per_subdomain, num_stages=$num_stages, seed=$seed, batch_size=$batch_size."
 
-    job_name="trial_${trial}"
+    job_name="t_${trial}_ns_${num_subdomains}_nr_${num_replicas_per_subdomain}_st_${num_stages}_bs_${batch_size}"
     error_file="$LOG_DIR/${job_name}.err"
     output_file="$LOG_DIR/${job_name}.out"
 

@@ -138,7 +138,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
 
     # To track epoch results
     epoch_results = []
-    for epoch in range(num_epochs):
+    for epoch in range(0, num_epochs+1):
         dist.barrier()
         if rank == 0:
             print(f'____________ EPOCH {epoch} ____________')
@@ -150,14 +150,14 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
 
         # Parallel training loop
         for i, (x, y) in enumerate(train_loader):
+            # Print progress in percentage rounded to two decimal places in the print using .2f
+            if rank == 0:
+                print(f"Progress: {100*(i/len(train_loader)):.2f}%")
+
             dist.barrier()
             # dist.barrier()
             x = x.to(device)
             y = y.to(device)
-
-            # Gather parallel model norm
-            par_optimizer.zero_grad()
-            counter_par += 1
 
             def final_subdomain_closure(outputs, y=y):
                 y_chunks = y.chunk(len(outputs))
@@ -166,13 +166,21 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
                     loss.append(criterion(o, y_chunks[i]))
                 return loss
 
-            par_loss = par_optimizer.step(closure=utils.closure(
-                x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True),
-                final_subdomain_closure=final_subdomain_closure)
+            par_optimizer.zero_grad()
+            counter_par += 1
+            if epoch == 0:
+                closuree = utils.closure(x, y, criterion, par_model, data_chunks_amount=data_chunks_amount, compute_grad=False)
+                par_loss = closuree()
+                loss_total_par += par_loss
+            else:
+                par_loss = par_optimizer.step(closure=utils.closure(
+                    x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True),
+                    final_subdomain_closure=final_subdomain_closure)
 
             loss_total_par += par_loss
             par_model.sync_params()
-            if i > 10:
+
+            if i > 9:
                 break
             # print(f"(ACTUAL PARALLEL) {rank} param norm: {torch.norm(torch.cat([p.flatten() for p in par_model.parameters()]))}, grad norm: {torch.norm(torch.cat([p.grad.flatten() for p in par_model.parameters()]))}")
 
@@ -227,18 +235,23 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
             epoch_results.append(
                 {'epoch': epoch, 'time': epoch_time, 'loss': avg_loss, 'accuracy': accuracy})
 
+    # Make CSV file name
+    csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}.csv"
+
     # Save results to CSV
     if rank == 0:
         df_results = pd.DataFrame(epoch_results)
-        # Make CSV file name
-        csv_file_name = f"tshak_trial_{trial}_subdomains_{num_subdomains}_replicas_{num_replicas_per_subdomain}_stages_{num_stages}.csv"
 
-        df_results.to_csv("training_results.csv", index=False)
-        print("Results saved to 'training_results.csv'")
+        df_results.to_csv(csv_file_name, index=False)
+        print(f"Results saved to {csv_file_name}")
+
+    # Make path file csv_file_name but with .pth instead of .csv
+    model_dict_file_name = csv_file_name.replace('.csv', '.pth')
+    par_model.save_state_dict(model_dict_file_name)
 
 
 if __name__ == '__main__':
-    if 1 == 2:
+    if 1 == 1:
         parser = argparse.ArgumentParser(
             description="Test Script with Seed Argument")
         parser.add_argument("--trial", type=int, default=0)

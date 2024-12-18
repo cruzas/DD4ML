@@ -40,6 +40,7 @@ class ParallelizedModel(BaseModel):
         params_dict = self.state_dict(dst_rank=0)
         if self.rank == 0:
             torch.save(params_dict, path)
+            print("Saved par model to: ", path)
 
     def load_state_dict(self, path):
         params_dict = torch.load(path)
