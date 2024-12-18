@@ -42,17 +42,17 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 1)
     num_stages = kwargs.get("num_stages", 2)
     trial = kwargs.get("trial", 0)
-    learning_rate = kwargs.get("learning_rate", 0.01)
+    learning_rate = kwargs.get("learning_rate", 0.1)
     # Other values
     num_epochs = kwargs.get("num_epochs", 40)
-    seed = kwargs.get("seed", 0)  # Default seed if not provided
+    seed = kwargs.get("seed", 2456456)  # Default seed if not provided
     batch_size = kwargs.get("batch_size", 64)
-    data_chunks_amount = kwargs.get("data_chunks_amount", 1)
-    block_size = kwargs.get("block_size", 128)
+    data_chunks_amount = kwargs.get("data_chunks_amount", 2)
+    block_size = kwargs.get("block_size", 256)
     vocab_size = kwargs.get("vocab_size", 0)
-    n_layer = kwargs.get("n_layer", 6)
+    n_layer = kwargs.get("n_layer", 1)
     n_head = kwargs.get("n_head", 2)
-    n_embd = kwargs.get("n_embd", 256)
+    n_embd = kwargs.get("n_embd", 384)
     dropout = kwargs.get("dropout", 0.0)
 
     utils.prepare_distributed_environment(
