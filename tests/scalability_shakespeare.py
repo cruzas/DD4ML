@@ -34,9 +34,14 @@ bias = True
 # num_stages = 2
 num_shards = 1
 TEST_ACCURACY = False
-
+accuracy = -1
+total_hours_in_seconds = 12*60*60
+save_threshold_in_seconds = total_hours_in_seconds/2
 
 def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwargs):
+    # Keep track of total time elapsed
+    code_start_time = time.time()
+
     # Scalability testing values & CSV file name relevant parameters
     num_subdomains = kwargs.get("num_subdomains", 2)
     num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 2)
@@ -136,6 +141,10 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     par_optimizer = APTS(model=par_model, subdomain_optimizer=subdomain_optimizer, subdomain_optimizer_defaults={'lr': learning_rate, 'momentum': 0.9},
                          global_optimizer=TR, global_optimizer_defaults=glob_opt_params, lr=learning_rate, max_subdomain_iter=2, dogleg=True, APTS_in_data_sync_strategy='average', step_strategy='mean')
 
+    # Make CSV file name
+    csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}.csv"
+    model_dict_file_name = csv_file_name.replace('.csv', '.pth')
+
     # To track epoch results
     epoch_results = []
     for epoch in range(0, num_epochs+1):
@@ -146,19 +155,15 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         counter_par = 0
 
         # Measure epoch time
-        start_time = time.time()
-
-        # Make CSV file name
-        csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}.csv"
-        model_dict_file_name = csv_file_name.replace('.csv', '.pth')
+        epoch_start_time = time.time()
 
         # Parallel training loop
         model_saved = False
         for i, (x, y) in enumerate(train_loader):
             # Print progress in percentage rounded to two decimal places in the print using .2f
+            progress = 100*(i/len(train_loader))
             if rank == 0:
-                progress = 100*(i/len(train_loader))
-                print(f"Progress: {100*(i/len(train_loader)):.2f}%")
+                print(f"Progress: {progress:.2f}%")
 
             dist.barrier()
             # dist.barrier()
@@ -185,9 +190,12 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
 
             loss_total_par += par_loss
             par_model.sync_params()
+            
+            # Total code time elapsed
+            code_time_passed = time.time() - code_start_time
 
             # Check if progress is a multiple of 10 or if it is the last iteration
-            if rank == 0 and progress > 50 and not model_saved:
+            if progress > 50 and not model_saved:
                 # Print memory usage in GB
                 print(
                     f"Memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
@@ -196,7 +204,9 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
 
                 par_model.save_state_dict(model_dict_file_name)
                 model_saved = True
-
+            elif code_time_passed >= save_threshold_in_seconds and not model_saved:
+                par_model.save_state_dict(model_dict_file_name)
+                model_saved = True
             dist.barrier()
             # if i > 9:
             #     break
@@ -207,47 +217,10 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         if rank == 0:
             avg_loss = loss_total_par/counter_par
             # Measure elapsed time in seconds
-            epoch_time = time.time() - start_time
+            epoch_time = time.time() - epoch_start_time
             print(
                 f'Epoch {epoch}, Parallel avg loss: {avg_loss}, Time: {epoch_time}')
 
-        # Parallel testing loop
-        if TEST_ACCURACY:
-            with torch.no_grad():  # TODO: Make this work also with NCCL
-                correct = 0
-                total = 0
-                for data in test_loader:
-                    images, labels = data
-                    images, labels = images.to(device), labels.to(device)
-                    closuree = utils.closure(
-                        images, labels, criterion, par_model, compute_grad=False, zero_grad=True, return_output=True)
-                    _, test_outputs = closuree()
-                    if model_handler.is_last_stage():
-                        test_outputs = torch.cat(test_outputs)
-                        _, predicted = torch.max(test_outputs.data, 1)
-                        total += labels.size(0)
-                        correct += (predicted ==
-                                    labels.to(predicted.device)).sum().item()
-
-                if model_handler.is_last_stage():
-                    accuracy = 100 * correct / total
-                    # here we dist all reduce the accuracy
-                    accuracy = torch.tensor(accuracy).to(device)
-                    dist.all_reduce(accuracy, op=dist.ReduceOp.SUM,
-                                    group=model_handler.get_layers_copy_group(mode='global'))
-                    accuracy /= len(model_handler.get_stage_ranks(
-                        stage_name='last', mode='global'))
-                    print(f'Epoch {epoch}, Parallel accuracy: {accuracy}')
-
-                    last_stage_ranks = model_handler.get_stage_ranks(
-                        stage_name='last', mode='global')
-
-                    # Send the accuracy from last_stage_ranks[0] to rank 0
-                    if rank == last_stage_ranks[0]:
-                        dist.send(tensor=accuracy, dst=0)
-        else:
-            accuracy = -1
-        
         # Save epoch results
         if rank == 0:
             epoch_results.append(
@@ -256,6 +229,8 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
             df_results.to_csv(csv_file_name, index=False)
             print(f"Results saved to {csv_file_name}")
         par_model.save_state_dict(model_dict_file_name)
+        torch.cuda.empty_cache()
+
 
 if __name__ == '__main__':
     if 1 == 1:
