@@ -34,8 +34,8 @@ bias = True
 # num_stages = 2
 num_shards = 1
 TEST_ACCURACY = False
-accuracy = -1
-total_hours_in_seconds = 12*60*60
+hours = 5
+total_hours_in_seconds = hours*60*60
 save_threshold_in_seconds = total_hours_in_seconds/2
 
 def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwargs):
@@ -106,13 +106,12 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     model_handler = ModelHandler(
         model_dict, num_subdomains, num_replicas_per_subdomain, available_ranks=None)
     # print the stages of the model
-    print(f'(rank {rank}) Model stage_list: {model_handler.stage_list}\n')
+    if rank == 0:
+        print(f'(rank {rank}) Model stage_list: {model_handler.stage_list}\n')
     torch.manual_seed(seed)
     train_loader = GeneralizedDistributedDataLoader(
         model_handler=model_handler, dataset=train_dataset_par, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
     torch.manual_seed(seed)
-    test_loader = GeneralizedDistributedDataLoader(model_handler=model_handler, dataset=test_dataset_par, batch_size=len(
-        test_dataset_par), shuffle=False, num_workers=0, pin_memory=True)
 
     # Sharded first layer into [0,1] -> dataloader should upload batch to 0 only
     x_batch, _ = next(iter(train_loader))
@@ -143,11 +142,21 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
 
     # Make CSV file name
     csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}.csv"
-    model_dict_file_name = csv_file_name.replace('.csv', '.pth')
+    iter_csv_file_name = csv_file_name.replace('.csv', '_iter.csv')
+
+    # Compute number of iterations needed per epoch
+    num_iters_per_epoch = len(train_loader)
+    if rank == 0:
+        print("Number of iterations per epoch: ", num_iters_per_epoch)
 
     # To track epoch results
     epoch_results = []
+    iteration_results = []
+    num_iters = 0
+    training_start_time = time.time()
     for epoch in range(0, num_epochs+1):
+        model_dict_file_name = csv_file_name.replace('.csv', f'_epoch_{epoch}.pth')
+
         dist.barrier()
         if rank == 0:
             print(f'____________ EPOCH {epoch} ____________')
@@ -160,10 +169,12 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         # Parallel training loop
         model_saved = False
         for i, (x, y) in enumerate(train_loader):
+            iter_start_time = time.time()
+
             # Print progress in percentage rounded to two decimal places in the print using .2f
             progress = 100*(i/len(train_loader))
-            if rank == 0:
-                print(f"Progress: {progress:.2f}%")
+            # if rank == 0:
+            #     print(f"Progress: {progress:.2f}%")
 
             dist.barrier()
             # dist.barrier()
@@ -184,6 +195,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
                 par_loss = closuree()
                 loss_total_par += par_loss
             else:
+                num_iters += 1
                 par_loss = par_optimizer.step(closure=utils.closure(
                     x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True),
                     final_subdomain_closure=final_subdomain_closure)
@@ -191,16 +203,26 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
             loss_total_par += par_loss
             par_model.sync_params()
             
+            if rank == 0 and epoch > 0 and num_iters > 0 and num_iters % 50 == 0:
+                running_time = time.time() - training_start_time
+                # print(
+                #     f'Iteration {num_iters}, Loss: {par_loss}, Time: {iter_time}')
+                iteration_results.append(
+                    {'iteration': num_iters, 'time': running_time, 'loss': par_loss})
+                df_iter_results = pd.DataFrame(iteration_results)
+                df_iter_results.to_csv(iter_csv_file_name, index=False)
+
             # Total code time elapsed
             code_time_passed = time.time() - code_start_time
 
             # Check if progress is a multiple of 10 or if it is the last iteration
             if progress > 50 and not model_saved:
                 # Print memory usage in GB
-                print(
-                    f"Memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
-                print(
-                    f"Memory cached: {torch.cuda.memory_reserved()/1e9:.2f} GB")
+                # if rank == 0:
+                #     print(
+                #         f"Memory allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
+                #     print(
+                #         f"Memory cached: {torch.cuda.memory_reserved()/1e9:.2f} GB")
 
                 par_model.save_state_dict(model_dict_file_name)
                 model_saved = True
@@ -224,10 +246,17 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         # Save epoch results
         if rank == 0:
             epoch_results.append(
-                {'epoch': epoch, 'time': epoch_time, 'loss': avg_loss, 'accuracy': accuracy})
+                {'epoch': epoch, 'time': epoch_time, 'loss': avg_loss})
             df_results = pd.DataFrame(epoch_results)
             df_results.to_csv(csv_file_name, index=False)
             print(f"Results saved to {csv_file_name}")
+
+            if epoch == 0:
+                iteration_results.append(
+                    {'iteration': 0, 'time': 0, 'loss': avg_loss})
+                df_iter_results = pd.DataFrame(iteration_results)
+                df_iter_results.to_csv(iter_csv_file_name, index=False)
+
         par_model.save_state_dict(model_dict_file_name)
         torch.cuda.empty_cache()
 
