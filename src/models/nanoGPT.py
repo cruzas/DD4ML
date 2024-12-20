@@ -438,8 +438,49 @@ class GPTModelFromDict(nn.Module):
         return logits
 
 
+# Create the sequential model
+class SequentialGPT(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.start = StartLayer(config)
 
+        # Create layers for each transformer block
+        self.blocks = nn.ModuleList()
+        for blk_idx in range(config.n_layer):
+            block = nn.ModuleDict({
+                'partA': LayerNormBlock(config),
+                'heads': nn.ModuleList([AttentionHead(config, h_idx) for h_idx in range(config.n_head)]),
+                'combine_heads': CombineHeadsBlock(config),
+                'partC': LayerNormAndMLPBlock(config),
+            })
+            self.blocks.append(block)
 
+        self.ln_f = LNFLayer(config)
+        self.finish = LMHeadLayer(config)
+
+    def forward(self, idx):
+        # Start layer (embedding and position encoding)
+        x = self.start(idx)
+
+        for block in self.blocks:
+            # LayerNormBlock
+            ln_out = block['partA'](x)
+
+            # Process each attention head
+            head_outputs = [head(ln_out) for head in block['heads']]
+
+            # Combine heads
+            combined_out = block['combine_heads']([*head_outputs, x])
+
+            # LayerNorm + MLP block
+            x = block['partC'](combined_out)
+
+        # Final LayerNorm
+        x = self.ln_f(x)
+
+        # Language modeling head
+        logits = self.finish(x)
+        return logits
 
 
 

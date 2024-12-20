@@ -10,3 +10,5 @@ data/
 *.out
 *.csv
 core.20615
+*.pth
+/.idea
