@@ -176,7 +176,10 @@ class APTS(torch.optim.Optimizer):
         self.timings['smoother'] += time.time() - tic
          
         # Update the learning rate
-        self.lr = self.global_optimizer.lr
+        if 'lr' in self.global_optimizer.param_groups[0]:
+            self.lr = self.global_optimizer.param_groups[0]['lr']
+        else:
+            self.lr = self.global_optimizer.lr
         # self.lr = self.global_optimizer.param_groups[0]['lr']
         self.update_param_group()
         return new_loss

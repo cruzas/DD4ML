@@ -1,31 +1,27 @@
-import warnings
-import utils
-from pmw.model_handler import *
-from pmw.parallelized_model import ParallelizedModel
-from llms_datasets.tiny_shakespeare import *
-from models.nanoGPT import *
-from optimizers import APTS, TR
-from dataloaders import GeneralizedDistributedDataLoader
 import os
 import sys
 import argparse
-import time
-import pandas as pd
+import time 
+import pandas as pd 
 import torch
 import numpy as np
 import random
 import torch.distributed as dist
 import torch.multiprocessing as mp
-import torch.nn as nn
-from torchvision import datasets, transforms
 
 # Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__),
-                '..', 'src'))  # Necessary on Daint
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src')) # Necessary on Daint
 
+from dataloaders import GeneralizedDistributedDataLoader
+from models.nanoGPT import *
+from llms_datasets.tiny_shakespeare import *
+from pmw.parallelized_model import ParallelizedModel
+from pmw.model_handler import *
+import utils
 
 ##########
 # TODO: REMOVE AFTER
+import warnings
 warnings.filterwarnings("ignore")
 #########
 bias = True
@@ -183,9 +179,9 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
                 loss_total_par += par_loss
             else:
                 num_iters += 1
-                par_loss = par_optimizer.step(closure=utils.closure(
-                    x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True),
-                    final_subdomain_closure=final_subdomain_closure)
+                closuree = utils.closure(
+                    x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True)
+                par_loss = par_optimizer.step(closuree)
 
             loss_total_par += par_loss
             par_model.sync_params()

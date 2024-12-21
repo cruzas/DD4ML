@@ -37,6 +37,7 @@ TEST_ACCURACY = False
 hours = 5
 total_hours_in_seconds = hours*60*60
 save_threshold_in_seconds = total_hours_in_seconds/2
+use_SGD_for_global = True
 
 def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwargs):
     # Keep track of total time elapsed
@@ -125,23 +126,37 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     #     f'Norm of the model: {par_model.subdomain.weight_parallelized_model.parameters().norm()}')
 
     subdomain_optimizer = torch.optim.SGD
-    glob_opt_params = {
-        'lr': learning_rate,
-        'max_lr': 1.0,
-        'min_lr': 0.05,
-        'nu': 0.5,
-        'inc_factor': 2.0,
-        'dec_factor': 0.5,
-        'nu_1': 0.25,
-        'nu_2': 0.75,
-        'max_iter': 3,
-        'norm_type': 2
-    }
+
+    if not use_SGD_for_global:
+        glob_opt_params = {
+            'lr': learning_rate,
+            'max_lr': 1.0,
+            'min_lr': 0.05,
+            'nu': 0.5,
+            'inc_factor': 2.0,
+            'dec_factor': 0.5,
+            'nu_1': 0.25,
+            'nu_2': 0.75,
+            'max_iter': 3,
+            'norm_type': 2
+        }
+
+        glob_opt = TR 
+    else:
+        glob_opt_params = {
+            'lr': learning_rate,
+            'momentum': 0.9
+        }
+        glob_opt = torch.optim.SGD
+
     par_optimizer = APTS(model=par_model, subdomain_optimizer=subdomain_optimizer, subdomain_optimizer_defaults={'lr': learning_rate, 'momentum': 0.9},
-                         global_optimizer=TR, global_optimizer_defaults=glob_opt_params, lr=learning_rate, max_subdomain_iter=2, dogleg=True, APTS_in_data_sync_strategy='average', step_strategy='mean')
+                         global_optimizer=glob_opt, global_optimizer_defaults=glob_opt_params, lr=learning_rate, max_subdomain_iter=2, dogleg=True, APTS_in_data_sync_strategy='average', step_strategy='mean')
 
     # Make CSV file name
     csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}.csv"
+    if use_SGD_for_global:
+        csv_file_name = csv_file_name.replace('.csv', '_sgd_as_glob.csv')
+
     iter_csv_file_name = csv_file_name.replace('.csv', '_iter.csv')
 
     # Compute number of iterations needed per epoch
