@@ -58,7 +58,7 @@ echo "Learning rate: $learning_rate"
 echo "Activating llms $(date)"
 source activate llms
 echo "Calling python script $(date)"
-srun python3 -u scalability_shakespeare.py \
+srun python3 -u scalability_shakespeare_parsgd.py \
     --trial $trial \
     --num_epochs $num_epochs \
     --num_subdomains $num_subdomains \
