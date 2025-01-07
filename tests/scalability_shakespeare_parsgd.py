@@ -45,7 +45,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 2)
     num_stages = kwargs.get("num_stages", 1)
     trial = kwargs.get("trial", 0)
-    learning_rate = kwargs.get("learning_rate", 0.1)
+    learning_rate = kwargs.get("learning_rate", 0.001)
     # Other values
     num_epochs = kwargs.get("num_epochs", 40)
     seed = kwargs.get("seed", 2456456)  # Default seed if not provided
@@ -57,6 +57,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     n_head = kwargs.get("n_head", 2)
     n_embd = kwargs.get("n_embd", 384)
     dropout = kwargs.get("dropout", 0.0)
+    percentage = kwargs.get("percentage", 100.0)
 
     utils.prepare_distributed_environment(
         rank, master_addr, master_port, world_size, is_cuda_enabled=True)
@@ -70,8 +71,8 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     # ____________________________________
 
     rank = dist.get_rank() if dist.get_backend() == 'nccl' else rank
-    train_dataset_par, test_dataset_par, tokenizer = load_shakespeare(
-        train_split=0.8, block_size=block_size)
+    train_dataset_par, _, tokenizer = load_shakespeare(
+        train_split=0.8, block_size=block_size, percentage=percentage)
 
     if rank == 0:
         print(f"World size: {dist.get_world_size()}")
@@ -122,7 +123,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     par_optimizer = torch.optim.SGD(par_model.parameters(), lr=learning_rate)
 
     # Make CSV file name
-    csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}_parsgd.csv"
+    csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}_lr_{str(learning_rate).replace('.', '_')}_perc_{str(percentage).replace('.', '_')}_parsgd.csv"
     iter_csv_file_name = csv_file_name.replace('.csv', '_iter.csv')
 
     # Compute number of iterations needed per epoch
@@ -151,8 +152,6 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         # Parallel training loop
         model_saved = False
         for i, (x, y) in enumerate(train_loader):
-            iter_start_time = time.time()
-
             # Print progress in percentage rounded to two decimal places in the print using .2f
             progress = 100*(i/len(train_loader))
             # if rank == 0:
@@ -254,9 +253,10 @@ if __name__ == '__main__':
         parser.add_argument("--n_embd", type=int, default=256)
         parser.add_argument("--dropout", type=float, default=0.0)
         parser.add_argument("--learning_rate", type=float, default=0.01)
+        parser.add_argument("--percentage", type=float, default=100.0)
         args = parser.parse_args()
         main(trial=args.trial, num_epochs=args.num_epochs, num_subdomains=args.num_subdomains, num_replicas_per_subdomain=args.num_replicas_per_subdomain, num_stages=args.num_stages, seed=args.seed, batch_size=args.batch_size,
-             data_chunks_amount=args.data_chunks_amount, block_size=args.block_size, vocab_size=args.vocab_size, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd, dropout=args.dropout, learning_rate=args.learning_rate)
+             data_chunks_amount=args.data_chunks_amount, block_size=args.block_size, vocab_size=args.vocab_size, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd, dropout=args.dropout, learning_rate=args.learning_rate, percentage=args.percentage)
 
     else:
         WORLD_SIZE = torch.cuda.device_count() if torch.cuda.is_available() else 0

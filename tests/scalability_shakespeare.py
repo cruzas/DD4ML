@@ -37,7 +37,7 @@ TEST_ACCURACY = False
 hours = 5
 total_hours_in_seconds = hours*60*60
 save_threshold_in_seconds = total_hours_in_seconds/2
-use_SGD_for_global = True
+use_SGD_for_global = False
 
 def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwargs):
     # Keep track of total time elapsed
@@ -153,7 +153,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
                          global_optimizer=glob_opt, global_optimizer_defaults=glob_opt_params, lr=learning_rate, max_subdomain_iter=2, dogleg=True, APTS_in_data_sync_strategy='average', step_strategy='mean')
 
     # Make CSV file name
-    csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}.csv"
+    csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}_nhead_{n_head}.csv"
     if use_SGD_for_global:
         csv_file_name = csv_file_name.replace('.csv', '_sgd_as_glob.csv')
 
