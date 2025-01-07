@@ -4,7 +4,7 @@ RUNPATH=/scratch/snx3000/scruzale/ML_APTS/
 cd $RUNPATH || exit
 
 # Fixed parameters
-NUM_EPOCHS=8
+NUM_EPOCHS=2
 DATA_CHUNKS_AMOUNT=10
 BLOCK_SIZE=256
 VOCAB_SIZE=0
@@ -12,7 +12,8 @@ N_LAYER=2
 N_HEAD=2
 N_EMBD=384
 DROPOUT=0.0
-LEARNING_RATE=0.1
+LEARNING_RATE=0.001
+PERCENTAGE=50.0
 
 # Arrays of parameters that change
 TRIALS=(0)
@@ -44,10 +45,15 @@ submit_job() {
     local n_embd=${13}
     local dropout=${14}
     local learning_rate=${15}
+    local percentage=${16}
 
-    echo "Submitting job with trial=$trial, num_epochs=$num_epochs, num_subdomains=$num_subdomains, num_replicas_per_subdomain=$num_replicas_per_subdomain, num_stages=$num_stages, seed=$seed, batch_size=$batch_size."
+    echo "Submitting job with trial=$trial, num_epochs=$num_epochs, num_subdomains=$num_subdomains, num_replicas_per_subdomain=$num_replicas_per_subdomain, num_stages=$num_stages, seed=$seed, batch_size=$batch_size, data_chunks_amount=$data_chunks_amount, block_size=$block_size, vocab_size=$vocab_size, n_layer=$n_layer, n_head=$n_head, n_embd=$n_embd, dropout=$dropout, learning_rate=$learning_rate, percentage=$percentage"
 
-    job_name="t_${trial}_ns_${num_subdomains}_nr_${num_replicas_per_subdomain}_st_${num_stages}_bs_${batch_size}_parsgd"
+    # Make a string replacing lr "." with "_"
+    lr_str=$(echo "$learning_rate" | tr . _)
+    perc_str=$(echo "$percentage" | tr . _)
+
+    job_name="t_${trial}_ns_${num_subdomains}_nr_${num_replicas_per_subdomain}_st_${num_stages}_bs_${batch_size}_lr_${lr_str}_perc_${perc_str}_parsgd"
     error_file="$LOG_DIR/${job_name}.err"
     output_file="$LOG_DIR/${job_name}.out"
 
@@ -75,7 +81,8 @@ submit_job() {
            "$n_head" \
            "$n_embd" \
            "$dropout" \
-           "$learning_rate"
+           "$learning_rate" \
+           "$percentage"
 }
 
 # Make sure the submit_job function is defined above this code block
@@ -100,7 +107,8 @@ for trial in "${TRIALS[@]}"; do
                         "$N_HEAD" \
                         "$N_EMBD" \
                         "$DROPOUT" \
-                        "$LEARNING_RATE"
+                        "$LEARNING_RATE" \
+                        "$PERCENTAGE"
                 done
             done
         done

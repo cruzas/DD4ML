@@ -11,13 +11,14 @@ import torch.multiprocessing as mp
 
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src')) # Necessary on Daint
-
-from dataloaders import GeneralizedDistributedDataLoader
-from models.nanoGPT import *
-from llms_datasets.tiny_shakespeare import *
-from pmw.parallelized_model import ParallelizedModel
-from pmw.model_handler import *
-import utils
+DEBUGGING = True
+if not DEBUGGING:
+    from dataloaders import GeneralizedDistributedDataLoader
+    from models.nanoGPT import *
+    from llms_datasets.tiny_shakespeare import *
+    from pmw.parallelized_model import ParallelizedModel
+    from pmw.model_handler import *
+    import utils
 
 ##########
 # TODO: REMOVE AFTER
@@ -34,7 +35,6 @@ TEST_ACCURACY = False
 hours = 5
 total_hours_in_seconds = hours*60*60
 save_threshold_in_seconds = total_hours_in_seconds/2
-
 
 def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwargs):
     # Keep track of total time elapsed
