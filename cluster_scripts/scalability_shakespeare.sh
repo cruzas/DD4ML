@@ -9,7 +9,7 @@ DATA_CHUNKS_AMOUNT=10
 BLOCK_SIZE=256
 VOCAB_SIZE=0
 N_LAYER=2
-N_HEAD=2
+N_HEAD=6
 N_EMBD=384
 DROPOUT=0.0
 LEARNING_RATE=0.1
@@ -18,9 +18,9 @@ LEARNING_RATE=0.1
 TRIALS=(0)
 NUM_SUBDOMAINS_LIST=(2)
 NUM_REPLICAS_PER_SUBDOMAIN_LIST=(1)
-NUM_STAGES_LIST=(13)
+NUM_STAGES_LIST=(21)
 BATCH_SIZES=(2048)
-use_SGD_as_global_optimizer=true
+use_SGD_as_global_optimizer=false
 
 LOG_DIR="./results"
 
@@ -48,7 +48,7 @@ submit_job() {
 
     echo "Submitting job with trial=$trial, num_epochs=$num_epochs, num_subdomains=$num_subdomains, num_replicas_per_subdomain=$num_replicas_per_subdomain, num_stages=$num_stages, seed=$seed, batch_size=$batch_size."
 
-    job_name="t_${trial}_ns_${num_subdomains}_nr_${num_replicas_per_subdomain}_st_${num_stages}_bs_${batch_size}"
+    job_name="t_${trial}_ns_${num_subdomains}_nr_${num_replicas_per_subdomain}_st_${num_stages}_bs_${batch_size}_nhead_${n_head}"
     if [ "$use_SGD_as_global_optimizer" = true ]; then
         job_name="${job_name}_SGD_as_glob"
     fi
