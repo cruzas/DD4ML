@@ -1,12 +1,28 @@
-
+# Byte-compiled files
 *.pyc
-src/models/.DS_Store
-src/utils/.DS_Store
-src/optimizers/.DS_Store
-src/.DS_Store
-.DS_Store
-data/
-*.err
-*.out
+__pycache__/
+
+# Virtual environment
+.env/
+venv/
+
+# PyTorch checkpoint files
+*.pth
+*.pt
+
+# Results and logs
+results/
 *.csv
-core.20615
+
+# IDE files
+.vscode/
+.idea/
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# OS files
+.DS_Store
+Thumbs.db
