@@ -10,23 +10,29 @@ Domain decomposition methods for machine learning.
 * Armando Maria Monforte (3, 5); armandomaria.monforte01@universitadipavia.it
 * Prof. Dr. Rolf Krause (2, 3); rolf.krause@kaust.edu.sa
 
+## Collaborators
+* Alena Kopaničáková (6)
+
 1. Università della Svizzera italiana
 2. King Abdullah University of Science and Technology (KAUST)
 3. UniDistance Suisse
 4. TODO: Marc, please put the name of your institute and university in Spain
 5. Università di Pavia
-
-## Collaborators
-* Alena Kopaničáková (University of Toulouse; Toulouse-INP/ENSEEIHT)
+6. University of Toulouse
 
 ## Funding
 This work was initially supported by the Swiss Platform for Advanced Scientific Computing (PASC) project **ExaTrain** (funding periods 2017-2021 and 2021-2024) and by the Swiss National Science Foundation through the projects "ML<sup>2</sup> -- Multilevel and Domain Decomposition Methods for Machine Learning" (197041) and "Multilevel training of DeepONets -- multiscale and multiphysics applications" (206745). 
 
+## Requirements
+See ``pyproject.toml`` file. 
+
 ## Installation
+```bash
 git clone https://github.com/cruzas/DD4ML.git
 cd DD4ML
 pip install .
+```
 
 ## Usage
-python src/train.py
+``python src/train.py``
 
