@@ -87,7 +87,7 @@ submit_job() {
 
 # Make sure the submit_job function is defined above this code block
 for trial in "${TRIALS[@]}"; do
-    seed=$((trial))
+    seed=$((trial * 2456456))
     for num_subdomains in "${NUM_SUBDOMAINS_LIST[@]}"; do
         for num_replicas_per_subdomain in "${NUM_REPLICAS_PER_SUBDOMAIN_LIST[@]}"; do
             for num_stages in "${NUM_STAGES_LIST[@]}"; do
