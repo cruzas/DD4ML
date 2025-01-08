@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --account=c24
-#SBATCH --time=06:00:00
+#SBATCH --time=00:10:00
 #SBATCH --ntasks-per-core=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
@@ -17,7 +17,7 @@ export NCCL_DEBUG=INFO
 export NCCL_IB_HCA=ipogif0
 export NCCL_IB_CUDA_SUPPORT=1
 
-RUNPATH=/scratch/snx3000/scruzale/ML_APTS/tests/
+RUNPATH=/scratch/snx3000/scruzale/DD4ML/tests/
 cd $RUNPATH || exit
 
 # Retrieve parameters from the command line

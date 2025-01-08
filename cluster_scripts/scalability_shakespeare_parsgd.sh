@@ -1,10 +1,10 @@
 #!/bin/bash
 
-RUNPATH=/scratch/snx3000/scruzale/ML_APTS/
+RUNPATH=/scratch/snx3000/scruzale/DD4ML/
 cd $RUNPATH || exit
 
 # Fixed parameters
-NUM_EPOCHS=2
+NUM_EPOCHS=3
 DATA_CHUNKS_AMOUNT=10
 BLOCK_SIZE=256
 VOCAB_SIZE=0

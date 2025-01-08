@@ -13,7 +13,7 @@ import torch.multiprocessing as mp
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__),
                 '..', 'src'))  # Necessary on Daint
-DEBUGGING = True
+DEBUGGING = False
 if not DEBUGGING:
     from dataloaders import GeneralizedDistributedDataLoader
     from models.nanoGPT import *
@@ -76,7 +76,8 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     saved_networks = os.listdir('../saved_networks')
     for saved_network in saved_networks:
         if base_file_name in saved_network:
-            print(f"Model with parameters {base_file_name} already trained.")
+            if rank == 0:
+                print(f"Model with parameters {base_file_name} already trained.")
             saved_network_epoch = int(
                 saved_network.split('_epoch_')[1].split('.pth')[0])
 
@@ -96,8 +97,9 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         last_iteration = iteration_results[-1]
         starting_num_iters = last_iteration['iteration']
 
-    if starting_epoch > num_epochs:
-        print("Model already fully trained. Exiting.")
+    if starting_epoch > num_epochs+1:
+        if rank == 0:
+            print("Model already fully trained. Exiting.")
         exit(0)
 
     utils.prepare_distributed_environment(
@@ -175,8 +177,9 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         print("Number of iterations per epoch: ", num_iters_per_epoch)
 
     # Training loop
-    print(
-        f"Starting from epoch {starting_epoch} and iteration {starting_num_iters}")
+    if rank == 0:
+        print(
+            f"Starting from epoch {starting_epoch} and iteration {starting_num_iters}")
     num_iters = starting_num_iters
     training_start_time = time.time()
     for epoch in range(starting_epoch, num_epochs+1):
