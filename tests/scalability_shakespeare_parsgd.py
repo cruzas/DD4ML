@@ -1,8 +1,9 @@
+import warnings
 import os
 import sys
 import argparse
-import time 
-import pandas as pd 
+import time
+import pandas as pd
 import torch
 import numpy as np
 import random
@@ -10,7 +11,8 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 
 # Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src')) # Necessary on Daint
+sys.path.append(os.path.join(os.path.dirname(__file__),
+                '..', 'src'))  # Necessary on Daint
 DEBUGGING = True
 if not DEBUGGING:
     from dataloaders import GeneralizedDistributedDataLoader
@@ -22,7 +24,6 @@ if not DEBUGGING:
 
 ##########
 # TODO: REMOVE AFTER
-import warnings
 warnings.filterwarnings("ignore")
 #########
 bias = True
@@ -36,18 +37,19 @@ hours = 5
 total_hours_in_seconds = hours*60*60
 save_threshold_in_seconds = total_hours_in_seconds/2
 
+
 def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwargs):
     # Keep track of total time elapsed
     code_start_time = time.time()
 
     # Scalability testing values & CSV file name relevant parameters
     num_subdomains = kwargs.get("num_subdomains", 2)
-    num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 2)
-    num_stages = kwargs.get("num_stages", 1)
+    num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 1)
+    num_stages = kwargs.get("num_stages", 13)
     trial = kwargs.get("trial", 0)
     learning_rate = kwargs.get("learning_rate", 0.001)
     # Other values
-    num_epochs = kwargs.get("num_epochs", 40)
+    num_epochs = kwargs.get("num_epochs", 4)
     seed = kwargs.get("seed", 2456456)  # Default seed if not provided
     batch_size = kwargs.get("batch_size", 64)
     data_chunks_amount = kwargs.get("data_chunks_amount", 2)
@@ -58,6 +60,45 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     n_embd = kwargs.get("n_embd", 384)
     dropout = kwargs.get("dropout", 0.0)
     percentage = kwargs.get("percentage", 100.0)
+
+    starting_network = ""
+    starting_epoch = 0
+    starting_num_iters = 0
+    epoch_results = []
+    iteration_results = []
+    # File names
+    base_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}_lr_{str(learning_rate).replace('.', '_')}_perc_{str(percentage).replace('.', '_')}_parsgd"
+    csv_file_name = os.path.join("../results", f"{base_file_name}.csv")
+    iter_csv_file_name = csv_file_name.replace('.csv', '_iter.csv')
+
+    # Check if the model has already been trained
+    max_epoch_already_trained = -1
+    saved_networks = os.listdir('../saved_networks')
+    for saved_network in saved_networks:
+        if base_file_name in saved_network:
+            print(f"Model with parameters {base_file_name} already trained.")
+            saved_network_epoch = int(
+                saved_network.split('_epoch_')[1].split('.pth')[0])
+
+            if saved_network_epoch > max_epoch_already_trained:
+                max_epoch_already_trained = saved_network_epoch
+                starting_network = saved_network
+
+    if max_epoch_already_trained > -1:
+        starting_epoch = max_epoch_already_trained + 1
+        # Load csv file into pandas dataframe
+        df = pd.read_csv(csv_file_name)
+        epoch_results = df.to_dict('records')
+        # Load iteration csv file into pandas dataframe
+        df_iter = pd.read_csv(iter_csv_file_name)
+        iteration_results = df_iter.to_dict('records')
+        # Get the last iteration
+        last_iteration = iteration_results[-1]
+        starting_num_iters = last_iteration['iteration']
+
+    if starting_epoch > num_epochs:
+        print("Model already fully trained. Exiting.")
+        exit(0)
 
     utils.prepare_distributed_environment(
         rank, master_addr, master_port, world_size, is_cuda_enabled=True)
@@ -120,25 +161,27 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     par_model = ParallelizedModel(
         model_handler=model_handler, sample=random_input)
 
-    par_optimizer = torch.optim.SGD(par_model.parameters(), lr=learning_rate)
+    if starting_network != "":
+        par_model.load_state_dict(
+            f"../saved_networks/{starting_network}")
+        if rank == 0:
+            print(f"Model loaded from {starting_network}")
 
-    # Make CSV file name
-    csv_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}_lr_{str(learning_rate).replace('.', '_')}_perc_{str(percentage).replace('.', '_')}_parsgd.csv"
-    iter_csv_file_name = csv_file_name.replace('.csv', '_iter.csv')
+    par_optimizer = torch.optim.SGD(par_model.parameters(), lr=learning_rate)
 
     # Compute number of iterations needed per epoch
     num_iters_per_epoch = len(train_loader)
     if rank == 0:
         print("Number of iterations per epoch: ", num_iters_per_epoch)
 
-    # To track epoch results
-    epoch_results = []
-    iteration_results = []
-    num_iters = 0
+    # Training loop
+    print(
+        f"Starting from epoch {starting_epoch} and iteration {starting_num_iters}")
+    num_iters = starting_num_iters
     training_start_time = time.time()
-    for epoch in range(0, num_epochs+1):
+    for epoch in range(starting_epoch, num_epochs+1):
         model_dict_file_name = csv_file_name.replace(
-            '.csv', f'_epoch_{epoch}.pth')
+            '.csv', f'_epoch_{epoch}.pth').replace("../results", "../saved_networks")
 
         dist.barrier()
         if rank == 0:
@@ -238,22 +281,22 @@ if __name__ == '__main__':
         parser = argparse.ArgumentParser(
             description="Test Script with Seed Argument")
         parser.add_argument("--trial", type=int, default=0)
-        parser.add_argument("--num_epochs", type=int, default=40)
-        parser.add_argument("--num_subdomains", type=int, default=1)
+        parser.add_argument("--num_epochs", type=int, default=5)
+        parser.add_argument("--num_subdomains", type=int, default=2)
         parser.add_argument("--num_replicas_per_subdomain",
                             type=int, default=1)
-        parser.add_argument("--num_stages", type=int, default=2)
+        parser.add_argument("--num_stages", type=int, default=13)
         parser.add_argument("--seed", type=int, default=0)
-        parser.add_argument("--batch_size", type=int, default=64)
-        parser.add_argument("--data_chunks_amount", type=int, default=1)
-        parser.add_argument("--block_size", type=int, default=128)
+        parser.add_argument("--batch_size", type=int, default=2048)
+        parser.add_argument("--data_chunks_amount", type=int, default=10)
+        parser.add_argument("--block_size", type=int, default=256)
         parser.add_argument("--vocab_size", type=int, default=0)
-        parser.add_argument("--n_layer", type=int, default=6)
+        parser.add_argument("--n_layer", type=int, default=2)
         parser.add_argument("--n_head", type=int, default=2)
-        parser.add_argument("--n_embd", type=int, default=256)
+        parser.add_argument("--n_embd", type=int, default=384)
         parser.add_argument("--dropout", type=float, default=0.0)
-        parser.add_argument("--learning_rate", type=float, default=0.01)
-        parser.add_argument("--percentage", type=float, default=100.0)
+        parser.add_argument("--learning_rate", type=float, default=0.001)
+        parser.add_argument("--percentage", type=float, default=50.0)
         args = parser.parse_args()
         main(trial=args.trial, num_epochs=args.num_epochs, num_subdomains=args.num_subdomains, num_replicas_per_subdomain=args.num_replicas_per_subdomain, num_stages=args.num_stages, seed=args.seed, batch_size=args.batch_size,
              data_chunks_amount=args.data_chunks_amount, block_size=args.block_size, vocab_size=args.vocab_size, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd, dropout=args.dropout, learning_rate=args.learning_rate, percentage=args.percentage)
