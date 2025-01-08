@@ -5,8 +5,8 @@ Domain decomposition methods for machine learning.
 * Samuel A. Cruz Alegría (1, 3); cruzas@usi.ch.
 * Ken Trotti (2); ken.trotti@usi.ch
 * Marc Salvadó Benasco (1, 3, 4); marc.salvado@usi.ch
-* Shega Likaj (1, 2); shega.likaj@usi.ch
-* Bindi Capriqi (1, 2); bindi.capriqi@kaust.edu.sa
+* Shega Likaj (1, 2, 3); shega.likaj@usi.ch
+* Bindi Capriqi (1, 2, 3); bindi.capriqi@kaust.edu.sa
 * Armando Maria Monforte (3, 5); armandomaria.monforte01@universitadipavia.it
 * Prof. Dr. Rolf Krause (2, 3); rolf.krause@kaust.edu.sa
 
