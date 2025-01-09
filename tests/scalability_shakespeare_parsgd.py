@@ -28,56 +28,24 @@ warnings.filterwarnings("ignore")
 #########
 bias = True
 
-# num_subdomains = 1
-# num_replicas_per_subdomain = 1
-# num_stages = 2
 num_shards = 1
 TEST_ACCURACY = False
 hours = 5
 total_hours_in_seconds = hours*60*60
 save_threshold_in_seconds = total_hours_in_seconds/2
 
-
-def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwargs):
-    # Keep track of total time elapsed
-    code_start_time = time.time()
-
-    # Scalability testing values & CSV file name relevant parameters
-    num_subdomains = kwargs.get("num_subdomains", 2)
-    num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 1)
-    num_stages = kwargs.get("num_stages", 13)
-    trial = kwargs.get("trial", 0)
-    learning_rate = kwargs.get("learning_rate", 0.001)
-    # Other values
-    num_epochs = kwargs.get("num_epochs", 4)
-    seed = kwargs.get("seed", 2456456)  # Default seed if not provided
-    batch_size = kwargs.get("batch_size", 64)
-    data_chunks_amount = kwargs.get("data_chunks_amount", 2)
-    block_size = kwargs.get("block_size", 256)
-    vocab_size = kwargs.get("vocab_size", 0)
-    n_layer = kwargs.get("n_layer", 1)
-    n_head = kwargs.get("n_head", 2)
-    n_embd = kwargs.get("n_embd", 384)
-    dropout = kwargs.get("dropout", 0.0)
-    percentage = kwargs.get("percentage", 100.0)
-
-    starting_network = ""
+def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
     starting_epoch = 0
     starting_num_iters = 0
+    starting_network = ""
     epoch_results = []
-    iteration_results = []
-    # File names
-    base_file_name = f"tshakespeare_t_{trial}_nsd_{num_subdomains}_nrs_{num_replicas_per_subdomain}_nst_{num_stages}_bs_{batch_size}_lr_{str(learning_rate).replace('.', '_')}_perc_{str(percentage).replace('.', '_')}_parsgd"
-    csv_file_name = os.path.join("../results", f"{base_file_name}.csv")
-    iter_csv_file_name = csv_file_name.replace('.csv', '_iter.csv')
+    iter_results = []
 
     # Check if the model has already been trained
     max_epoch_already_trained = -1
     saved_networks = os.listdir('../saved_networks')
     for saved_network in saved_networks:
         if base_file_name in saved_network:
-            if rank == 0:
-                print(f"Model with parameters {base_file_name} already trained.")
             saved_network_epoch = int(
                 saved_network.split('_epoch_')[1].split('.pth')[0])
 
@@ -85,41 +53,82 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
                 max_epoch_already_trained = saved_network_epoch
                 starting_network = saved_network
 
+    # Check that the corresponding csv files exist
     if max_epoch_already_trained > -1:
-        starting_epoch = max_epoch_already_trained + 1
-        # Load csv file into pandas dataframe
-        df = pd.read_csv(csv_file_name)
-        epoch_results = df.to_dict('records')
-        # Load iteration csv file into pandas dataframe
-        df_iter = pd.read_csv(iter_csv_file_name)
-        iteration_results = df_iter.to_dict('records')
-        # Get the last iteration
-        last_iteration = iteration_results[-1]
-        starting_num_iters = last_iteration['iteration']
+        if os.path.exists(epoch_file_name):
+            starting_epoch = max_epoch_already_trained + 1
+            if starting_epoch > num_epochs+1:
+                if rank == 0:
+                    print("Model already fully trained. Exiting...")
+                exit(0)
+            # Load epoch results
+            df = pd.read_csv(epoch_file_name)
+            epoch_results = df.to_dict('records')
+            # Load iteration results
+            df = pd.read_csv(epoch_file_name.replace('.csv', '_iter.csv'))
+            iter_results = df.to_dict('records')
+            # Get the number of iterations
+            starting_num_iters = iter_results[-1]['iteration']
+            # Print details 
+            if rank == 0 and max_epoch_already_trained > -1:
+                print(f"Model with parameters {base_file_name} already trained for {max_epoch_already_trained} epochs")
+        else:
+            starting_network = ""
+            
+    return starting_epoch, starting_num_iters, epoch_results, iter_results, starting_network
 
-    if starting_epoch > num_epochs+1:
-        if rank == 0:
-            print("Model already fully trained. Exiting.")
-        exit(0)
+def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwargs):
+    # General settings
+    num_epochs = kwargs.get("num_epochs", 4)
+    learning_rate = kwargs.get("learning_rate", 0.001)
+    seed = kwargs.get("seed", 2456456)  # Default seed if not provided
+    batch_size = kwargs.get("batch_size", 64)
+    data_chunks_amount = kwargs.get("data_chunks_amount", 1)
+    percentage = kwargs.get("percentage", 100.0) # Percentage of the dataset to use
+    # Scalability testing values 
+    trial = kwargs.get("trial", 0)
+    num_subdomains = kwargs.get("num_subdomains", 2)
+    num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 1)
+    num_stages = kwargs.get("num_stages", 13)
+    # Transformer parameters
+    block_size = kwargs.get("block_size", 256)
+    n_layer = kwargs.get("n_layer", 1)
+    n_head = kwargs.get("n_head", 2)
+    n_embd = kwargs.get("n_embd", 384)
+    dropout = kwargs.get("dropout", 0.0)
 
+    # Directory to save results
+    tinyshakespeare_dir = "../results/tinyshakespeare"
+
+    # File names
+    lr_str = str(learning_rate).replace('.', '_') # Learning rate string
+    perc_str = str(percentage).replace('.', '_') # Percentage string
+    base_file_name = f"ts_t_{trial}_bls_{block_size}_nl_{n_layer}_nh_{n_head}_ne_{n_embd}_ns_{num_subdomains}_nr_{num_replicas_per_subdomain}_st_{num_stages}_bs_{batch_size}_dc_{data_chunks_amount}_lr_{lr_str}_perc_{perc_str}_epochs_{num_epochs}_parsgd"
+    epoch_file_name = os.path.join(tinyshakespeare_dir, f"{base_file_name}.csv") # File to save epoch results
+    iter_file_name = epoch_file_name.replace('.csv', '_iter.csv') # File to save iteration results
+
+    # Check if the model has already been trained
+    starting_epoch, starting_num_iters, epoch_results, iter_results, starting_network = get_starting_info(rank, base_file_name, epoch_file_name, num_epochs)
+
+    # Initialize distributed environment
     utils.prepare_distributed_environment(
         rank, master_addr, master_port, world_size, is_cuda_enabled=True)
     utils.check_gpus_per_rank()
-    # _________ Some parameters __________
+
     # NOTE: Setting a bach size lower than the dataset size will cause the two dataloader (sequential and parallel) to have different batches, hence different losses and accuracies
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     torch.manual_seed(seed)
     random.seed(seed)
     np.random.seed(seed)
-    # ____________________________________
 
+    # Device rank
     rank = dist.get_rank() if dist.get_backend() == 'nccl' else rank
+
+    # Load dataset
     train_dataset_par, _, tokenizer = load_shakespeare(
         train_split=0.8, block_size=block_size, percentage=percentage)
 
-    if rank == 0:
-        print(f"World size: {dist.get_world_size()}")
-
+    # Set configuration for the model
     config = GPTConfig(
         num_stages=num_stages,
         block_size=block_size,
@@ -131,6 +140,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         bias=bias
     )
 
+    # Define the loss function 
     def criterion(outputs, targets):
         B, T, C = outputs.size()
         # loss = F.cross_entropy(outputs.view(B*T, C), targets.view(-1), ignore_index=-1)
@@ -138,6 +148,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
             B * T, C), targets.reshape(-1), ignore_index=-1)
         return loss
 
+    # Reset seed to ensure the model is initialized with the same weights
     torch.manual_seed(seed)
     model_dict = get_model_dict(config)
 
@@ -146,11 +157,15 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         for key in model_dict.keys():
             model_dict[key]['stage'] = 0
 
+    # Initialize model handler
     model_handler = ModelHandler(
         model_dict, num_subdomains, num_replicas_per_subdomain, available_ranks=None)
-    # print the stages of the model
+    
     if rank == 0:
-        print(f'(rank {rank}) Model stage_list: {model_handler.stage_list}\n')
+        print(f"World size: {dist.get_world_size()}")
+        # print(f'(rank {rank}) Model stage_list: {model_handler.stage_list}\n')
+    
+    # Initialize dataloaders
     torch.manual_seed(seed)
     train_loader = GeneralizedDistributedDataLoader(
         model_handler=model_handler, dataset=train_dataset_par, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
@@ -160,122 +175,98 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     x_batch, _ = next(iter(train_loader))
     random_input = x_batch.to(device)
 
+    # Initialize model
     par_model = ParallelizedModel(
         model_handler=model_handler, sample=random_input)
 
+    # Load model if it exists
     if starting_network != "":
         par_model.load_state_dict(
             f"../saved_networks/{starting_network}")
         if rank == 0:
             print(f"Model loaded from {starting_network}")
 
-    par_optimizer = torch.optim.SGD(par_model.parameters(), lr=learning_rate)
+    # Initialize optimizer
+    par_optimizer = torch.optim.SGD(par_model.parameters(), lr=learning_rate, momentum=0.9)
 
     # Compute number of iterations needed per epoch
     num_iters_per_epoch = len(train_loader)
     if rank == 0:
         print("Number of iterations per epoch: ", num_iters_per_epoch)
-
-    # Training loop
-    if rank == 0:
         print(
-            f"Starting from epoch {starting_epoch} and iteration {starting_num_iters}")
+            f"Starting from epoch {starting_epoch} and iteration {starting_num_iters}")    
     num_iters = starting_num_iters
+
+    # Parallel training loop
     training_start_time = time.time()
     for epoch in range(starting_epoch, num_epochs+1):
-        model_dict_file_name = csv_file_name.replace(
-            '.csv', f'_epoch_{epoch}.pth').replace("../results", "../saved_networks")
-
         dist.barrier()
-        if rank == 0:
-            print(f'____________ EPOCH {epoch} ____________')
+        model_dict_file_name = epoch_file_name.replace(
+            '.csv', f'_epoch_{epoch}.pth').replace(tinyshakespeare_dir, "../saved_networks")
+        if rank == 0: print(f'____________ EPOCH {epoch} ____________')        
+        epoch_start_time = time.time()
         loss_total_par = 0
         counter_par = 0
-
-        # Measure epoch time
-        epoch_start_time = time.time()
-
-        # Parallel training loop
-        model_saved = False
         for i, (x, y) in enumerate(train_loader):
-            # Print progress in percentage rounded to two decimal places in the print using .2f
-            progress = 100*(i/len(train_loader))
-            # if rank == 0:
-            #     print(f"Progress: {progress:.2f}%")
-
             dist.barrier()
-            # dist.barrier()
-            x = x.to(device)
-            y = y.to(device)
-
-            def final_subdomain_closure(outputs, y=y):
-                y_chunks = y.chunk(len(outputs))
-                loss = []
-                for i, o in enumerate(outputs):
-                    loss.append(criterion(o, y_chunks[i]))
-                return loss
-
-            par_optimizer.zero_grad()
             counter_par += 1
+            x = x.to(device)
+            y = y.to(device) 
+
+            # Build an estimate as to how much time it would take to finish the epoch
+            if rank == 0 and i == 1:
+                time_passed = time.time() - training_start_time
+                time_per_iter = time_passed/(num_iters+1)
+                time_left = time_per_iter*(len(train_loader))
+                print(f"Time left for epoch {epoch} is approximately {time_left:.2f} seconds")
+
             if epoch == 0:
                 closuree = utils.closure(
                     x, y, criterion, par_model, data_chunks_amount=data_chunks_amount, compute_grad=False)
                 par_loss = closuree()
-                loss_total_par += par_loss
             else:
-                num_iters += 1
+                par_optimizer.zero_grad()
                 closuree = utils.closure(
                     x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True)
                 par_loss = par_optimizer.step(closuree)
+                num_iters += 1
 
             loss_total_par += par_loss
             par_model.sync_params()
-
-            if rank == 0 and epoch > 0 and num_iters > 0 and num_iters % 50 == 0:
+            if rank == 0 and epoch > 0:
                 running_time = time.time() - training_start_time
-                # print(
-                #     f'Iteration {num_iters}, Loss: {par_loss}, Time: {iter_time}')
-                iteration_results.append(
+                iter_results.append(
                     {'iteration': num_iters, 'time': running_time, 'loss': par_loss})
-                df_iter_results = pd.DataFrame(iteration_results)
-                df_iter_results.to_csv(iter_csv_file_name, index=False)
 
-            # Total code time elapsed
-            code_time_passed = time.time() - code_start_time
-
-            # Check if progress is a multiple of 10 or if it is the last iteration
-            if progress > 50 and not model_saved:
-                par_model.save_state_dict(model_dict_file_name)
-                model_saved = True
-            elif code_time_passed >= save_threshold_in_seconds and not model_saved:
-                par_model.save_state_dict(model_dict_file_name)
-                model_saved = True
-            dist.barrier()
-
+        # Compute average loss and epoch time
         avg_loss = -1
         epoch_time = -1
         if rank == 0:
             avg_loss = loss_total_par/counter_par
-            # Measure elapsed time in seconds
-            epoch_time = time.time() - epoch_start_time
+            epoch_time = time.time() - epoch_start_time # Epoch time in seconds
             print(
                 f'Epoch {epoch}, Parallel avg loss: {avg_loss}, Time: {epoch_time}')
 
-        # Save epoch results
+        # Save epoch and iteration results
         if rank == 0:
             epoch_results.append(
                 {'epoch': epoch, 'time': epoch_time, 'loss': avg_loss})
             df_results = pd.DataFrame(epoch_results)
-            df_results.to_csv(csv_file_name, index=False)
-            print(f"Results saved to {csv_file_name}")
+            df_results.to_csv(epoch_file_name, index=False)
+            print(f"Epoch results saved to {epoch_file_name}")
 
             if epoch == 0:
-                iteration_results.append(
+                iter_results.append(
                     {'iteration': 0, 'time': 0, 'loss': avg_loss})
-                df_iter_results = pd.DataFrame(iteration_results)
-                df_iter_results.to_csv(iter_csv_file_name, index=False)
+                
+            df_iter_results = pd.DataFrame(iter_results)
+            df_iter_results.to_csv(iter_file_name, index=False)
+            print(f"Iteration results saved to {iter_file_name}")
 
+        # Save model state
         par_model.save_state_dict(model_dict_file_name)
+
+        # Reset cache to avoid memory leaks
         torch.cuda.empty_cache()
 
 

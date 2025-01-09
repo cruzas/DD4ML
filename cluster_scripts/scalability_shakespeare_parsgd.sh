@@ -4,25 +4,25 @@ RUNPATH=/scratch/snx3000/scruzale/DD4ML/
 cd $RUNPATH || exit
 
 # Fixed parameters
-NUM_EPOCHS=3
-DATA_CHUNKS_AMOUNT=10
+NUM_EPOCHS=4
+DATA_CHUNKS_AMOUNT=1 # only useful if num_stages > 1
 BLOCK_SIZE=256
-VOCAB_SIZE=0
-N_LAYER=2
-N_HEAD=2
+VOCAB_SIZE=0 # unnecessary param that should be removed later
+N_LAYER=6
+N_HEAD=6
 N_EMBD=384
 DROPOUT=0.0
 LEARNING_RATE=0.001
-PERCENTAGE=50.0
+PERCENTAGE=100.0
 
 # Arrays of parameters that change
 TRIALS=(0)
-NUM_SUBDOMAINS_LIST=(2)
+NUM_SUBDOMAINS_LIST=(1)
 NUM_REPLICAS_PER_SUBDOMAIN_LIST=(1)
-NUM_STAGES_LIST=(13)
-BATCH_SIZES=(2048)
+NUM_STAGES_LIST=(1)
+BATCH_SIZES=(200)
 
-LOG_DIR="./results"
+LOG_DIR="./results/log_files"
 
 # Check if LOG_DIR exists. If not, create it.
 if [ ! -d "$LOG_DIR" ]; then
@@ -53,7 +53,7 @@ submit_job() {
     lr_str=$(echo "$learning_rate" | tr . _)
     perc_str=$(echo "$percentage" | tr . _)
 
-    job_name="t_${trial}_ns_${num_subdomains}_nr_${num_replicas_per_subdomain}_st_${num_stages}_bs_${batch_size}_lr_${lr_str}_perc_${perc_str}_parsgd"
+    job_name="ts_t_${trial}_bls_${BLOCK_SIZE}_nl_${N_LAYER}_nh_${N_HEAD}_ne_${N_EMBD}_ns_${num_subdomains}_nr_${num_replicas_per_subdomain}_st_${num_stages}_bs_${batch_size}_dc_${DATA_CHUNKS_AMOUNT}_lr_${lr_str}_perc_${perc_str}_epochs_${NUM_EPOCHS}_parsgd"
     error_file="$LOG_DIR/${job_name}.err"
     output_file="$LOG_DIR/${job_name}.out"
 
