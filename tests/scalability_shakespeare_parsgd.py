@@ -198,7 +198,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     num_iters = starting_num_iters
 
     # Parallel training loop
-    training_start_time = time.time()
+    training_start_time = time.time() # TODO: fix start time when resuming training
     for epoch in range(starting_epoch, num_epochs+1):
         dist.barrier()
         model_dict_file_name = epoch_file_name.replace(
@@ -208,6 +208,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
         loss_total_par = 0
         counter_par = 0
         for i, (x, y) in enumerate(train_loader):
+            iter_star_time = time.time()
             dist.barrier()
             counter_par += 1
             x = x.to(device)
@@ -215,7 +216,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
 
             # Build an estimate as to how much time it would take to finish the epoch
             if rank == 0 and i == 1:
-                time_passed = time.time() - training_start_time
+                time_passed = (time.time() - training_start_time)
                 time_per_iter = time_passed/(num_iters+1)
                 time_left = time_per_iter*(len(train_loader))
                 print(f"Time left for epoch {epoch} is approximately {time_left:.2f} seconds")
@@ -234,9 +235,9 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
             loss_total_par += par_loss
             par_model.sync_params()
             if rank == 0 and epoch > 0:
-                running_time = time.time() - training_start_time
+                iter_time = time.time() - iter_star_time
                 iter_results.append(
-                    {'iteration': num_iters, 'time': running_time, 'loss': par_loss})
+                    {'iteration': num_iters, 'time': iter_time, 'loss': par_loss})
 
         # Compute average loss and epoch time
         avg_loss = -1
