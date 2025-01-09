@@ -17,7 +17,7 @@ Domain decomposition methods for machine learning.
 2. King Abdullah University of Science and Technology (KAUST)
 3. UniDistance Suisse
 4. TODO: Marc, please put the name of your institute and university in Spain
-5. Università di Pavia
+5. University of Pavia
 6. University of Toulouse
 
 ## Funding
