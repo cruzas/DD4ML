@@ -85,6 +85,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     batch_size = kwargs.get("batch_size", 64)
     data_chunks_amount = kwargs.get("data_chunks_amount", 1)
     percentage = kwargs.get("percentage", 100.0) # Percentage of the dataset to use
+    num_workers = kwargs.get("num_workers", 0)
     # Scalability testing values 
     trial = kwargs.get("trial", 0)
     num_subdomains = kwargs.get("num_subdomains", 2)
@@ -103,7 +104,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     # File names
     lr_str = str(learning_rate).replace('.', '_') # Learning rate string
     perc_str = str(percentage).replace('.', '_') # Percentage string
-    base_file_name = f"ts_t_{trial}_bls_{block_size}_nl_{n_layer}_nh_{n_head}_ne_{n_embd}_ns_{num_subdomains}_nr_{num_replicas_per_subdomain}_st_{num_stages}_bs_{batch_size}_dc_{data_chunks_amount}_lr_{lr_str}_perc_{perc_str}_epochs_{num_epochs}_parsgd"
+    base_file_name = f"ts_t_{trial}_nw_{num_workers}_bls_{block_size}_nl_{n_layer}_nh_{n_head}_ne_{n_embd}_ns_{num_subdomains}_nr_{num_replicas_per_subdomain}_st_{num_stages}_bs_{batch_size}_dc_{data_chunks_amount}_lr_{lr_str}_perc_{perc_str}_epochs_{num_epochs}_parsgd"
     epoch_file_name = os.path.join(tinyshakespeare_dir, f"{base_file_name}.csv") # File to save epoch results
     iter_file_name = epoch_file_name.replace('.csv', '_iter.csv') # File to save iteration results
 
@@ -168,7 +169,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     # Initialize dataloaders
     torch.manual_seed(seed)
     train_loader = GeneralizedDistributedDataLoader(
-        model_handler=model_handler, dataset=train_dataset_par, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
+        model_handler=model_handler, dataset=train_dataset_par, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
     torch.manual_seed(seed)
 
     # Sharded first layer into [0,1] -> dataloader should upload batch to 0 only
@@ -292,9 +293,10 @@ if __name__ == '__main__':
         parser.add_argument("--dropout", type=float, default=0.0)
         parser.add_argument("--learning_rate", type=float, default=0.001)
         parser.add_argument("--percentage", type=float, default=50.0)
+        parser.add_argument("--num_workers", type=int, default=0)
         args = parser.parse_args()
         main(trial=args.trial, num_epochs=args.num_epochs, num_subdomains=args.num_subdomains, num_replicas_per_subdomain=args.num_replicas_per_subdomain, num_stages=args.num_stages, seed=args.seed, batch_size=args.batch_size,
-             data_chunks_amount=args.data_chunks_amount, block_size=args.block_size, vocab_size=args.vocab_size, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd, dropout=args.dropout, learning_rate=args.learning_rate, percentage=args.percentage)
+             data_chunks_amount=args.data_chunks_amount, block_size=args.block_size, vocab_size=args.vocab_size, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd, dropout=args.dropout, learning_rate=args.learning_rate, percentage=args.percentage, num_workers=args.num_workers)
 
     else:
         WORLD_SIZE = torch.cuda.device_count() if torch.cuda.is_available() else 0

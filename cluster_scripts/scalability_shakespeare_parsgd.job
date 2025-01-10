@@ -38,6 +38,7 @@ n_embd=${13}
 dropout=${14}
 learning_rate=${15}
 percentage=${16}
+num_workers=${17}
 
 # Echo all of the above
 echo "Trial: $trial"
@@ -56,6 +57,7 @@ echo "Embedding size: $n_embd"
 echo "Dropout: $dropout"
 echo "Learning rate: $learning_rate"
 echo "Percentage: $percentage"
+echo "Number of workers: $num_workers"
 
 # Run the training script
 echo "Activating llms $(date)"
@@ -77,5 +79,6 @@ srun python3 -u scalability_shakespeare_parsgd.py \
     --n_embd "$n_embd" \
     --dropout "$dropout" \
     --learning_rate "$learning_rate" \
-    --percentage "$percentage"
+    --percentage "$percentage" \
+    --num_workers "$num_workers"
 echo "Test done $(date)"
