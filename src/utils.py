@@ -4,7 +4,50 @@ import pickle
 import socket
 import subprocess
 import torch.distributed as dist
+import pandas as pd
 
+def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
+    starting_epoch = 0
+    starting_num_iters = 0
+    starting_network = ""
+    epoch_results = []
+    iter_results = []
+
+    # Check if the model has already been trained
+    max_epoch_already_trained = -1
+    saved_networks = os.listdir('../saved_networks')
+    for saved_network in saved_networks:
+        if base_file_name in saved_network:
+            saved_network_epoch = int(
+                saved_network.split('_epoch_')[1].split('.pth')[0])
+
+            if saved_network_epoch > max_epoch_already_trained:
+                max_epoch_already_trained = saved_network_epoch
+                starting_network = saved_network
+
+    # Check that the corresponding csv files exist
+    if max_epoch_already_trained > -1:
+        if os.path.exists(epoch_file_name):
+            starting_epoch = max_epoch_already_trained + 1
+            if starting_epoch > num_epochs+1:
+                if rank == 0:
+                    print("Model already fully trained. Exiting...")
+                exit(0)
+            # Load epoch results
+            df = pd.read_csv(epoch_file_name)
+            epoch_results = df.to_dict('records')
+            # Load iteration results
+            df = pd.read_csv(epoch_file_name.replace('.csv', '_iter.csv'))
+            iter_results = df.to_dict('records')
+            # Get the number of iterations
+            starting_num_iters = iter_results[-1]['iteration']
+            # Print details 
+            if rank == 0 and max_epoch_already_trained > -1:
+                print(f"Model with parameters {base_file_name} already trained for {max_epoch_already_trained} epochs")
+        else:
+            starting_network = ""
+            
+    return starting_epoch, starting_num_iters, epoch_results, iter_results, starting_network
 
 def decide_tensor_device(ws, backend, gpu_id):
     if torch.cuda.is_available():

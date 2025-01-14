@@ -21,6 +21,7 @@ if not DEBUGGING:
     from pmw.parallelized_model import ParallelizedModel
     from pmw.model_handler import *
     import utils
+    from optimizers import APTS, TR
 
 ##########
 # TODO: REMOVE AFTER
@@ -61,7 +62,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     # File names
     lr_str = str(learning_rate).replace('.', '_') # Learning rate string
     perc_str = str(percentage).replace('.', '_') # Percentage string
-    base_file_name = f"ts_t_{trial}_nw_{num_workers}_bls_{block_size}_nl_{n_layer}_nh_{n_head}_ne_{n_embd}_ns_{num_subdomains}_nr_{num_replicas_per_subdomain}_st_{num_stages}_bs_{batch_size}_dc_{data_chunks_amount}_lr_{lr_str}_perc_{perc_str}_epochs_{num_epochs}_parsgd"
+    base_file_name = f"ts_t_{trial}_nw_{num_workers}_bls_{block_size}_nl_{n_layer}_nh_{n_head}_ne_{n_embd}_ns_{num_subdomains}_nr_{num_replicas_per_subdomain}_st_{num_stages}_bs_{batch_size}_dc_{data_chunks_amount}_lr_{lr_str}_perc_{perc_str}_epochs_{num_epochs}_apts"
     epoch_file_name = os.path.join(tinyshakespeare_dir, f"{base_file_name}.csv") # File to save epoch results
     iter_file_name = epoch_file_name.replace('.csv', '_iter.csv') # File to save iteration results
 
@@ -121,7 +122,8 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     
     if rank == 0:
         print(f"World size: {dist.get_world_size()}")
-    
+        # print(f'(rank {rank}) Model stage_list: {model_handler.stage_list}\n')
+
     # Initialize dataloaders
     torch.manual_seed(seed)
     train_loader = GeneralizedDistributedDataLoader(
@@ -135,7 +137,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     # Initialize model
     par_model = ParallelizedModel(
         model_handler=model_handler, sample=random_input)
-
+    
     # Load model if it exists
     if starting_network != "":
         par_model.load_state_dict(
@@ -144,7 +146,23 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
             print(f"Model loaded from {starting_network}")
 
     # Initialize optimizer
-    par_optimizer = torch.optim.SGD(par_model.parameters(), lr=learning_rate, momentum=0.9)
+    glob_opt_params = {
+        'lr': learning_rate,
+        'max_lr': 1.0,
+        'min_lr': 0.05,
+        'nu': 0.5,
+        'inc_factor': 2.0,
+        'dec_factor': 0.5,
+        'nu_1': 0.25,
+        'nu_2': 0.75,
+        'max_iter': 3,
+        'norm_type': 2
+    }
+
+    glob_opt = TR 
+    subdomain_optimizer = torch.optim.SGD
+    par_optimizer = APTS(model=par_model, subdomain_optimizer=subdomain_optimizer, subdomain_optimizer_defaults={'lr': learning_rate, 'momentum': 0.9},
+                         global_optimizer=glob_opt, global_optimizer_defaults=glob_opt_params, lr=learning_rate, max_subdomain_iter=2, dogleg=True, APTS_in_data_sync_strategy='average', step_strategy='mean')
 
     # Compute number of iterations needed per epoch
     num_iters_per_epoch = len(train_loader)
@@ -169,7 +187,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
             dist.barrier()
             counter_par += 1
             x = x.to(device)
-            y = y.to(device) 
+            y = y.to(device)
 
             # Build an estimate as to how much time it would take to finish the epoch
             if rank == 0 and i == 1:
@@ -178,6 +196,13 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
                 time_left = time_per_iter*(len(train_loader))
                 print(f"Time left for epoch {epoch} is approximately {time_left:.2f} seconds")
 
+            def final_subdomain_closure(outputs, y=y):
+                y_chunks = y.chunk(len(outputs))
+                loss = []
+                for i, o in enumerate(outputs):
+                    loss.append(criterion(o, y_chunks[i]))
+                return loss
+            
             if epoch == 0:
                 closuree = utils.closure(
                     x, y, criterion, par_model, data_chunks_amount=data_chunks_amount, compute_grad=False)
@@ -186,7 +211,8 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
                 par_optimizer.zero_grad()
                 closuree = utils.closure(
                     x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True)
-                par_loss = par_optimizer.step(closuree)
+                par_loss = par_optimizer.step(closure=closuree,
+                    final_subdomain_closure=final_subdomain_closure)
                 num_iters += 1
 
             loss_total_par += par_loss

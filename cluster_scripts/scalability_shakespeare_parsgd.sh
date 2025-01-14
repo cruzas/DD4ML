@@ -4,7 +4,7 @@ RUNPATH=/scratch/snx3000/scruzale/DD4ML/
 cd $RUNPATH || exit
 
 # Fixed parameters
-NUM_EPOCHS=2
+NUM_EPOCHS=15
 DATA_CHUNKS_AMOUNT=1 # only useful if num_stages > 1
 BLOCK_SIZE=256
 VOCAB_SIZE=0 # unnecessary param that should be removed later
@@ -13,12 +13,12 @@ N_HEAD=6
 N_EMBD=384
 DROPOUT=0.0
 LEARNING_RATE=0.001
-PERCENTAGE=50.0
-NUM_WORKERS=(2 4 8 12)
+PERCENTAGE=100.0
+NUM_WORKERS=(0)
 
 # Arrays of parameters that change
 TRIALS=(0)
-NUM_SUBDOMAINS_LIST=(4)
+NUM_SUBDOMAINS_LIST=(1)
 NUM_REPLICAS_PER_SUBDOMAIN_LIST=(1)
 NUM_STAGES_LIST=(1)
 BATCH_SIZES=(128)
