@@ -49,6 +49,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     num_subdomains = kwargs.get("num_subdomains", 2)
     num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 1)
     num_stages = kwargs.get("num_stages", 13)
+    num_sdi = kwargs.get("sdi", 2) # Subdomain iterations
     # Transformer parameters
     block_size = kwargs.get("block_size", 256)
     n_layer = kwargs.get("n_layer", 1)
@@ -62,7 +63,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     # File names
     lr_str = str(learning_rate).replace('.', '_') # Learning rate string
     perc_str = str(percentage).replace('.', '_') # Percentage string
-    base_file_name = f"ts_t_{trial}_nw_{num_workers}_bls_{block_size}_nl_{n_layer}_nh_{n_head}_ne_{n_embd}_ns_{num_subdomains}_nr_{num_replicas_per_subdomain}_st_{num_stages}_bs_{batch_size}_dc_{data_chunks_amount}_lr_{lr_str}_perc_{perc_str}_epochs_{num_epochs}_apts"
+    base_file_name = f"ts_t_{trial}_nw_{num_workers}_bls_{block_size}_nl_{n_layer}_nh_{n_head}_ne_{n_embd}_ns_{num_subdomains}_nr_{num_replicas_per_subdomain}_st_{num_stages}_bs_{batch_size}_dc_{data_chunks_amount}_lr_{lr_str}_perc_{perc_str}_sdi_{num_sdi}_epochs_{num_epochs}_apts"
     epoch_file_name = os.path.join(tinyshakespeare_dir, f"{base_file_name}.csv") # File to save epoch results
     iter_file_name = epoch_file_name.replace('.csv', '_iter.csv') # File to save iteration results
 
@@ -162,7 +163,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     glob_opt = TR 
     subdomain_optimizer = torch.optim.SGD
     par_optimizer = APTS(model=par_model, subdomain_optimizer=subdomain_optimizer, subdomain_optimizer_defaults={'lr': learning_rate, 'momentum': 0.9},
-                         global_optimizer=glob_opt, global_optimizer_defaults=glob_opt_params, lr=learning_rate, max_subdomain_iter=2, dogleg=True, APTS_in_data_sync_strategy='average', step_strategy='mean')
+                         global_optimizer=glob_opt, global_optimizer_defaults=glob_opt_params, lr=learning_rate, max_subdomain_iter=num_sdi, dogleg=True, APTS_in_data_sync_strategy='average', step_strategy='mean')
 
     # Compute number of iterations needed per epoch
     num_iters_per_epoch = len(train_loader)
@@ -276,9 +277,10 @@ if __name__ == '__main__':
         parser.add_argument("--learning_rate", type=float, default=0.001)
         parser.add_argument("--percentage", type=float, default=50.0)
         parser.add_argument("--num_workers", type=int, default=0)
+        parser.add_argument("--sdi", type=int, default=2) # Subdomain iterations
         args = parser.parse_args()
         main(trial=args.trial, num_epochs=args.num_epochs, num_subdomains=args.num_subdomains, num_replicas_per_subdomain=args.num_replicas_per_subdomain, num_stages=args.num_stages, seed=args.seed, batch_size=args.batch_size,
-             data_chunks_amount=args.data_chunks_amount, block_size=args.block_size, vocab_size=args.vocab_size, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd, dropout=args.dropout, learning_rate=args.learning_rate, percentage=args.percentage, num_workers=args.num_workers)
+             data_chunks_amount=args.data_chunks_amount, block_size=args.block_size, vocab_size=args.vocab_size, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd, dropout=args.dropout, learning_rate=args.learning_rate, percentage=args.percentage, num_workers=args.num_workers, sdi=args.sdi)
 
     else:
         WORLD_SIZE = torch.cuda.device_count() if torch.cuda.is_available() else 0

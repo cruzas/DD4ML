@@ -12,9 +12,10 @@ N_LAYER=6
 N_HEAD=6
 N_EMBD=384
 DROPOUT=0.0
-LEARNING_RATE=0.001
+LEARNING_RATE=0.01
 PERCENTAGE=25.0
 NUM_WORKERS=(0)
+SDI=5 # number of subdomain iterations
 
 # Arrays of parameters that change
 TRIALS=(0)
@@ -48,14 +49,15 @@ submit_job() {
     local learning_rate=${15}
     local percentage=${16}
     local num_workers=${17}
+    local sdi=${18}
 
-    echo "Submitting job with trial=$trial, num_epochs=$num_epochs, num_subdomains=$num_subdomains, num_replicas_per_subdomain=$num_replicas_per_subdomain, num_stages=$num_stages, seed=$seed, batch_size=$batch_size, data_chunks_amount=$data_chunks_amount, block_size=$block_size, vocab_size=$vocab_size, n_layer=$n_layer, n_head=$n_head, n_embd=$n_embd, dropout=$dropout, learning_rate=$learning_rate, percentage=$percentage, num_workers=$num_workers"
+    echo "Submitting job with trial=$trial, num_epochs=$num_epochs, sdi=$sdi, num_subdomains=$num_subdomains, num_replicas_per_subdomain=$num_replicas_per_subdomain, num_stages=$num_stages, seed=$seed, batch_size=$batch_size, data_chunks_amount=$data_chunks_amount, block_size=$block_size, vocab_size=$vocab_size, n_layer=$n_layer, n_head=$n_head, n_embd=$n_embd, dropout=$dropout, learning_rate=$learning_rate, percentage=$percentage, num_workers=$num_workers"
 
     # Make a string replacing lr "." with "_"
     lr_str=$(echo "$learning_rate" | tr . _)
     perc_str=$(echo "$percentage" | tr . _)
 
-    job_name="ts_t_${trial}_nw_${num_workers}_bls_${BLOCK_SIZE}_nl_${N_LAYER}_nh_${N_HEAD}_ne_${N_EMBD}_ns_${num_subdomains}_nr_${num_replicas_per_subdomain}_st_${num_stages}_bs_${batch_size}_dc_${DATA_CHUNKS_AMOUNT}_lr_${lr_str}_perc_${perc_str}_epochs_${NUM_EPOCHS}_apts"
+    job_name="ts_t_${trial}_nw_${num_workers}_bls_${BLOCK_SIZE}_nl_${N_LAYER}_nh_${N_HEAD}_ne_${N_EMBD}_ns_${num_subdomains}_nr_${num_replicas_per_subdomain}_st_${num_stages}_bs_${batch_size}_dc_${DATA_CHUNKS_AMOUNT}_lr_${lr_str}_perc_${perc_str}_sdi_${sdi}_epochs_${NUM_EPOCHS}_apts"
     error_file="$LOG_DIR/${job_name}.err"
     output_file="$LOG_DIR/${job_name}.out"
 
@@ -85,7 +87,8 @@ submit_job() {
            "$dropout" \
            "$learning_rate" \
            "$percentage" \
-           "$num_workers"
+           "$num_workers" \
+           "$sdi"
 }
 
 # Make sure the submit_job function is defined above this code block
@@ -113,7 +116,8 @@ for trial in "${TRIALS[@]}"; do
                         "$DROPOUT" \
                         "$LEARNING_RATE" \
                         "$PERCENTAGE" \
-                        "$num_workers"
+                        "$num_workers" \
+                        "$SDI"
                     done
                 done
             done
