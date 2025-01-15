@@ -38,6 +38,7 @@ dropout=${14}
 learning_rate=${15}
 percentage=${16}
 num_workers=${17}
+sdi=${18}
 
 # Echo all of the above
 echo "Trial: $trial"
@@ -57,6 +58,7 @@ echo "Dropout: $dropout"
 echo "Learning rate: $learning_rate"
 echo "Percentage: $percentage"
 echo "Number of workers: $num_workers"
+echo "Number of subdomain iterations: $sdi"
 
 # Run the training script
 echo "Activating llms $(date)"
@@ -79,5 +81,6 @@ srun python3 -u scalability_shakespeare_apts.py \
     --dropout "$dropout" \
     --learning_rate "$learning_rate" \
     --percentage "$percentage" \
-    --num_workers "$num_workers"
+    --num_workers "$num_workers" \
+    --sdi "$sdi"
 echo "Test done $(date)"
