@@ -149,7 +149,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, **kwarg
     glob_opt_params = {
         'lr': learning_rate,
         'max_lr': 1.0,
-        'min_lr': 0.05,
+        'min_lr': 0.0001,
         'nu': 0.5,
         'inc_factor': 2.0,
         'dec_factor': 0.5,

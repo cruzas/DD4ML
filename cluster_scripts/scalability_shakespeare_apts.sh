@@ -13,14 +13,14 @@ N_HEAD=6
 N_EMBD=384
 DROPOUT=0.0
 LEARNING_RATE=0.001
-PERCENTAGE=100.0
+PERCENTAGE=25.0
 NUM_WORKERS=(0)
 
 # Arrays of parameters that change
 TRIALS=(0)
-NUM_SUBDOMAINS_LIST=(2)
+NUM_SUBDOMAINS_LIST=(2 4 8)
 NUM_REPLICAS_PER_SUBDOMAIN_LIST=(1)
-NUM_STAGES_LIST=(57) # total layers = 3+n_layer*(3+n_head) 
+NUM_STAGES_LIST=(2) # total layers = 3+n_layer*(3+n_head) 
 BATCH_SIZES=(128)
 
 LOG_DIR="./results/log_files"
