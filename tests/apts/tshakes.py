@@ -4,20 +4,21 @@ import os
 import sys
 import argparse
 import time
-import pandas as pd
 import torch
 import numpy as np
+import pandas as pd  # IMPORTANT: this should come after numpy!
 import random
 import torch.distributed as dist
 import torch.multiprocessing as mp
 # Internal libraries
 from pmw.dataloaders import GeneralizedDistributedDataLoader
 from models.nanogpt.model import *
-from datasets.tiny_shakespeare import *
+from datasets.tinyshakespeare import *
 from pmw.parallelized_model import ParallelizedModel
 from pmw.model_handler import *
 import pmw.utils as utils
-from optimizers import APTS, TrustRegion
+from optimizers.apts import APTS
+from optimizers.trust_region import TrustRegion
 
 ##########
 # TODO: REMOVE AFTER
@@ -33,6 +34,17 @@ save_threshold_in_seconds = total_hours_in_seconds/2
 
 
 def main(rank=None, world_size=None, **kwargs):
+    # Initialize process group
+    dist.init_process_group(
+        backend="gloo",
+        init_method="tcp://127.0.0.1:29500",  # Or another free port
+        rank=rank,
+        world_size=world_size
+    )
+
+    print("I made it this far 2.")
+    exit(0)
+
     # General settings
     num_epochs = kwargs.get("num_epochs", 15)
     learning_rate = kwargs.get("learning_rate", 0.001)
@@ -72,16 +84,6 @@ def main(rank=None, world_size=None, **kwargs):
     starting_epoch, starting_num_iters, epoch_results, iter_results, starting_network = utils.get_starting_info(
         rank, base_file_name, epoch_file_name, num_epochs)
 
-    exit(0)
-    # Initialize distributed environment
-    dist.init_process_group(
-        backend="gloo",
-        init_method="tcp://127.0.0.1:29500",  # Or another free port
-        rank=rank,
-        world_size=world_size
-    )
-
-    exit(0)
     # NOTE: Setting a bach size lower than the dataset size will cause the two dataloader (sequential and parallel) to have different batches, hence different losses and accuracies
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     torch.manual_seed(seed)
@@ -265,48 +267,53 @@ def main(rank=None, world_size=None, **kwargs):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description="Test Script with Seed Argument")
-    parser.add_argument("--trial", type=int, default=0)
-    parser.add_argument("--num_epochs", type=int, default=5)
-    parser.add_argument("--num_subdomains", type=int, default=2)
-    parser.add_argument("--num_replicas_per_subdomain",
-                        type=int, default=1)
-    parser.add_argument("--num_stages", type=int, default=13)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--batch_size", type=int, default=2048)
-    parser.add_argument("--data_chunks_amount", type=int, default=10)
-    parser.add_argument("--block_size", type=int, default=256)
-    parser.add_argument("--vocab_size", type=int, default=0)
-    parser.add_argument("--n_layer", type=int, default=2)
-    parser.add_argument("--n_head", type=int, default=2)
-    parser.add_argument("--n_embd", type=int, default=384)
-    parser.add_argument("--dropout", type=float, default=0.0)
-    parser.add_argument("--learning_rate", type=float, default=0.001)
-    parser.add_argument("--percentage", type=float, default=50.0)
-    parser.add_argument("--num_workers", type=int, default=0)
-    # Subdomain iterations
-    parser.add_argument("--sdi", type=int, default=2)
-    args = parser.parse_args()
+    # Adjust world_size for the number of CPU cores you want to use
+    world_size = 2
+    mp.spawn(main, args=(world_size,), nprocs=world_size, join=True)
+    # parser = argparse.ArgumentParser(
+    #     description="Test Script with Seed Argument")
+    # parser.add_argument("--trial", type=int, default=0)
+    # parser.add_argument("--num_epochs", type=int, default=5)
+    # parser.add_argument("--num_subdomains", type=int, default=2)
+    # parser.add_argument("--num_replicas_per_subdomain",
+    #                     type=int, default=1)
+    # parser.add_argument("--num_stages", type=int, default=13)
+    # parser.add_argument("--seed", type=int, default=0)
+    # parser.add_argument("--batch_size", type=int, default=2048)
+    # parser.add_argument("--data_chunks_amount", type=int, default=10)
+    # parser.add_argument("--block_size", type=int, default=256)
+    # parser.add_argument("--vocab_size", type=int, default=0)
+    # parser.add_argument("--n_layer", type=int, default=2)
+    # parser.add_argument("--n_head", type=int, default=2)
+    # parser.add_argument("--n_embd", type=int, default=384)
+    # parser.add_argument("--dropout", type=float, default=0.0)
+    # parser.add_argument("--learning_rate", type=float, default=0.001)
+    # parser.add_argument("--percentage", type=float, default=50.0)
+    # parser.add_argument("--num_workers", type=int, default=0)
+    # # Subdomain iterations
+    # parser.add_argument("--sdi", type=int, default=2)
+    # args = parser.parse_args()
 
-    num_subdomains = 2
-    num_replicas_per_subdomain = 1
-    num_stages = 1
-    WORLD_SIZE = num_subdomains*num_replicas_per_subdomain*num_stages*num_shards
+    # num_subdomains = 2
+    # num_replicas_per_subdomain = 1
+    # num_stages = 1
+    # WORLD_SIZE = num_subdomains*num_replicas_per_subdomain*num_stages*num_shards
 
-    args = (
-        world_size,
-        args.trial, args.num_epochs, args.num_subdomains,
-        args.num_replicas_per_subdomain, args.num_stages, args.seed,
-        args.batch_size, args.data_chunks_amount, args.block_size,
-        args.vocab_size, args.n_layer, args.n_head,
-        args.n_embd, args.dropout, args.learning_rate,
-        args.percentage, args.num_workers, args.sdi
-    )
+    # args = (
+    #     world_size,
+    #     args.trial, args.num_epochs, args.num_subdomains,
+    #     args.num_replicas_per_subdomain, args.num_stages, args.seed,
+    #     args.batch_size, args.data_chunks_amount, args.block_size,
+    #     args.vocab_size, args.n_layer, args.n_head,
+    #     args.n_embd, args.dropout, args.learning_rate,
+    #     args.percentage, args.num_workers, args.sdi
+    # )
 
-    mp.spawn(
-        main,
-        args=args,
-        nprocs=WORLD_SIZE,
-        join=True
-    )
+    # print("Is this something new now?")
+
+    # mp.spawn(
+    #     main,
+    #     args=args,
+    #     nprocs=WORLD_SIZE,
+    #     join=True
+    # )
