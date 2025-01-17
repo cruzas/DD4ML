@@ -1,7 +1,0 @@
-torch
-torchvision
-torchaudio
-matplotlib
-numpy
-pandas
-scipy
