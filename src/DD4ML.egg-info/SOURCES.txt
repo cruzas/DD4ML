@@ -1,8 +1,0 @@
-LICENSE
-README.md
-pyproject.toml
-src/DD4ML.egg-info/PKG-INFO
-src/DD4ML.egg-info/SOURCES.txt
-src/DD4ML.egg-info/dependency_links.txt
-src/DD4ML.egg-info/requires.txt
-src/DD4ML.egg-info/top_level.txt

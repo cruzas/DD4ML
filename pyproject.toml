@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "DD4ML"
+version = "0.1.0"
+description = "A PyTorch-based project for domain decomposition methods for machine learning."
+authors = [
+    { name = "Samuel Adolfo Cruz Alegría", email = "cruzas@usi.ch" },
+    { name = "Ken Trotti", email = "ken.trotti@usi.ch" },
+    { name = "Marc Salvadó Benasco", email = "marc.salvado@usi.ch" },
+    { name = "Shega Likaj", email = "shega.likaj@usi.ch" },
+    { name = "Bindi Capriqi", email = "bindi.capriqi@kaust.edu.sa" },
+    { name = "Armando Maria Monforte", email = "armandomaria.monforte01@universitadipavia.it" },
+    { name = "Prof. Dr. Rolf Krause", email = "rolf.krause@kaust.edu.sa" },
+]
+license = { file = "LICENSE" }
+dependencies = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "scipy"
+]
+
+[tool.setuptools]
+packages = ["mingpt", "projects"]

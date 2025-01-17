@@ -1,17 +1,28 @@
-SLM_model_wikitext-2-raw-v1.pth
+# Byte-compiled files
 *.pyc
-src/models/.DS_Store
-src/utils/.DS_Store
-src/optimizers/.DS_Store
-src/.DS_Store
-.DS_Store
-data/
-*.err
-*.out
-*.csv
-core.20615
+__pycache__/
+
+# Virtual environment
+.env/
+venv/
+
+# PyTorch checkpoint files
 *.pth
-/.idea
-*.pdf
-*.png
-*.png
+*.pt
+
+# Results and logs
+results/
+*.csv
+
+# IDE files
+.vscode/
+.idea/
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# OS files
+.DS_Store
+Thumbs.db
