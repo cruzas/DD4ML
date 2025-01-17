@@ -27,4 +27,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["src"]
+packages = ["src", "datasets"]
