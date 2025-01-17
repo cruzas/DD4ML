@@ -33,7 +33,7 @@ total_hours_in_seconds = hours*60*60
 save_threshold_in_seconds = total_hours_in_seconds/2
 
 
-def main(rank=None, world_size=None, **kwargs):
+def main(rank, world_size, args):
     # Initialize process group
     dist.init_process_group(
         backend="gloo",
@@ -42,30 +42,35 @@ def main(rank=None, world_size=None, **kwargs):
         world_size=world_size
     )
 
-    print("I made it this far 2.")
-    exit(0)
-
     # General settings
-    num_epochs = kwargs.get("num_epochs", 15)
-    learning_rate = kwargs.get("learning_rate", 0.001)
-    seed = kwargs.get("seed", 3407)  # Default seed if not provided
-    batch_size = kwargs.get("batch_size", 64)
-    data_chunks_amount = kwargs.get("data_chunks_amount", 1)
+    num_epochs = args["num_epochs"]
+    learning_rate = args["learning_rate"]
+    seed = args["seed"]  # Default seed is already set in argparse
+    batch_size = args["batch_size"]
+    data_chunks_amount = args["data_chunks_amount"]
     # Percentage of the dataset to use
-    percentage = kwargs.get("percentage", 100.0)
-    num_workers = kwargs.get("num_workers", 0)
+    percentage = args["percentage"]
+    num_workers = args["num_workers"]
     # Scalability testing values
-    trial = kwargs.get("trial", 0)
-    num_subdomains = kwargs.get("num_subdomains", 2)
-    num_replicas_per_subdomain = kwargs.get("num_replicas_per_subdomain", 1)
-    num_stages = kwargs.get("num_stages", 13)
-    num_sdi = kwargs.get("sdi", 2)  # Subdomain iterations
+    trial = args["trial"]
+    num_subdomains = args["num_subdomains"]
+    num_replicas_per_subdomain = args["num_replicas_per_subdomain"]
+    num_stages = args["num_stages"]
+    num_sdi = args["sdi"]  # Subdomain iterations
     # Transformer parameters
-    block_size = kwargs.get("block_size", 256)
-    n_layer = kwargs.get("n_layer", 1)
-    n_head = kwargs.get("n_head", 2)
-    n_embd = kwargs.get("n_embd", 384)
-    dropout = kwargs.get("dropout", 0.0)
+    block_size = args["block_size"]
+    n_layer = args["n_layer"]
+    n_head = args["n_head"]
+    n_embd = args["n_embd"]
+    dropout = args["dropout"]
+
+    print(f"Rank {rank}/{world_size}: Hello there!")
+    print(
+        f"General settings: num_epochs={num_epochs}, learning_rate={learning_rate}, seed={seed}")
+    print(
+        f"Scalability settings: num_subdomains={num_subdomains}, num_replicas_per_subdomain={num_replicas_per_subdomain}, num_stages={num_stages}")
+
+    exit(0)
 
     # Directory to save results
     tinyshakespeare_dir = "../results/tinyshakespeare"
@@ -265,55 +270,47 @@ def main(rank=None, world_size=None, **kwargs):
         # Reset cache to avoid memory leaks
         torch.cuda.empty_cache()
 
+    # Clean up
+    dist.destroy_process_group()
+
 
 if __name__ == '__main__':
-    # Adjust world_size for the number of CPU cores you want to use
-    world_size = 2
-    mp.spawn(main, args=(world_size,), nprocs=world_size, join=True)
-    # parser = argparse.ArgumentParser(
-    #     description="Test Script with Seed Argument")
-    # parser.add_argument("--trial", type=int, default=0)
-    # parser.add_argument("--num_epochs", type=int, default=5)
-    # parser.add_argument("--num_subdomains", type=int, default=2)
-    # parser.add_argument("--num_replicas_per_subdomain",
-    #                     type=int, default=1)
-    # parser.add_argument("--num_stages", type=int, default=13)
-    # parser.add_argument("--seed", type=int, default=0)
-    # parser.add_argument("--batch_size", type=int, default=2048)
-    # parser.add_argument("--data_chunks_amount", type=int, default=10)
-    # parser.add_argument("--block_size", type=int, default=256)
-    # parser.add_argument("--vocab_size", type=int, default=0)
-    # parser.add_argument("--n_layer", type=int, default=2)
-    # parser.add_argument("--n_head", type=int, default=2)
-    # parser.add_argument("--n_embd", type=int, default=384)
-    # parser.add_argument("--dropout", type=float, default=0.0)
-    # parser.add_argument("--learning_rate", type=float, default=0.001)
-    # parser.add_argument("--percentage", type=float, default=50.0)
-    # parser.add_argument("--num_workers", type=int, default=0)
-    # # Subdomain iterations
-    # parser.add_argument("--sdi", type=int, default=2)
-    # args = parser.parse_args()
+    parser = argparse.ArgumentParser(
+        description="Test Script with Seed Argument")
+    parser.add_argument("--trial", type=int, default=0)
+    parser.add_argument("--num_epochs", type=int, default=15)
+    parser.add_argument("--num_subdomains", type=int, default=1)
+    parser.add_argument("--num_replicas_per_subdomain",
+                        type=int, default=1)
+    parser.add_argument("--num_stages", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=3407)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--data_chunks_amount", type=int, default=1)
+    parser.add_argument("--block_size", type=int, default=128)
+    parser.add_argument("--vocab_size", type=int, default=0)
+    parser.add_argument("--n_layer", type=int, default=6)
+    parser.add_argument("--n_head", type=int, default=6)
+    parser.add_argument("--n_embd", type=int, default=192)
+    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--learning_rate", type=float, default=1e-3)
+    parser.add_argument("--percentage", type=float, default=100.0)
+    parser.add_argument("--num_workers", type=int, default=0)
+    # Subdomain iterations
+    parser.add_argument("--sdi", type=int, default=3)
+    args = parser.parse_args()
 
-    # num_subdomains = 2
-    # num_replicas_per_subdomain = 1
-    # num_stages = 1
-    # WORLD_SIZE = num_subdomains*num_replicas_per_subdomain*num_stages*num_shards
+    num_shards = 1
+    num_subdomains = 2
+    num_replicas_per_subdomain = 1
+    num_stages = 1
+    world_size = num_subdomains*num_replicas_per_subdomain*num_stages*num_shards
 
-    # args = (
-    #     world_size,
-    #     args.trial, args.num_epochs, args.num_subdomains,
-    #     args.num_replicas_per_subdomain, args.num_stages, args.seed,
-    #     args.batch_size, args.data_chunks_amount, args.block_size,
-    #     args.vocab_size, args.n_layer, args.n_head,
-    #     args.n_embd, args.dropout, args.learning_rate,
-    #     args.percentage, args.num_workers, args.sdi
-    # )
+    # Serialize args into a dictionary
+    args_dict = vars(args)
 
-    # print("Is this something new now?")
-
-    # mp.spawn(
-    #     main,
-    #     args=args,
-    #     nprocs=WORLD_SIZE,
-    #     join=True
-    # )
+    mp.spawn(
+        main,
+        args=(world_size, args_dict),
+        nprocs=world_size,
+        join=True
+    )
