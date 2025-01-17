@@ -10,6 +10,7 @@ import torch
 from torch.utils.data.dataloader import DataLoader
 from mingpt.utils import CfgNode as CN
 
+
 class Trainer:
 
     @staticmethod
@@ -24,7 +25,7 @@ class Trainer:
         C.batch_size = 64
         C.learning_rate = 3e-4
         C.betas = (0.9, 0.95)
-        C.weight_decay = 0.1 # only applied on matmul weights
+        C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = 1.0
         return C
 
@@ -67,7 +68,8 @@ class Trainer:
         # setup the dataloader
         train_loader = DataLoader(
             self.train_dataset,
-            sampler=torch.utils.data.RandomSampler(self.train_dataset, replacement=True, num_samples=int(1e10)),
+            sampler=torch.utils.data.RandomSampler(
+                self.train_dataset, replacement=True, num_samples=int(1e10)),
             shuffle=False,
             pin_memory=True,
             batch_size=config.batch_size,
@@ -89,14 +91,16 @@ class Trainer:
             batch = [t.to(self.device) for t in batch]
             x, y = batch
 
-            # forward the model
-            logits, self.loss = model(x, y)
+            def closure(compute_grad=True):
+                logits, self.loss = model(x, y)
+                if compute_grad:
+                    model.zero_grad(set_to_none=True)
+                    self.loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), config.grad_norm_clip)
+                return logits, self.loss
 
-            # backprop and update the parameters
-            model.zero_grad(set_to_none=True)
-            self.loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_norm_clip)
-            self.optimizer.step()
+            self.optimizer.step(closure)
 
             self.trigger_callbacks('on_batch_end')
             self.iter_num += 1
