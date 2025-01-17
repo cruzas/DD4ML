@@ -1,3 +1,4 @@
+# External libraries
 import warnings
 import os
 import sys
@@ -9,14 +10,14 @@ import numpy as np
 import random
 import torch.distributed as dist
 import torch.multiprocessing as mp
-
+# Internal libraries
 from pmw.dataloaders import GeneralizedDistributedDataLoader
 from models.nanogpt.model import *
-from llms_datasets.tiny_shakespeare import *
+from datasets.tiny_shakespeare import *
 from pmw.parallelized_model import ParallelizedModel
 from pmw.model_handler import *
-import utils
-from optimizers import APTS, TR
+import pmw.utils as utils
+from optimizers import APTS, TrustRegion
 
 ##########
 # TODO: REMOVE AFTER
@@ -31,7 +32,7 @@ total_hours_in_seconds = hours*60*60
 save_threshold_in_seconds = total_hours_in_seconds/2
 
 
-def main(rank=None, master_address=None, master_port=None, world_size=None, **kwargs):
+def main(rank=None, world_size=None, **kwargs):
     # General settings
     num_epochs = kwargs.get("num_epochs", 15)
     learning_rate = kwargs.get("learning_rate", 0.001)
@@ -71,11 +72,16 @@ def main(rank=None, master_address=None, master_port=None, world_size=None, **kw
     starting_epoch, starting_num_iters, epoch_results, iter_results, starting_network = utils.get_starting_info(
         rank, base_file_name, epoch_file_name, num_epochs)
 
+    exit(0)
     # Initialize distributed environment
-    utils.prepare_distributed_environment(
-        rank, master_address, master_port, world_size, is_cuda_enabled=True)
-    utils.check_gpus_per_rank()
+    dist.init_process_group(
+        backend="gloo",
+        init_method="tcp://127.0.0.1:29500",  # Or another free port
+        rank=rank,
+        world_size=world_size
+    )
 
+    exit(0)
     # NOTE: Setting a bach size lower than the dataset size will cause the two dataloader (sequential and parallel) to have different batches, hence different losses and accuracies
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     torch.manual_seed(seed)
@@ -283,15 +289,13 @@ if __name__ == '__main__':
     parser.add_argument("--sdi", type=int, default=2)
     args = parser.parse_args()
 
-    master_address = 'localhost'
-    master_port = '12345'
     num_subdomains = 2
     num_replicas_per_subdomain = 1
     num_stages = 1
     WORLD_SIZE = num_subdomains*num_replicas_per_subdomain*num_stages*num_shards
 
     args = (
-        master_address, master_port, world_size,
+        world_size,
         args.trial, args.num_epochs, args.num_subdomains,
         args.num_replicas_per_subdomain, args.num_stages, args.seed,
         args.batch_size, args.data_chunks_amount, args.block_size,

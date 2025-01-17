@@ -14,11 +14,11 @@ class ParallelizedModel(BaseModel):
         num_subdomains is the next shell, which deals with data-parallelism (Domain Decomposition approach).
         num_replicas_per_subdomain refers to the number of replicas in each data-parallel subdomain (exact data parallelism to speed up computation within each subdomain).
         stage_list is the list of pipeline stages per replica in each subdomain
-        
+
         NOTE: REMAKE COMMENTS !!!!!!!!!!!!!!!!!!!
-    
+
         E.g. num_subdomains = 2; num_replicas_per_subdomain = 3; stage_list = [(Layer0, Layer0dict), (Layer1, Layer1dict), (Layer2, Layer2dict)])
-    
+
                                     Subdomain 0                                                         Subdomain 1
                 Replica 0           Replica 1           Replica 2                   Replica 0           Replica 1           Replica 2
                 [Layer0, (Rank0)    [Layer0, (Rank3)   [Layer0, (Rank6)            [Layer0, (Rank9)    [Layer0, (Rank12)   [Layer0, (Rank15)
@@ -33,9 +33,10 @@ class ParallelizedModel(BaseModel):
         self.tot_replicas = self.model_handler.tot_replicas
 
         if self.rank in self.model_handler.available_ranks:
-            self.subdomain = DataAndWeightParallelizedSubdomain(self.model_handler, sample)
+            self.subdomain = DataAndWeightParallelizedSubdomain(
+                self.model_handler, sample)
             self.sync_params()
-    
+
     def save_state_dict(self, path):
         params_dict = self.state_dict(dst_rank=0)
         if self.rank == 0:
@@ -54,7 +55,8 @@ class ParallelizedModel(BaseModel):
                     key2 = '.'.join(key.split('.')[1:])
                     key2 = 'layer.' + key2
                     local_dict[layer][key2] = params_dict[key]
-        self.subdomain.weight_parallelized_model.subdomain.load_state_dict(local_dict)
+        self.subdomain.weight_parallelized_model.subdomain.load_state_dict(
+            local_dict)
 
     def state_dict(self, dst_rank=0):
         def merger(gathered_state_dicts, replica_ranks):
@@ -63,16 +65,19 @@ class ParallelizedModel(BaseModel):
                 for key in gathered_state_dicts[i].keys():
                     gathered_state_dicts[0][key] = gathered_state_dicts[i][key]
             return gathered_state_dicts[0]
-                
+
         sd, rep, _, _ = self.model_handler.rank_to_position()
         if sd == 0 and rep == 0:
             replica_ranks = self.model_handler.replica_ranks()
             subdomain_state_dict = self.subdomain.weight_parallelized_model.subdomain.state_dict()
             if self.rank == replica_ranks[0]:
-                gathered_state_dicts = [None for _ in range(len(replica_ranks))]
-                dist.gather_object(subdomain_state_dict, gathered_state_dicts, dst=replica_ranks[0], group=self.model_handler.get_replica_group())
+                gathered_state_dicts = [
+                    None for _ in range(len(replica_ranks))]
+                dist.gather_object(subdomain_state_dict, gathered_state_dicts,
+                                   dst=replica_ranks[0], group=self.model_handler.get_replica_group())
             else:
-                dist.gather_object(subdomain_state_dict, dst=replica_ranks[0], group=self.model_handler.get_replica_group())
+                dist.gather_object(
+                    subdomain_state_dict, dst=replica_ranks[0], group=self.model_handler.get_replica_group())
 
             if self.rank == replica_ranks[0]:
                 merged_state_dict = merger(gathered_state_dicts, replica_ranks)
@@ -80,7 +85,7 @@ class ParallelizedModel(BaseModel):
                     dist.send_object_list([merged_state_dict], dst=dst_rank)
                 else:
                     return merged_state_dict
-                
+
         if self.rank == dst_rank:
             return dist.recv_object_list(src=replica_ranks[0])[0]
 
@@ -92,52 +97,55 @@ class ParallelizedModel(BaseModel):
 
     def subdomain_backward(self, losses):
         self.subdomain.weight_parallelized_model.subdomain.backward(losses)
-        self.subdomain.sync_grads() # This is needed in case there are multiple replicas per subdomain (exact data parallelism)
+        # This is needed in case there are multiple replicas per subdomain (exact data parallelism)
+        self.subdomain.sync_grads()
 
     def subdomain_zero_grad(self):
         self.subdomain.weight_parallelized_model.subdomain.zero_grad()
 
     def subdomain_params(self):
         return self.subdomain.weight_parallelized_model.subdomain.parameters()
-        
+
     def subdomain_grad(self):
         return self.subdomain.weight_parallelized_model.subdomain.grad()
-    
+
     def subdomain_grad_norm(self, p=2):
         return self.subdomain.weight_parallelized_model.subdomain.grad_norm(p=p)
-    
-    def parameters(self, clone=False): # Returns the global parameters of the model
+
+    def parameters(self, clone=False):  # Returns the global parameters of the model
         return self.subdomain.weight_parallelized_model.parameters(clone=clone)
-    
-    def parameters_norm(self, p=2): # Returns the global parameters norm of the model
+
+    def parameters_norm(self, p=2):  # Returns the global parameters norm of the model
         return self.subdomain.weight_parallelized_model.parameters().norm(p=p)
-    
-    def grad(self, clone=False): # Returns the global gradient of the model
+
+    def grad(self, clone=False):  # Returns the global gradient of the model
         return self.subdomain.weight_parallelized_model.grad(clone=clone)
 
-    def grad_norm(self, p=2): # Returns the global gradient norm of the model
+    def grad_norm(self, p=2):  # Returns the global gradient norm of the model
         return self.subdomain.weight_parallelized_model.grad_norm(p=p)
-        
-    def forward(self, x, chunks_amount=1, reset_grad = False, compute_grad = True):
+
+    def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):
         return self.subdomain.forward(x, chunks_amount=chunks_amount, reset_grad=reset_grad, compute_grad=compute_grad)
-    
+
     def backward(self, losses):
         self.subdomain.backward(losses=losses, sync=False)
-        self.sync_grads()  
-    
+        self.sync_grads()
+
     def sync_params(self, method='average'):
         if self.num_subdomains > 1:
             if method not in ['average', 'sum']:
                 raise ValueError(f"Method {method} is not supported.")
             for param in self.subdomain_params():
-                dist.all_reduce(tensor=param.data, group=self.model_handler.get_layers_copy_group(mode='global'), op=dist.ReduceOp.SUM)
+                dist.all_reduce(tensor=param.data, group=self.model_handler.get_layers_copy_group(
+                    mode='global'), op=dist.ReduceOp.SUM)
                 if method == 'average':
                     param.data /= self.tot_replicas
 
     def sync_grads(self):
         if self.num_subdomains > 1:
             for param in self.subdomain_params():
-                dist.all_reduce(tensor=param.grad, group=self.model_handler.get_layers_copy_group(mode='global'), op=dist.ReduceOp.SUM)	
+                dist.all_reduce(tensor=param.grad, group=self.model_handler.get_layers_copy_group(
+                    mode='global'), op=dist.ReduceOp.SUM)
                 param.grad /= self.tot_replicas
 
     def normalize_grads(self, p=torch.inf):
