@@ -27,4 +27,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["mingpt", "projects", "tests"]
+packages = ["src"]
