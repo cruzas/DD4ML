@@ -12,25 +12,15 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 # Internal libraries
 from pmw.dataloaders import GeneralizedDistributedDataLoader
-from models.nanogpt.model import *
+from src.models.skgpt.model import *
 from datasets.tinyshakespeare import *
 from pmw.parallelized_model import ParallelizedModel
 from pmw.model_handler import *
 import pmw.utils as utils
 from optimizers.apts import APTS
 from optimizers.trust_region import TrustRegion
-
-##########
-# TODO: REMOVE AFTER
-warnings.filterwarnings("ignore")
-#########
+# Some settings
 bias = True
-
-num_shards = 1
-TEST_ACCURACY = False
-hours = 24
-total_hours_in_seconds = hours*60*60
-save_threshold_in_seconds = total_hours_in_seconds/2
 
 
 def main(rank, world_size, args):
@@ -65,10 +55,11 @@ def main(rank, world_size, args):
     dropout = args["dropout"]
 
     print(f"Rank {rank}/{world_size}: Hello there!")
-    print(
-        f"General settings: num_epochs={num_epochs}, learning_rate={learning_rate}, seed={seed}")
-    print(
-        f"Scalability settings: num_subdomains={num_subdomains}, num_replicas_per_subdomain={num_replicas_per_subdomain}, num_stages={num_stages}")
+    if rank == 0:
+        print(
+            f"General settings: num_epochs={num_epochs}, learning_rate={learning_rate}, seed={seed}")
+        print(
+            f"Scalability settings: num_subdomains={num_subdomains}, num_replicas_per_subdomain={num_replicas_per_subdomain}, num_stages={num_stages}")
 
     exit(0)
 

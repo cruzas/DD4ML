@@ -23,20 +23,19 @@ def get_config():
     # system
     C.system = CN()
     C.system.seed = 3407
-    C.system.work_dir = './out/chargpt'
+    C.system.work_dir = './out/'
 
     # data
     C.data = CharDataset.get_default_config()
 
     # model
     C.model = GPT.get_default_config()
-    C.model.model_type = 'gpt-mini'  # SAM: Change this to nano
+    C.model.model_type = 'gpt-mini'
 
     # trainer
     C.trainer = Trainer.get_default_config()
     # the model we're using is so small that we can go a bit faster
-    # C.trainer.learning_rate = 5e-4
-    C.trainer.learning_rate = 1e-3
+    C.trainer.learning_rate = 5e-4
 
     return C
 
