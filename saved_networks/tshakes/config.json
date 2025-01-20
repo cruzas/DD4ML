@@ -11,9 +11,9 @@
     },
     "model": {
         "model_type": "gpt-mini",
-        "n_layer": null,
-        "n_head": null,
-        "n_embd": null,
+        "n_layer": "null",
+        "n_head": "null",
+        "n_embd": "null",
         "vocab_size": 0,
         "block_size": 128,
         "embd_pdrop": 0.1,
@@ -29,12 +29,33 @@
         "max_iters": 15,
         "batch_size": 64,
         "learning_rate": 0.001,
-        "max_subdomain_iters": 3,
         "betas": [
             0.9,
             0.95
         ],
         "weight_decay": 0.1,
-        "grad_norm_clip": 1.0
+        "grad_norm_clip": 1.0,
+        "subdomain_optimizer": "torch.optim.adamw.AdamW",
+        "subdomain_optimizer_args": {
+            "lr": 0.001,
+            "betas": [
+                0.9,
+                0.95
+            ]
+        },
+        "max_subdomain_iters": 3,
+        "global_optimizer": "src.optimizers.trust_region.TrustRegion",
+        "global_optimizer_args": {
+            "lr": 0.001,
+            "max_lr": 1.0,
+            "min_lr": 0.0001,
+            "nu": 0.5,
+            "inc_factor": 2.0,
+            "dec_factor": 0.5,
+            "nu_1": 0.25,
+            "nu_2": 0.75,
+            "max_iter": 3,
+            "norm_type": 2
+        }
     }
 }

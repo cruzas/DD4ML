@@ -365,16 +365,28 @@ class CfgNode:
         return "".join(parts)
 
     def to_dict(self):
-        """ return a dict representation of the config """
-        # return { k: v.to_dict() if isinstance(v, CfgNode) else v for k, v in self.__dict__.items() }
-
+        """Return a dict representation of the config with JSON-serializable values."""
         result = {}
+
         for k, v in self.__dict__.items():
             if isinstance(v, CfgNode):
+                # Recursively call to_dict for nested CfgNode instances
                 result[k] = v.to_dict()
+            elif isinstance(v, type):  
+                # Convert class references to string
+                result[k] = f"{v.__module__}.{v.__name__}"
+            elif v is None:
+                # Replace None with a JSON-serializable equivalent
+                result[k] = "null"
+            elif v is Ellipsis:  
+                # Replace ellipses (...) with a placeholder string
+                result[k] = "..."
             else:
+                # Keep other values as is
                 result[k] = v
+
         return result
+
 
     def merge_from_dict(self, d):
         self.__dict__.update(d)
