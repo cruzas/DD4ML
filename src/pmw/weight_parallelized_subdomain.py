@@ -61,7 +61,7 @@ class WeightParallelizedSubdomain(BaseModel):
         return [param for layer in self.sharded_layers for param in layer.parameters()]
 
     def forward(self, x=None, num_chunks=None, num_samples_in_chunk=None, chunk_id=None, is_in_pipeline=False):
-        self.DEBUG = False
+        self.DEBUG = True
         empty_at_the_end = []
         if not is_in_pipeline:
             for chunk_id in range(len(self.outputs[list(self.outputs.keys())[0]])):
