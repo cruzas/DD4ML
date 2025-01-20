@@ -9,8 +9,10 @@ from collections import defaultdict
 import torch
 from torch.utils.data.dataloader import DataLoader
 
-from pmw.dataloaders import GeneralizedDistributedDataLoader
+from src.pmw.dataloaders import GeneralizedDistributedDataLoader
+from src.pmw.model_handler import ModelHandler
 from src.utils import CfgNode as CN
+from src.utils import dprint
 
 
 class Trainer:
@@ -27,8 +29,6 @@ class Trainer:
         C.batch_size = 64
         # the model we're using is so small that we can go a bit faster
         C.learning_rate = 1e-3
-        C.num_subdomains = 1
-        C.num_replicas_per_subdomain = 1
         C.max_subdomain_iters = 3
         C.betas = (0.9, 0.95) # in case of Adam optimizer used somewhere
         C.weight_decay = 0.1  # only applied on matmul weights
@@ -48,7 +48,7 @@ class Trainer:
         else:
             self.device = config.device
         self.model = self.model.to(self.device)
-        print("running on device", self.device)
+        dprint(f"running on device {self.device}")
 
         # variables that will be assigned to trainer class later for logging and etc
         self.iter_num = 0
@@ -67,20 +67,21 @@ class Trainer:
 
     def run(self):
         model, config = self.model, self.config
+        model_handler = ModelHandler(model.model_dict, config.num_subdomains, config.num_replicas_per_subdomain)
 
         # setup the optimizer
         self.optimizer = model.configure_optimizers(config)
-
+    
         # setup the dataloader
-        train_loader = DataLoader(
-            self.train_dataset,
-            sampler=torch.utils.data.RandomSampler(
-                self.train_dataset, replacement=True, num_samples=int(1e10)),
-            shuffle=False,
-            pin_memory=True,
-            batch_size=config.batch_size,
-            num_workers=config.num_workers,
-        )
+        # train_loader = DataLoader(
+        #     self.train_dataset,
+        #     sampler=torch.utils.data.RandomSampler(
+        #         self.train_dataset, replacement=True, num_samples=int(1e10)),
+        #     shuffle=False,
+        #     pin_memory=True,
+        #     batch_size=config.batch_size,
+        #     num_workers=config.num_workers,
+        # )
 
         model.train()
         self.iter_num = 0

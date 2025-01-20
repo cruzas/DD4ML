@@ -1,12 +1,13 @@
-import torch
-from pmw.base_model import BaseModel
-from pmw.sharded_layer import ShardedLayer
-from torch import nn
-from torch import autograd
-import src.utils as utils
-import torch.distributed as dist
 import copy
 from collections import OrderedDict
+
+import torch
+import torch.distributed as dist
+from torch import autograd, nn
+
+import src.utils as utils
+from src.pmw.base_model import BaseModel
+from src.pmw.sharded_layer import ShardedLayer
 
 
 class WeightParallelizedSubdomain(BaseModel):

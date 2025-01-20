@@ -1,8 +1,11 @@
-import torch
 import copy
+
+import torch
 import torch.distributed as dist
-from pmw.base_model import BaseModel
-from pmw.data_and_weight_parallelized_subdomain import DataAndWeightParallelizedSubdomain
+
+from src.pmw.base_model import BaseModel
+from src.pmw.data_and_weight_parallelized_subdomain import \
+    DataAndWeightParallelizedSubdomain
 
 
 class ParallelizedModel(BaseModel):

@@ -1,8 +1,13 @@
-import torch.nn as nn
-from pmw.base_model import BaseModel
-from torch import autograd
+import math
 from inspect import isfunction
+
+import torch
 import torch.autograd as autograd
+import torch.nn as nn
+from torch import autograd
+
+from src.pmw.base_model import BaseModel
+
 
 # TODO: Implement this properly to actually perform sharding of the layers.
 class ShardedLayer(BaseModel):
@@ -18,6 +23,21 @@ class ShardedLayer(BaseModel):
                     self.layer = layer_dict['callable']['object']
                 else:
                     self.layer = layer_dict['callable']['object'](**layer_dict['callable']['settings']).to(self.tensor_device)
+                
+                if isinstance(self.layer, nn.Linear):
+                    torch.nn.init.normal_(self.layer.weight, mean=0.0, std=0.02)
+                    if self.layer.bias is not None:
+                            torch.nn.init.zeros_(self.layer.bias)
+                elif isinstance(self.layer, nn.Embedding):
+                    torch.nn.init.normal_(self.layer.weight, mean=0.0, std=0.02)
+                elif isinstance(self.layer, nn.LayerNorm):
+                    torch.nn.init.zeros_(self.layer.bias)
+                    torch.nn.init.ones_(self.layer.weight)
+
+                for pn, p in self.layer.named_parameters():
+                    if pn.endswith('c_proj.weight'):
+                        torch.nn.init.normal_(
+                            p, mean=0.0, std=0.02/math.sqrt(2 * BaseModel.n_layer))
         else:
             # This has sharding...TODO
             pass

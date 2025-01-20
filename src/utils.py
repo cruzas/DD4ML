@@ -13,6 +13,14 @@ import torch
 import torch.distributed as dist
 
 
+def dprint(str_to_print): 
+    '''
+    Print only if the rank is 0 or if the code is running in a single node.
+    '''
+    if not dist.is_initialized() or (dist.is_initialized() and dist.get_rank() == 0):
+        print(str_to_print)
+
+
 def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
     starting_epoch = 0
     starting_num_iters = 0
@@ -442,5 +450,3 @@ class CfgNode:
             if delete_ok: del self.__dict__[ok]
            
             
-        
-
