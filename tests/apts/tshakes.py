@@ -1,26 +1,98 @@
-# External libraries
-import warnings
-import os
-import sys
 import argparse
+import json
+import os
+import random
+import sys
 import time
-import torch
+import warnings
+from ast import literal_eval
+
 import numpy as np
 import pandas as pd  # IMPORTANT: this should come after numpy!
-import random
+import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-# Internal libraries
-from pmw.dataloaders import GeneralizedDistributedDataLoader
-from src.models.skgpt.model import *
+from torch.utils.data import Dataset
+from torch.utils.data.dataloader import DataLoader
+
 from datasets.tinyshakespeare import *
-from pmw.parallelized_model import ParallelizedModel
-from pmw.model_handler import *
-import pmw.utils as utils
 from optimizers.apts import APTS
 from optimizers.trust_region import TrustRegion
+from pmw.model_handler import *
+from pmw.parallelized_model import ParallelizedModel
+from src.models.skgpt.model import GPT
+from src.models.skgpt.trainer import Trainer
+from src.utils import CfgNode as CN
+from src.utils import closure, get_starting_info, set_seed, setup_logging
+
 # Some settings
 bias = True
+
+
+def get_config():
+    C = CN()
+
+    # system
+    C.system = CN()
+    C.system.seed = 3407
+    C.system.trial = 0
+    C.system.work_dir = '../../saved_networks/tshakes/'
+
+    # data
+    C.data = CharDataset.get_default_config()
+  
+    # model
+    C.model = GPT.get_default_config()
+
+    # trainer
+    C.trainer = Trainer.get_default_config()
+    return C
+
+
+class CharDataset(Dataset):
+    """
+    Emits batches of characters
+    """
+
+    @staticmethod
+    def get_default_config():
+        C = CN()
+        C.block_size = 128
+        C.data_chunks_amount = 1
+        C.percentage = 100.0
+        return C
+
+    def __init__(self, config, data):
+        self.config = config
+
+        chars = sorted(list(set(data)))
+        data_size, vocab_size = len(data), len(chars)
+        if dist.get_rank() == 0:
+            print('data has %d characters, %d unique.' % (data_size, vocab_size))
+
+        self.stoi = {ch: i for i, ch in enumerate(chars)}
+        self.itos = {i: ch for i, ch in enumerate(chars)}
+        self.vocab_size = vocab_size
+        self.data = data
+
+    def get_vocab_size(self):
+        return self.vocab_size
+
+    def get_block_size(self):
+        return self.config.block_size
+
+    def __len__(self):
+        return len(self.data) - self.config.block_size
+
+    def __getitem__(self, idx):
+        # grab a chunk of (block_size + 1) characters from the data
+        chunk = self.data[idx:idx + self.config.block_size + 1]
+        # encode every character to an integer
+        dix = [self.stoi[s] for s in chunk]
+        # return as tensors
+        x = torch.tensor(dix[:-1], dtype=torch.long)
+        y = torch.tensor(dix[1:], dtype=torch.long)
+        return x, y
 
 
 def main(rank, world_size, args):
@@ -32,269 +104,98 @@ def main(rank, world_size, args):
         world_size=world_size
     )
 
-    # General settings
-    num_epochs = args["num_epochs"]
-    learning_rate = args["learning_rate"]
-    seed = args["seed"]  # Default seed is already set in argparse
-    batch_size = args["batch_size"]
-    data_chunks_amount = args["data_chunks_amount"]
-    # Percentage of the dataset to use
-    percentage = args["percentage"]
-    num_workers = args["num_workers"]
-    # Scalability testing values
-    trial = args["trial"]
-    num_subdomains = args["num_subdomains"]
-    num_replicas_per_subdomain = args["num_replicas_per_subdomain"]
-    num_stages = args["num_stages"]
-    num_sdi = args["sdi"]  # Subdomain iterations
-    # Transformer parameters
-    block_size = args["block_size"]
-    n_layer = args["n_layer"]
-    n_head = args["n_head"]
-    n_embd = args["n_embd"]
-    dropout = args["dropout"]
+    # Print world size and rank
+    print(f"Rank {rank}/{world_size-1}")
 
-    print(f"Rank {rank}/{world_size}: Hello there!")
-    if rank == 0:
-        print(
-            f"General settings: num_epochs={num_epochs}, learning_rate={learning_rate}, seed={seed}")
-        print(
-            f"Scalability settings: num_subdomains={num_subdomains}, num_replicas_per_subdomain={num_replicas_per_subdomain}, num_stages={num_stages}")
+    # get default config and overrides from the command line, if any
+    config = get_config()
+    config.merge_from_dict(args)
+    config.merge_and_cleanup()
+    if rank == 0: print(config)   
+    setup_logging(config)
+    set_seed(config.system.seed)
 
-    exit(0)
+    # construct the training dataset
+    # don't worry we won't run out of file handles
+    text = open('../../input.txt', 'r').read()
+    train_dataset = CharDataset(config.data, text)
 
-    # Directory to save results
-    tinyshakespeare_dir = "../results/tinyshakespeare"
+    # construct the model
+    config.model.vocab_size = train_dataset.get_vocab_size()
+    config.model.block_size = train_dataset.get_block_size()
+    model = GPT(config.model)
+    print(model)
+    print('asd')
+    # # construct the trainer object
+    # trainer = Trainer(config.trainer, model, train_dataset)
 
-    # File names
-    lr_str = str(learning_rate).replace('.', '_')  # Learning rate string
-    perc_str = str(percentage).replace('.', '_')  # Percentage string
-    base_file_name = f"ts_t_{trial}_nw_{num_workers}_bls_{block_size}_nl_{n_layer}_nh_{n_head}_ne_{n_embd}_ns_{num_subdomains}_nr_{num_replicas_per_subdomain}_st_{num_stages}_bs_{batch_size}_dc_{data_chunks_amount}_lr_{lr_str}_perc_{perc_str}_sdi_{num_sdi}_epochs_{num_epochs}_apts"
-    # File to save epoch results
-    epoch_file_name = os.path.join(
-        tinyshakespeare_dir, f"{base_file_name}.csv")
-    iter_file_name = epoch_file_name.replace(
-        '.csv', '_iter.csv')  # File to save iteration results
+    # # iteration callback
+    # def batch_end_callback(trainer):
 
-    # Check if the model has already been trained
-    starting_epoch, starting_num_iters, epoch_results, iter_results, starting_network = utils.get_starting_info(
-        rank, base_file_name, epoch_file_name, num_epochs)
+    #     if trainer.iter_num % 10 == 0:
+    #         print(
+    #             f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss.item():.5f}")
 
-    # NOTE: Setting a bach size lower than the dataset size will cause the two dataloader (sequential and parallel) to have different batches, hence different losses and accuracies
-    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-    torch.manual_seed(seed)
-    random.seed(seed)
-    np.random.seed(seed)
+    #     if trainer.iter_num % 500 == 0:
+    #         # evaluate both the train and test score
+    #         model.eval()
+    #         with torch.no_grad():
+    #             # sample from the model...
+    #             context = "O God, O God!"
+    #             x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[
+    #                 None, ...].to(trainer.device)
+    #             y = model.generate(x, 500, temperature=1.0,
+    #                                do_sample=True, top_k=10)[0]
+    #             completion = ''.join([train_dataset.itos[int(i)] for i in y])
+    #             print(completion)
+    #         # save the latest model
+    #         print("saving model")
+    #         ckpt_path = os.path.join(config.system.work_dir, "model.pt")
 
-    # Device rank
-    rank = dist.get_rank() if dist.get_backend() == 'nccl' else rank
+    #         torch.save(model.state_dict(), ckpt_path)
+    #         # revert model to training mode
+    #         model.train()
 
-    # Load dataset
-    train_dataset_par, _, tokenizer = load_shakespeare(
-        train_split=0.8, block_size=block_size, percentage=percentage)
+    # trainer.set_callback('on_batch_end', batch_end_callback)
 
-    # Set configuration for the model
-    config = GPTConfig(
-        num_stages=num_stages,
-        block_size=block_size,
-        vocab_size=tokenizer.vocab_size,
-        n_layer=n_layer,
-        n_head=n_head,
-        n_embd=n_embd,
-        dropout=dropout,
-        bias=bias
-    )
-
-    # Define the loss function
-    def criterion(outputs, targets):
-        B, T, C = outputs.size()
-        # loss = F.cross_entropy(outputs.view(B*T, C), targets.view(-1), ignore_index=-1)
-        loss = F.cross_entropy(outputs.reshape(
-            B * T, C), targets.reshape(-1), ignore_index=-1)
-        return loss
-
-    # Reset seed to ensure the model is initialized with the same weights
-    torch.manual_seed(seed)
-    model_dict = get_model_dict(config)
-
-    if num_stages == 1:
-        # Go through every key in dictionary and set the field stage to 0
-        for key in model_dict.keys():
-            model_dict[key]['stage'] = 0
-
-    # Initialize model handler
-    model_handler = ModelHandler(
-        model_dict, num_subdomains, num_replicas_per_subdomain, available_ranks=None)
-
-    if rank == 0:
-        print(f"World size: {dist.get_world_size()}")
-        # print(f'(rank {rank}) Model stage_list: {model_handler.stage_list}\n')
-
-    # Initialize dataloaders
-    torch.manual_seed(seed)
-    train_loader = GeneralizedDistributedDataLoader(
-        model_handler=model_handler, dataset=train_dataset_par, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
-    torch.manual_seed(seed)
-
-    # Sharded first layer into [0,1] -> dataloader should upload batch to 0 only
-    x_batch, _ = next(iter(train_loader))
-    random_input = x_batch.to(device)
-
-    # Initialize model
-    par_model = ParallelizedModel(
-        model_handler=model_handler, sample=random_input)
-
-    # Load model if it exists
-    if starting_network != "":
-        par_model.load_state_dict(
-            f"../saved_networks/{starting_network}")
-        if rank == 0:
-            print(f"Model loaded from {starting_network}")
-
-    # Initialize optimizer
-    glob_opt_params = {
-        'lr': learning_rate,
-        'max_lr': 1.0,
-        'min_lr': 0.0001,
-        'nu': 0.5,
-        'inc_factor': 2.0,
-        'dec_factor': 0.5,
-        'nu_1': 0.25,
-        'nu_2': 0.75,
-        'max_iter': 3,
-        'norm_type': 2
-    }
-
-    glob_opt = TR
-    subdomain_optimizer = torch.optim.SGD
-    par_optimizer = APTS(model=par_model, subdomain_optimizer=subdomain_optimizer, subdomain_optimizer_defaults={'lr': learning_rate, 'momentum': 0.9},
-                         global_optimizer=glob_opt, global_optimizer_defaults=glob_opt_params, lr=learning_rate, max_subdomain_iter=num_sdi, dogleg=True, APTS_in_data_sync_strategy='average', step_strategy='mean')
-
-    # Compute number of iterations needed per epoch
-    num_iters_per_epoch = len(train_loader)
-    if rank == 0:
-        print("Number of iterations per epoch: ", num_iters_per_epoch)
-        print(
-            f"Starting from epoch {starting_epoch} and iteration {starting_num_iters}")
-    num_iters = starting_num_iters
-
-    # Parallel training loop
-    training_start_time = time.time()  # TODO: fix start time when resuming training
-    for epoch in range(starting_epoch, num_epochs+1):
-        dist.barrier()
-        model_dict_file_name = epoch_file_name.replace(
-            '.csv', f'_epoch_{epoch}.pth').replace(tinyshakespeare_dir, "../saved_networks")
-        if rank == 0:
-            print(f'____________ EPOCH {epoch} ____________')
-        epoch_start_time = time.time()
-        loss_total_par = 0
-        counter_par = 0
-        for i, (x, y) in enumerate(train_loader):
-            iter_start_time = time.time()
-            dist.barrier()
-            counter_par += 1
-            x = x.to(device)
-            y = y.to(device)
-
-            # Build an estimate as to how much time it would take to finish the epoch
-            if rank == 0 and i == 1:
-                time_passed = (time.time() - training_start_time)
-                time_per_iter = time_passed/(num_iters+1)
-                time_left = time_per_iter*(len(train_loader))
-                print(
-                    f"Time left for epoch {epoch} is approximately {time_left:.2f} seconds")
-
-            def final_subdomain_closure(outputs, y=y):
-                y_chunks = y.chunk(len(outputs))
-                loss = []
-                for i, o in enumerate(outputs):
-                    loss.append(criterion(o, y_chunks[i]))
-                return loss
-
-            if epoch == 0:
-                closuree = utils.closure(
-                    x, y, criterion, par_model, data_chunks_amount=data_chunks_amount, compute_grad=False)
-                par_loss = closuree()
-            else:
-                par_optimizer.zero_grad()
-                closuree = utils.closure(
-                    x, y, criterion=criterion, model=par_model, data_chunks_amount=data_chunks_amount, compute_grad=True)
-                par_loss = par_optimizer.step(closure=closuree,
-                                              final_subdomain_closure=final_subdomain_closure)
-                num_iters += 1
-
-            loss_total_par += par_loss
-            par_model.sync_params()
-            if rank == 0 and epoch > 0:
-                iter_time = time.time() - iter_start_time
-                iter_results.append(
-                    {'iteration': num_iters, 'time': iter_time, 'loss': par_loss})
-
-        # Compute average loss and epoch time
-        avg_loss = -1
-        epoch_time = -1
-        if rank == 0:
-            avg_loss = loss_total_par/counter_par
-            epoch_time = time.time() - epoch_start_time  # Epoch time in seconds
-            print(
-                f'Epoch {epoch}, Parallel avg loss: {avg_loss}, Time: {epoch_time}')
-
-        # Save epoch and iteration results
-        if rank == 0:
-            epoch_results.append(
-                {'epoch': epoch, 'time': epoch_time, 'loss': avg_loss})
-            df_results = pd.DataFrame(epoch_results)
-            df_results.to_csv(epoch_file_name, index=False)
-            print(f"Epoch results saved to {epoch_file_name}")
-
-            if epoch == 0:
-                iter_results.append(
-                    {'iteration': 0, 'time': 0, 'loss': avg_loss})
-
-            df_iter_results = pd.DataFrame(iter_results)
-            df_iter_results.to_csv(iter_file_name, index=False)
-            print(f"Iteration results saved to {iter_file_name}")
-
-        # Save model state
-        par_model.save_state_dict(model_dict_file_name)
-
-        # Reset cache to avoid memory leaks
-        torch.cuda.empty_cache()
+    # # run the optimization
+    # trainer.run()
 
     # Clean up
     dist.destroy_process_group()
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="Test Script with Seed Argument")
     parser.add_argument("--trial", type=int, default=0)
-    parser.add_argument("--num_epochs", type=int, default=15)
+    parser.add_argument("--max_iters", type=int, default=15)
     parser.add_argument("--num_subdomains", type=int, default=1)
     parser.add_argument("--num_replicas_per_subdomain",
                         type=int, default=1)
-    parser.add_argument("--num_stages", type=int, default=1)
+    parser.add_argument("--num_stages", type=int, default=3)
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--data_chunks_amount", type=int, default=1)
     parser.add_argument("--block_size", type=int, default=128)
     parser.add_argument("--vocab_size", type=int, default=0)
-    parser.add_argument("--n_layer", type=int, default=6)
-    parser.add_argument("--n_head", type=int, default=6)
-    parser.add_argument("--n_embd", type=int, default=192)
-    parser.add_argument("--dropout", type=float, default=0.1)
+    # The following should be enabled only if we want to use a non-predefined model
+    # parser.add_argument("--n_layer", type=int, default=6)
+    # parser.add_argument("--n_head", type=int, default=6)
+    # parser.add_argument("--n_embd", type=int, default=192)
+    # 
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--percentage", type=float, default=100.0)
     parser.add_argument("--num_workers", type=int, default=0)
     # Subdomain iterations
-    parser.add_argument("--sdi", type=int, default=3)
+    parser.add_argument("--max_subdomain_iters", type=int, default=3)
     args = parser.parse_args()
 
     num_shards = 1
-    num_subdomains = 2
-    num_replicas_per_subdomain = 1
-    num_stages = 1
+    num_subdomains = args.num_subdomains
+    num_replicas_per_subdomain = args.num_replicas_per_subdomain
+    num_stages = args.num_stages
     world_size = num_subdomains*num_replicas_per_subdomain*num_stages*num_shards
+    print("World size: ", world_size)
 
     # Serialize args into a dictionary
     args_dict = vars(args)

@@ -6,12 +6,12 @@ import os
 import sys
 
 import torch
-from torch.utils.data import Dataset
-from torch.utils.data.dataloader import DataLoader
-
 from mingpt.model import GPT
 from mingpt.trainer import Trainer
-from mingpt.utils import set_seed, setup_logging, CfgNode as CN
+from mingpt.utils import CfgNode as CN
+from mingpt.utils import set_seed, setup_logging
+from torch.utils.data import Dataset
+from torch.utils.data.dataloader import DataLoader
 
 # -----------------------------------------------------------------------------
 
@@ -23,7 +23,7 @@ def get_config():
     # system
     C.system = CN()
     C.system.seed = 3407
-    C.system.work_dir = './out/'
+    C.system.work_dir = '../../saved_networks/chargpt/'
 
     # data
     C.data = CharDataset.get_default_config()
@@ -131,6 +131,7 @@ if __name__ == '__main__':
             # save the latest model
             print("saving model")
             ckpt_path = os.path.join(config.system.work_dir, "model.pt")
+
             torch.save(model.state_dict(), ckpt_path)
             # revert model to training mode
             model.train()

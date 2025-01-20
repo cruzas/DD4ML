@@ -2,7 +2,7 @@ from abc import abstractmethod
 import torch.nn as nn
 import torch.distributed as dist
 import torch
-import pmw.utils as utils
+import src.utils as utils
 
 
 class BaseModel(nn.Module):

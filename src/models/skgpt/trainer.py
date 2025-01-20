@@ -8,7 +8,9 @@ from collections import defaultdict
 
 import torch
 from torch.utils.data.dataloader import DataLoader
-from mingpt.utils import CfgNode as CN
+
+from pmw.dataloaders import GeneralizedDistributedDataLoader
+from src.utils import CfgNode as CN
 
 
 class Trainer:
@@ -23,10 +25,14 @@ class Trainer:
         # optimizer parameters
         C.max_iters = None
         C.batch_size = 64
-        C.learning_rate = 3e-4
-        C.betas = (0.9, 0.95)
+        # the model we're using is so small that we can go a bit faster
+        C.learning_rate = 1e-3
+        C.num_subdomains = 1
+        C.num_replicas_per_subdomain = 1
+        C.max_subdomain_iters = 3
+        C.betas = (0.9, 0.95) # in case of Adam optimizer used somewhere
         C.weight_decay = 0.1  # only applied on matmul weights
-        C.grad_norm_clip = 1.0
+        C.grad_norm_clip = 1.0 # max norm for gradient clipping
         return C
 
     def __init__(self, config, model, train_dataset):
