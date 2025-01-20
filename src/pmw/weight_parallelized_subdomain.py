@@ -60,6 +60,12 @@ class WeightParallelizedSubdomain(BaseModel):
     def parameters(self):
         return [param for layer in self.sharded_layers for param in layer.parameters()]
 
+    def named_parameters(self):
+        return [(layer_name, param) for layer_name, layer in zip(self.stage_data['layers'], self.sharded_layers) for param in layer.parameters()]
+
+    def configure_params(self, train_config):
+        return [layer.configure_params(train_config) for layer in self.sharded_layers]
+
     def forward(self, x=None, num_chunks=None, num_samples_in_chunk=None, chunk_id=None, is_in_pipeline=False):
         self.DEBUG = True
         empty_at_the_end = []
