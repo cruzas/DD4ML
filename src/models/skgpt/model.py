@@ -105,6 +105,28 @@ class Block(nn.Module):
         x = x + self.mlpf(self.ln_2(x))
         return x
 
+class StartLayer(nn.Module):
+    """Initial layer for the GPT model"""
+
+    def __init__(self, config):
+        super().__init__()
+        self.wte = nn.Embedding(config.vocab_size, config.n_embd)
+        self.wpe = nn.Embedding(config.block_size, config.n_embd)
+        self.drop = nn.Dropout(config.embd_pdrop)
+        self.block_size = config.block_size
+    
+    def forward(self, idx):
+        device = idx.device
+        b, t = idx.size()
+        assert t <= self.block_size, f"Cannot forward sequence of length {t}, block size is only {self.block_size}"
+        pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
+        pos = pos.unsqueeze(0).expand(b, t)  # shape (b, t)
+        tok_emb = self.wte(idx)  # token embeddings
+        pos_emb = self.wpe(pos)  # position embeddings
+        x = self.drop(tok_emb + pos_emb)
+        return x
+
+
 class GPT(nn.Module):
     """ GPT Language Model """
 
@@ -178,43 +200,11 @@ class GPT(nn.Module):
         # Word Embeddings (receives token idx)
         model_dict['start'] = {
             'callable': {
-                'object': nn.Embedding,
-                'settings': {
-                    'num_embeddings': config.vocab_size,
-                    'embedding_dim': config.n_embd
-                }
+                'object': StartLayer,
+                'settings': {'config': config}
             },
-            'dst': {'to': ['drop']},
-            'rcv': {'src': [], 'strategy': None},
-            'stage': 0,
-            'num_layer_shards': 1,
-        }
-
-        model_dict['wpe'] = {
-            'callable': {
-                'object': nn.Embedding,
-                'settings': {
-                    'num_embeddings': config.block_size,
-                    'embedding_dim': config.n_embd
-                }
-            },
-
-            'dst': {'to': ['drop']},
-            'rcv': {'src': [], 'strategy': None},
-            'stage': 0,
-            'num_layer_shards': 1,
-        }
-
-        # Dropout (sums start and wpe outputs)
-        model_dict['drop'] = {
-            'callable': {
-                'object': nn.Dropout,
-                'settings': {'p': config.embd_pdrop}
-            },
-            # The next module will be the first transformer block
             'dst': {'to': ['block_0']},
-            # Receives from start and wpe; 'strategy': 'sum' indicates adding the tensors
-            'rcv': {'src': ['start', 'wpe'], 'strategy': 'sum'},
+            'rcv': {'src': [], 'strategy': None},
             'stage': 0,
             'num_layer_shards': 1,
         }
@@ -222,7 +212,7 @@ class GPT(nn.Module):
         # Transformer Blocks
         for i in range(config.n_layer):
             next_module = f'block_{i+1}' if i + 1 < config.n_layer else 'ln_f'
-            prev_module = f'block_{i-1}' if i > 0 else 'drop'
+            prev_module = f'block_{i-1}' if i > 0 else 'start'
             model_dict[f'block_{i}'] = {
                 'callable': {
                     'object': Block,
