@@ -1,6 +1,6 @@
 import torch
 import torch.distributed as dist
-import pmw.utils as utils
+import src.utils as utils
 from pmw.base_model import BaseModel
 from pmw.weight_parallelized_model import WeightParallelizedModel
 

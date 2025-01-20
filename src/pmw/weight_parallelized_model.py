@@ -3,7 +3,7 @@ import time
 import torch.nn as nn
 import torch.distributed as dist
 import torch.autograd as autograd
-import pmw.utils as utils
+import src.utils as utils
 from pmw.weight_parallelized_subdomain import WeightParallelizedSubdomain
 from pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from pmw.base_model import BaseModel
