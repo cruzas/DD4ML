@@ -1,14 +1,16 @@
-import torch
-import torch.nn as nn
-import torch.distributed as dist
-import torch.nn.functional as F
-import numpy as np
+import copy
 import json
 import os
 import sys
-import copy
-import src.utils as utils
 from collections import deque
+
+import numpy as np
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+import torch.nn.functional as F
+
+from src.utils import broadcast_dict
 
 
 def max_path_length(model, layer):
@@ -117,7 +119,7 @@ class ModelHandler():
             self.num_stages = len(self.stage_list)  # maybe not needed
             dicti = {'net_dict': self.net_dict, 'organized_layers': self.organized_layers, 'stage_list': self.stage_list,
                      'num_stages': self.num_stages, 'num_ranks_per_model': self.num_ranks_per_model}
-        dicti = utils.broadcast_dict(dicti, src=0)
+        dicti = broadcast_dict(dicti, src=0)
         for key, value in dicti.items():
             setattr(self, key, value)
 

@@ -19,7 +19,9 @@
         "embd_pdrop": 0.1,
         "resid_pdrop": 0.1,
         "attn_pdrop": 0.1,
-        "num_stages": 3
+        "num_stages": 2,
+        "num_subdomains": 1,
+        "num_replicas_per_subdomain": 1
     },
     "trainer": {
         "device": "auto",
@@ -27,8 +29,6 @@
         "max_iters": 15,
         "batch_size": 64,
         "learning_rate": 0.001,
-        "num_subdomains": 1,
-        "num_replicas_per_subdomain": 1,
         "max_subdomain_iters": 3,
         "betas": [
             0.9,

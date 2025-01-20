@@ -1,8 +1,9 @@
 import torch
 import torch.distributed as dist
+
 import src.utils as utils
-from pmw.base_model import BaseModel
-from pmw.weight_parallelized_model import WeightParallelizedModel
+from src.pmw.base_model import BaseModel
+from src.pmw.weight_parallelized_model import WeightParallelizedModel
 
 
 class DataAndWeightParallelizedSubdomain(BaseModel):

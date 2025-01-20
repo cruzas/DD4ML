@@ -16,14 +16,16 @@ from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
 
 from datasets.tinyshakespeare import *
-from optimizers.apts import APTS
-from optimizers.trust_region import TrustRegion
-from pmw.model_handler import *
-from pmw.parallelized_model import ParallelizedModel
 from src.models.skgpt.model import GPT
 from src.models.skgpt.trainer import Trainer
+from src.optimizers.apts import APTS
+from src.optimizers.trust_region import TrustRegion
+from src.pmw.base_model import BaseModel
+from src.pmw.model_handler import ModelHandler
+from src.pmw.parallelized_model import ParallelizedModel
 from src.utils import CfgNode as CN
-from src.utils import closure, get_starting_info, set_seed, setup_logging
+from src.utils import (closure, dprint, get_starting_info, set_seed,
+                       setup_logging)
 
 # Some settings
 bias = True
@@ -67,8 +69,7 @@ class CharDataset(Dataset):
 
         chars = sorted(list(set(data)))
         data_size, vocab_size = len(data), len(chars)
-        if dist.get_rank() == 0:
-            print('data has %d characters, %d unique.' % (data_size, vocab_size))
+        dprint(f'data has {data_size} characters, {vocab_size} unique.')
 
         self.stoi = {ch: i for i, ch in enumerate(chars)}
         self.itos = {i: ch for i, ch in enumerate(chars)}
@@ -94,6 +95,23 @@ class CharDataset(Dataset):
         y = torch.tensor(dix[1:], dtype=torch.long)
         return x, y
 
+def get_sample_input(train_dataset, config):
+    dummy_train_loader = DataLoader(
+        train_dataset,
+        sampler=torch.utils.data.RandomSampler(
+            train_dataset, replacement=True, num_samples=int(1e10)),
+        shuffle=False,
+        pin_memory=True,
+        batch_size=config.batch_size,
+        num_workers=config.num_workers,
+    )
+
+    x_batch, _ = next(iter(dummy_train_loader))
+    device = config.device
+    if device == 'auto':
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    return x_batch.to(device)
 
 def main(rank, world_size, args):
     # Initialize process group
@@ -111,7 +129,7 @@ def main(rank, world_size, args):
     config = get_config()
     config.merge_from_dict(args)
     config.merge_and_cleanup()
-    if rank == 0: print(config)   
+    dprint(config)   
     setup_logging(config)
     set_seed(config.system.seed)
 
@@ -124,42 +142,50 @@ def main(rank, world_size, args):
     config.model.vocab_size = train_dataset.get_vocab_size()
     config.model.block_size = train_dataset.get_block_size()
     model = GPT(config.model)
-    print(model)
-    print('asd')
-    # # construct the trainer object
-    # trainer = Trainer(config.trainer, model, train_dataset)
+    BaseModel.n_layer = config.model.n_layer # Bit of a hack for now
+    dprint(model)
 
-    # # iteration callback
-    # def batch_end_callback(trainer):
+    # construct the model handler
+    model_handler = ModelHandler(model.model_dict, config.model.num_subdomains, config.model.num_replicas_per_subdomain)
 
-    #     if trainer.iter_num % 10 == 0:
-    #         print(
-    #             f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss.item():.5f}")
+    # construct the parallel model
+    random_input = get_sample_input(train_dataset, config.trainer)
+    model = ParallelizedModel(model_handler, sample=random_input)
 
-    #     if trainer.iter_num % 500 == 0:
-    #         # evaluate both the train and test score
-    #         model.eval()
-    #         with torch.no_grad():
-    #             # sample from the model...
-    #             context = "O God, O God!"
-    #             x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[
-    #                 None, ...].to(trainer.device)
-    #             y = model.generate(x, 500, temperature=1.0,
-    #                                do_sample=True, top_k=10)[0]
-    #             completion = ''.join([train_dataset.itos[int(i)] for i in y])
-    #             print(completion)
-    #         # save the latest model
-    #         print("saving model")
-    #         ckpt_path = os.path.join(config.system.work_dir, "model.pt")
+    # construct the trainer object
+    trainer = Trainer(config.trainer, model, train_dataset)
+    
+    # iteration callback
+    def batch_end_callback(trainer):
 
-    #         torch.save(model.state_dict(), ckpt_path)
-    #         # revert model to training mode
-    #         model.train()
+        if trainer.iter_num % 10 == 0:
+            print(
+                f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss.item():.5f}")
 
-    # trainer.set_callback('on_batch_end', batch_end_callback)
+        if trainer.iter_num % 500 == 0:
+            # evaluate both the train and test score
+            model.eval()
+            with torch.no_grad():
+                # sample from the model...
+                context = "O God, O God!"
+                x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[
+                    None, ...].to(trainer.device)
+                y = model.generate(x, 500, temperature=1.0,
+                                   do_sample=True, top_k=10)[0]
+                completion = ''.join([train_dataset.itos[int(i)] for i in y])
+                print(completion)
+            # save the latest model
+            print("saving model")
+            ckpt_path = os.path.join(config.system.work_dir, "model.pt")
 
-    # # run the optimization
-    # trainer.run()
+            torch.save(model.state_dict(), ckpt_path)
+            # revert model to training mode
+            model.train()
+
+    trainer.set_callback('on_batch_end', batch_end_callback)
+
+    # run the optimization
+    trainer.run()
 
     # Clean up
     dist.destroy_process_group()
@@ -172,7 +198,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_subdomains", type=int, default=1)
     parser.add_argument("--num_replicas_per_subdomain",
                         type=int, default=1)
-    parser.add_argument("--num_stages", type=int, default=3)
+    parser.add_argument("--num_stages", type=int, default=2)
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--data_chunks_amount", type=int, default=1)

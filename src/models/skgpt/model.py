@@ -16,7 +16,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.nn import functional as F
 
-from optimizers.trust_region import TrustRegion
+from src.optimizers.trust_region import TrustRegion
 from src.utils import CfgNode as CN
 from src.utils import broadcast_dict
 
@@ -125,6 +125,8 @@ class GPT(nn.Module):
         C.attn_pdrop = 0.1
         # pipelining options
         C.num_stages = 1
+        C.num_subdomains = 1
+        C.num_replicas_per_subdomain = 1
         return C
 
     def __str__(self):
@@ -173,7 +175,7 @@ class GPT(nn.Module):
     def build_gpt_dictionary(self, config):
         model_dict = {}
 
-        # Word Embeddings
+        # Word Embeddings (receives token idx)
         model_dict['start'] = {
             'callable': {
                 'object': nn.Embedding,
@@ -182,13 +184,12 @@ class GPT(nn.Module):
                     'embedding_dim': config.n_embd
                 }
             },
-            'dst': {'to': ['wpe']},
+            'dst': {'to': ['drop']},
             'rcv': {'src': [], 'strategy': None},
             'stage': 0,
             'num_layer_shards': 1,
         }
 
-        # Positional Embeddings
         model_dict['wpe'] = {
             'callable': {
                 'object': nn.Embedding,
@@ -197,40 +198,38 @@ class GPT(nn.Module):
                     'embedding_dim': config.n_embd
                 }
             },
+
             'dst': {'to': ['drop']},
-            'rcv': {'src': ['start'], 'strategy': None},
+            'rcv': {'src': [], 'strategy': None},
             'stage': 0,
             'num_layer_shards': 1,
         }
 
-        # Dropout
+        # Dropout (sums start and wpe outputs)
         model_dict['drop'] = {
             'callable': {
                 'object': nn.Dropout,
                 'settings': {'p': config.embd_pdrop}
             },
+            # The next module will be the first transformer block
             'dst': {'to': ['block_0']},
-            'rcv': {'src': ['wpe'], 'strategy': None},
+            # Receives from start and wpe; 'strategy': 'sum' indicates adding the tensors
+            'rcv': {'src': ['start', 'wpe'], 'strategy': 'sum'},
             'stage': 0,
             'num_layer_shards': 1,
         }
 
         # Transformer Blocks
         for i in range(config.n_layer):
+            next_module = f'block_{i+1}' if i + 1 < config.n_layer else 'ln_f'
+            prev_module = f'block_{i-1}' if i > 0 else 'drop'
             model_dict[f'block_{i}'] = {
                 'callable': {
                     'object': Block,
                     'settings': {'config': config}
                 },
-                'dst': {
-                    'to': (
-                        [f'block_{i+1}'] if i + 1 < config.n_layer else ['ln_f']
-                    )
-                },
-                'rcv': {
-                    'src': [f'block_{i-1}'] if i > 0 else ['drop'],
-                    'strategy': None
-                },
+                'dst': {'to': [next_module]},
+                'rcv': {'src': [prev_module], 'strategy': None},
                 'stage': 0,
                 'num_layer_shards': 1,
             }
@@ -263,11 +262,12 @@ class GPT(nn.Module):
             'num_layer_shards': 1,
         }
 
-        # Optionally set all stages to 0 again (if needed).
+        # Optionally reset all stages (if your pipeline approach needs it)
         for name in model_dict:
             model_dict[name]['stage'] = 0
 
         return self.set_stage(model_dict, config.num_stages)
+
 
     def set_stage(self, model_dict, num_stages):
         """
@@ -332,3 +332,5 @@ class GPT(nn.Module):
                     idx += 1
 
         return model_dict
+
+    
