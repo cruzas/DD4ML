@@ -67,21 +67,15 @@ class Trainer:
 
     def run(self):
         model, config = self.model, self.config
-        model_handler = ModelHandler(model.model_dict, config.num_subdomains, config.num_replicas_per_subdomain)
 
         # setup the optimizer
-        self.optimizer = model.configure_optimizers(config)
-    
-        # setup the dataloader
-        # train_loader = DataLoader(
-        #     self.train_dataset,
-        #     sampler=torch.utils.data.RandomSampler(
-        #         self.train_dataset, replacement=True, num_samples=int(1e10)),
-        #     shuffle=False,
-        #     pin_memory=True,
-        #     batch_size=config.batch_size,
-        #     num_workers=config.num_workers,
-        # )
+        model.configure_params(config)
+        train_loader = GeneralizedDistributedDataLoader(model_handler=config.model_handler, 
+                                                        dataset=self.train_dataset, 
+                                                        batch_size=config.batch_size, 
+                                                        shuffle=False, 
+                                                        num_workers=config.num_workers, 
+                                                        pin_memory=True)
 
         model.train()
         self.iter_num = 0

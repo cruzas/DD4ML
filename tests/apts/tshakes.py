@@ -147,8 +147,9 @@ def main(rank, world_size, args):
 
     # construct the model handler
     model_handler = ModelHandler(model.model_dict, config.model.num_subdomains, config.model.num_replicas_per_subdomain)
+    config.trainer.model_handler = model_handler
 
-    # construct the parallel model
+    # construct the parallel model (overwrite the model)
     random_input = get_sample_input(train_dataset, config.trainer)
     model = ParallelizedModel(model_handler, sample=random_input)
 

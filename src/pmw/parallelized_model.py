@@ -95,6 +95,9 @@ class ParallelizedModel(BaseModel):
     def parameters(self):
         return self.subdomain.weight_parallelized_model.subdomain.parameters()
 
+    def configure_params(self, train_config):
+        return self.subdomain.weight_parallelized_model.subdomain.configure_params(train_config)
+
     def subdomain_forward(self):
         return self.subdomain.weight_parallelized_model.subdomain.forward()
 
@@ -108,6 +111,9 @@ class ParallelizedModel(BaseModel):
 
     def subdomain_params(self):
         return self.subdomain.weight_parallelized_model.subdomain.parameters()
+
+    def subdomain_named_params(self):
+        return self.subdomain.weight_parallelized_model.subdomain.named_parameters()
 
     def subdomain_grad(self):
         return self.subdomain.weight_parallelized_model.subdomain.grad()

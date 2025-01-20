@@ -322,5 +322,3 @@ class GPT(nn.Module):
                     idx += 1
 
         return model_dict
-
-    
