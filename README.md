@@ -34,5 +34,12 @@ python3 -m pip install .
 ```
 
 ## Usage
-``python src/train.py``
+```bash
+python3 ./tests/chargpt/chargpt.py
+```
 
+## Note
+In case it's necessary, you may need to run the following:
+```bash
+python3 -m pip install --force-reinstall .
+```
