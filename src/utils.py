@@ -141,7 +141,7 @@ def receive_shape(src: int, device=None):
     return shape
 
 
-def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True, return_output=False, data_chunks_amount=1, grad_norm_clip=None):
+def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True, return_output=False, data_chunks_amount=1, grad_norm_clip=None, outputs_only=False):
     """
     NOTE: Losses from different chunks are averaged.
     """
@@ -149,11 +149,11 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
     #     raise ValueError('Model must be an instance of the "ParallelizedModel".')
     if isinstance(criterion, type):
         raise ValueError('Criterion must be an instance of a class.')
-    if model.model_handler.is_last_stage():
+    if model.model_handler.is_last_stage() and targets is not None and not outputs_only:
         targets = targets.chunk(data_chunks_amount)
     # Compute loss
 
-    def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount, sync_loss='global', grad_norm_clip=grad_norm_clip):
+    def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount, sync_loss='global', grad_norm_clip=grad_norm_clip, outputs_only=outputs_only):
         '''
         sync_loss: 'global' or 'local' ('global' means every rank, 'local' means only the ranks within the same subdomain in data)
         '''
@@ -163,6 +163,8 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
             model.zero_grad()
         with torch.set_grad_enabled(compute_grad):
             outputs = model(inputs, chunks_amount=data_chunks_amount)
+            if outputs_only:
+                return [output for output in outputs]
         losses = [0] * data_chunks_amount
         loss = torch.tensor(0.0).to(model.tensor_device)
         if model.model_handler.is_last_stage():
