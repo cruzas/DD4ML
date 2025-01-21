@@ -18,7 +18,7 @@ class BaseModel(nn.Module):
         self.tensor_device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         # Default device to store scalars
         self.default_device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-        self.DEBUG = True
+        self.DEBUG = False
 
     def backend_device(self, tensor=torch.tensor([0])):
         backend_device = torch.device('cpu')

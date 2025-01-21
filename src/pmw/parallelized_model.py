@@ -34,6 +34,7 @@ class ParallelizedModel(BaseModel):
         self.num_subdomains = self.model_handler.num_subdomains
         self.num_replicas_per_subdomain = self.model_handler.num_replicas_per_subdomain
         self.tot_replicas = self.model_handler.tot_replicas
+        self.block_size = sample.size(1)
 
         if self.rank in self.model_handler.available_ranks:
             self.subdomain = DataAndWeightParallelizedSubdomain(
@@ -175,22 +176,32 @@ class ParallelizedModel(BaseModel):
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = idx if idx.size(
                 1) <= self.block_size else idx[:, -self.block_size:]
-            # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond)
-            # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
-            # optionally crop the logits to only the top k options
-            if top_k is not None:
-                v, _ = torch.topk(logits, top_k)
-                logits[logits < v[:, [-1]]] = -float('Inf')
-            # apply softmax to convert logits to (normalized) probabilities
-            probs = F.softmax(logits, dim=-1)
-            # either sample from the distribution or take the most likely element
-            if do_sample:
-                idx_next = torch.multinomial(probs, num_samples=1)
-            else:
-                _, idx_next = torch.topk(probs, k=1, dim=-1)
-            # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
 
-        return idx
+            if self.rank == 1:
+                print("I am here 1")
+
+            # forward the model to get the logits for the index in the sequence
+            logits = self(idx_cond)
+
+            # pluck the logits at the final step and scale by desired temperature
+            if self.model_handler.is_last_stage():
+                logits = logits[:, -1, :] / temperature
+                # optionally crop the logits to only the top k options
+                if top_k is not None:
+                    v, _ = torch.topk(logits, top_k)
+                    logits[logits < v[:, [-1]]] = -float('Inf')
+                # apply softmax to convert logits to (normalized) probabilities
+                probs = F.softmax(logits, dim=-1)
+                # either sample from the distribution or take the most likely element
+                if do_sample:
+                    idx_next = torch.multinomial(probs, num_samples=1)
+                else:
+                    _, idx_next = torch.topk(probs, k=1, dim=-1)
+                # append sampled index to the running sequence and continue
+                idx = torch.cat((idx, idx_next), dim=1)
+
+            # distribute idx across all ranks
+            last_stage_ranks = self.model_handler.get_stage_ranks(stage_name='last', mode='global')
+            idx = dist.broadcast(idx, src=last_stage_ranks[0])
+
+        return idx  

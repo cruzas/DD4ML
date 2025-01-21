@@ -114,7 +114,7 @@ class Trainer:
                                                         pin_memory=True)
 
         def criterion(logits, targets):
-            F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
 
         model.train()
         self.iter_num = 0
