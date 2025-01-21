@@ -160,7 +160,7 @@ def main(rank, world_size, args):
 
         if trainer.iter_num % 10 == 0:
             dprint(
-                f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss.item():.5f}")
+                f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss:.5f}")
 
         if trainer.iter_num % 500 == 0:
             # evaluate both the train and test score
@@ -170,6 +170,7 @@ def main(rank, world_size, args):
                 context = "O God, O God!"
                 x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[
                     None, ...].to(trainer.device)
+
                 y = model.generate(x, 500, temperature=1.0,
                                    do_sample=True, top_k=10)[0]
                 completion = ''.join([train_dataset.itos[int(i)] for i in y])
