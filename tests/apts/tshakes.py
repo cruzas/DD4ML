@@ -60,7 +60,6 @@ class CharDataset(Dataset):
     def get_default_config():
         C = CN()
         C.block_size = 128
-        C.data_chunks_amount = 1
         C.percentage = 100.0
         return C
 
@@ -160,7 +159,7 @@ def main(rank, world_size, args):
     def batch_end_callback(trainer):
 
         if trainer.iter_num % 10 == 0:
-            print(
+            dprint(
                 f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss.item():.5f}")
 
         if trainer.iter_num % 500 == 0:
@@ -174,12 +173,13 @@ def main(rank, world_size, args):
                 y = model.generate(x, 500, temperature=1.0,
                                    do_sample=True, top_k=10)[0]
                 completion = ''.join([train_dataset.itos[int(i)] for i in y])
-                print(completion)
+                dprint(completion)
             # save the latest model
-            print("saving model")
-            ckpt_path = os.path.join(config.system.work_dir, "model.pt")
+            dprint("saving model")
+            model_filename = f"model_{config.model.model_type}_nsd_{config.model.num_subdomains}_nr_{config.model.num_replicas_per_subdomain}_nst_{config.model.num_stages}_s_{config.system.seed}_t_{config.system.trial}_i_{trainer.iter_num}.pt"
+            ckpt_path = os.path.join(config.system.work_dir, model_filename)
 
-            torch.save(model.state_dict(), ckpt_path)
+            par_model.save_state_dict(ckpt_path)
             # revert model to training mode
             model.train()
 

@@ -7,6 +7,7 @@ import time
 from collections import defaultdict
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data.dataloader import DataLoader
 
 from src.optimizers.apts import APTS
@@ -14,7 +15,7 @@ from src.optimizers.trust_region import TrustRegion
 from src.pmw.dataloaders import GeneralizedDistributedDataLoader
 from src.pmw.model_handler import ModelHandler
 from src.utils import CfgNode as CN
-from src.utils import dprint
+from src.utils import closure, dprint
 
 
 class Trainer:
@@ -45,17 +46,16 @@ class Trainer:
         # global optimizer
         C.global_optimizer = TrustRegion
         C.global_optimizer_args = {
-            'lr': C.learning_rate,
             'max_lr': 1.0,
-            'min_lr': 0.0001,
-            'nu': 0.5,
-            'inc_factor': 2.0,
-            'dec_factor': 0.5,
-            'nu_1': 0.25,
-            'nu_2': 0.75,
-            'max_iter': 3,
-            'norm_type': 2
+            'min_lr': 1e-5,
+            'eta1': 0.25,
+            'eta2': 0.75,
+            'alpha1': 0.5,
+            'alpha2': 2.0,
+            'history_size': 5,
         }
+        # data chunks amount
+        C.data_chunks_amount = 1
 
         return C
 
@@ -113,12 +113,14 @@ class Trainer:
                                                         num_workers=config.num_workers, 
                                                         pin_memory=True)
 
+        def criterion(logits, targets):
+            F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+
         model.train()
         self.iter_num = 0
         self.iter_time = time.time()
         data_iter = iter(train_loader)
         while True:
-
             # fetch the next batch (x, y) and re-init iterator if needed
             try:
                 batch = next(data_iter)
@@ -127,18 +129,22 @@ class Trainer:
                 batch = next(data_iter)
             batch = [t.to(self.device) for t in batch]
             x, y = batch
+        
+            if self.iter_num == 0:
+                first_closure = closure(x, y, criterion, model, data_chunks_amount=config.data_chunks_amount, compute_grad=False)
+                self.loss = first_closure()
+            else:
+                def final_subdomain_closure(outputs, y=y):
+                    y_chunks = y.chunk(len(outputs))
+                    loss = []
+                    for i, o in enumerate(outputs):
+                        loss.append(criterion(o, y_chunks[i]))
+                    return loss
 
-            def closure(compute_grad=True):
-                logits, self.loss = model(x, y)
-                if compute_grad:
-                    model.zero_grad(set_to_none=True)
-                    self.loss.backward()
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), config.grad_norm_clip)
-                return logits, self.loss
-
-            self.optimizer.step(closure)
-
+                self.optimizer.zero_grad()      
+                general_closure = closure(x, y, criterion=criterion, model=model, data_chunks_amount=config.data_chunks_amount, compute_grad=True)        
+                self.loss = self.optimizer.step(closure=general_closure, final_subdomain_closure=final_subdomain_closure)
+                
             self.trigger_callbacks('on_batch_end')
             self.iter_num += 1
             tnow = time.time()

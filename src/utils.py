@@ -199,6 +199,7 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
 
         if compute_grad and torch.is_grad_enabled():
             model.backward(losses)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_norm_clip) # TODO: verify if this is correct
         loss_broadcast.wait()
         if return_output:
             if model.model_handler.is_last_stage():
