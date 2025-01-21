@@ -19,7 +19,7 @@
         "resid_pdrop": 0.1,
         "attn_pdrop": 0.1,
         "num_stages": 2,
-        "num_subdomains": 2,
+        "num_subdomains": 1,
         "num_replicas_per_subdomain": 1
     },
     "trainer": {
@@ -34,13 +34,10 @@
         ],
         "weight_decay": 0.1,
         "grad_norm_clip": 1.0,
-        "subdomain_optimizer": "torch.optim.adamw.AdamW",
+        "subdomain_optimizer": "torch.optim.sgd.SGD",
         "subdomain_optimizer_args": {
             "lr": 0.001,
-            "betas": [
-                0.9,
-                0.95
-            ]
+            "momentum": 0.9
         },
         "max_subdomain_iters": 3,
         "global_optimizer": "src.optimizers.trust_region.TrustRegion",
