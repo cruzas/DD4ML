@@ -86,7 +86,12 @@ class WeightParallelizedModel(BaseModel):
                 self.subdomain.forward(
                     num_chunks=chunks_amount, num_samples_in_chunk=chunk_shapes[c], chunk_id=c, x=temp, is_in_pipeline=True)
 
-        return self.subdomain.outputs['finish'] if self.model_handler.is_last_stage() else [True]
+        if self.model_handler.is_last_stage():
+            return self.subdomain.outputs['finish']
+        else:
+            return [True]
+
+        # return self.subdomain.outputs['finish'] if self.model_handler.is_last_stage() else [True]
 
     def backward(self, losses):
         num_chunks = len(losses)

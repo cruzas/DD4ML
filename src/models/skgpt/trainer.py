@@ -7,6 +7,7 @@ import time
 from collections import defaultdict
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch.utils.data.dataloader import DataLoader
 
@@ -36,7 +37,7 @@ class Trainer:
         C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = 1.0 # max norm for gradient clipping
         # subdomain optimizer
-        C.subdomain_optimizer = torch.optim.AdamW
+        C.subdomain_optimizer = torch.optim.SGD
         C.subdomain_optimizer_args = {'lr' : C.learning_rate}
         if C.subdomain_optimizer == torch.optim.AdamW:
             C.subdomain_optimizer_args['betas'] = C.betas
@@ -148,10 +149,7 @@ class Trainer:
                 general_closure = closure(x, y, criterion=criterion, model=model, data_chunks_amount=config.data_chunks_amount, compute_grad=True, grad_norm_clip=config.grad_norm_clip)        
                 self.loss = self.optimizer.step(closure=general_closure, final_subdomain_closure=final_subdomain_closure)
             
-            if self.iter_num % 10 == 0:
-                dprint(
-                    f"iter_dt {self.iter_dt * 1000:.2f}ms; iter {self.iter_num}: train loss {self.loss:.5f}")
-            # self.trigger_callbacks('on_batch_end')
+            self.trigger_callbacks('on_batch_end')
             self.iter_num += 1
             tnow = time.time()
             self.iter_dt = tnow - self.iter_time

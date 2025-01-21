@@ -150,6 +150,7 @@ def main(rank, world_size, args):
 
     # construct the parallel model (overwrite the model)
     random_input = get_sample_input(train_dataset, config.trainer)
+    print(f"Random input shape: {random_input.shape}")
     model = ParallelizedModel(model_handler, sample=random_input)
 
     # construct the trainer object
@@ -157,7 +158,6 @@ def main(rank, world_size, args):
     
     # iteration callback
     def batch_end_callback(trainer):
-
         if trainer.iter_num % 10 == 0:
             dprint(
                 f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss:.5f}")
@@ -167,12 +167,12 @@ def main(rank, world_size, args):
             model.eval()
             with torch.no_grad():
                 # sample from the model...
-                context = "O God, O God!"
-                x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[
-                    None, ...].to(trainer.device)
-
-                y = model.generate(x, 500, temperature=1.0,
-                                   do_sample=True, top_k=10)[0]
+                # context = "O God, O God!" # TODO: check why this doesn't work with our model
+                # x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None,...].to(trainer.device)
+                x = random_input
+                if x.size(0) > 1:
+                    x = x[0:1]
+                y = model.generate(x, 500, temperature=1.0, do_sample=True, top_k=10)[0]
                 completion = ''.join([train_dataset.itos[int(i)] for i in y])
                 dprint(completion)
             # save the latest model
@@ -180,7 +180,7 @@ def main(rank, world_size, args):
             model_filename = f"model_{config.model.model_type}_nsd_{config.model.num_subdomains}_nr_{config.model.num_replicas_per_subdomain}_nst_{config.model.num_stages}_s_{config.system.seed}_t_{config.system.trial}_i_{trainer.iter_num}.pt"
             ckpt_path = os.path.join(config.system.work_dir, model_filename)
 
-            par_model.save_state_dict(ckpt_path)
+            model.save_state_dict(ckpt_path)
             # revert model to training mode
             model.train()
 
@@ -197,7 +197,7 @@ if __name__ == '__main__':
         description="Test Script with Seed Argument")
     parser.add_argument("--trial", type=int, default=0)
     parser.add_argument("--max_iters", type=int, default=10000)
-    parser.add_argument("--num_subdomains", type=int, default=2)
+    parser.add_argument("--num_subdomains", type=int, default=1)
     parser.add_argument("--num_replicas_per_subdomain",
                         type=int, default=1)
     parser.add_argument("--num_stages", type=int, default=2)

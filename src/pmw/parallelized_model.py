@@ -2,6 +2,7 @@ import copy
 
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 
 from src.pmw.base_model import BaseModel
 from src.pmw.data_and_weight_parallelized_subdomain import \
@@ -165,38 +166,43 @@ class ParallelizedModel(BaseModel):
         # Required for proper parameter initialization for transformer networks
         return self.subdomain.weight_parallelized_model.subdomain.named_parameters()
     
-    @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, do_sample=False, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, do_sample=False, top_k=None, closure=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
+        last_stage_ranks = self.model_handler.get_stage_ranks(stage_name='last', mode='local')
         for _ in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = idx if idx.size(
                 1) <= self.block_size else idx[:, -self.block_size:]
 
             # forward the model to get the logits for the index in the sequence
-            logits = self.forward(idx_cond)
+            logits = self.forward(idx_cond, chunks_amount=1, reset_grad=False, compute_grad=False)[0]
 
-            if self.rank == 1:
-                print("I am here 1")
+            if not self.model_handler.is_last_stage():
+                # increase second dimension of idx by one to receive it in the broadcast
+                idx = torch.cat((idx, torch.zeros((idx.size(0), 1), dtype=torch.long)), dim=1)
 
-            # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
-            # optionally crop the logits to only the top k options
-            if top_k is not None:
-                v, _ = torch.topk(logits, top_k)
-                logits[logits < v[:, [-1]]] = -float('Inf')
-            # apply softmax to convert logits to (normalized) probabilities
-            probs = F.softmax(logits, dim=-1)
-            # either sample from the distribution or take the most likely element
-            if do_sample:
-                idx_next = torch.multinomial(probs, num_samples=1)
-            else:
-                _, idx_next = torch.topk(probs, k=1, dim=-1)
-            # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
-
+            if self.model_handler.is_last_stage():
+                # pluck the logits at the final step and scale by desired temperature
+                logits = logits[:, -1, :] / temperature
+                # optionally crop the logits to only the top k options
+                if top_k is not None:
+                    v, _ = torch.topk(logits, top_k)
+                    logits[logits < v[:, [-1]]] = -float('Inf')
+                # apply softmax to convert logits to (normalized) probabilities
+                probs = F.softmax(logits, dim=-1)
+                # either sample from the distribution or take the most likely element
+                if do_sample:
+                    idx_next = torch.multinomial(probs, num_samples=1)
+                else:
+                    _, idx_next = torch.topk(probs, k=1, dim=-1)
+                # append sampled index to the running sequence and continue
+                idx = torch.cat((idx, idx_next), dim=1)
+            
+            # broadcast the idx to all replicas in the last stage
+            idx_broadcast = dist.broadcast(idx, src=last_stage_ranks[0], group=self.model_handler.get_replica_group(), async_op=True)
+            idx_broadcast.wait()
         return idx  
