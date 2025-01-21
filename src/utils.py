@@ -141,7 +141,7 @@ def receive_shape(src: int, device=None):
     return shape
 
 
-def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True, return_output=False, data_chunks_amount=1):
+def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True, return_output=False, data_chunks_amount=1, grad_norm_clip=None):
     """
     NOTE: Losses from different chunks are averaged.
     """
@@ -153,7 +153,7 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
         targets = targets.chunk(data_chunks_amount)
     # Compute loss
 
-    def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount, sync_loss='global'):
+    def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount, sync_loss='global', grad_norm_clip=grad_norm_clip):
         '''
         sync_loss: 'global' or 'local' ('global' means every rank, 'local' means only the ranks within the same subdomain in data)
         '''
@@ -199,7 +199,8 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
 
         if compute_grad and torch.is_grad_enabled():
             model.backward(losses)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_norm_clip) # TODO: verify if this is correct
+            if grad_norm_clip is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm_clip) 
         loss_broadcast.wait()
         if return_output:
             if model.model_handler.is_last_stage():
