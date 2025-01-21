@@ -46,13 +46,16 @@ class Trainer:
         # global optimizer
         C.global_optimizer = TrustRegion
         C.global_optimizer_args = {
+            'lr': C.learning_rate,
             'max_lr': 1.0,
-            'min_lr': 1e-5,
-            'eta1': 0.25,
-            'eta2': 0.75,
-            'alpha1': 0.5,
-            'alpha2': 2.0,
-            'history_size': 5,
+            'min_lr': 0.0001,
+            'nu': 0.5,
+            'inc_factor': 2.0,
+            'dec_factor': 0.5,
+            'nu_1': 0.25,
+            'nu_2': 0.75,
+            'max_iter': 3,
+            'norm_type': 2
         }
         # data chunks amount
         C.data_chunks_amount = 1
@@ -142,10 +145,13 @@ class Trainer:
                     return loss
 
                 self.optimizer.zero_grad()      
-                general_closure = closure(x, y, criterion=criterion, model=model, data_chunks_amount=config.data_chunks_amount, compute_grad=True)        
+                general_closure = closure(x, y, criterion=criterion, model=model, data_chunks_amount=config.data_chunks_amount, compute_grad=True, grad_norm_clip=config.grad_norm_clip)        
                 self.loss = self.optimizer.step(closure=general_closure, final_subdomain_closure=final_subdomain_closure)
-                
-            self.trigger_callbacks('on_batch_end')
+            
+            if self.iter_num % 10 == 0:
+                dprint(
+                    f"iter_dt {self.iter_dt * 1000:.2f}ms; iter {self.iter_num}: train loss {self.loss:.5f}")
+            # self.trigger_callbacks('on_batch_end')
             self.iter_num += 1
             tnow = time.time()
             self.iter_dt = tnow - self.iter_time
