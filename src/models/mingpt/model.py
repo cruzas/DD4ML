@@ -14,8 +14,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from mingpt.utils import CfgNode as CN
-from optimizers.trust_region import TrustRegion
+from src.models.mingpt.utils import CfgNode as CN
+from src.optimizers.trust_region import TrustRegion
 
 # -----------------------------------------------------------------------------
 
