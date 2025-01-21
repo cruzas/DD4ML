@@ -19,13 +19,13 @@
         "resid_pdrop": 0.1,
         "attn_pdrop": 0.1,
         "num_stages": 2,
-        "num_subdomains": 1,
+        "num_subdomains": 2,
         "num_replicas_per_subdomain": 1
     },
     "trainer": {
         "device": "auto",
         "num_workers": 0,
-        "max_iters": 15,
+        "max_iters": 10000,
         "batch_size": 64,
         "learning_rate": 0.001,
         "betas": [
@@ -45,13 +45,16 @@
         "max_subdomain_iters": 3,
         "global_optimizer": "src.optimizers.trust_region.TrustRegion",
         "global_optimizer_args": {
+            "lr": 0.001,
             "max_lr": 1.0,
-            "min_lr": 1e-05,
-            "eta1": 0.25,
-            "eta2": 0.75,
-            "alpha1": 0.5,
-            "alpha2": 2.0,
-            "history_size": 5
+            "min_lr": 0.0001,
+            "nu": 0.5,
+            "inc_factor": 2.0,
+            "dec_factor": 0.5,
+            "nu_1": 0.25,
+            "nu_2": 0.75,
+            "max_iter": 3,
+            "norm_type": 2
         },
         "data_chunks_amount": 1
     }
