@@ -116,7 +116,7 @@ def main(rank, world_size, args):
     # Initialize process group
     dist.init_process_group(
         backend="gloo",
-        init_method="tcp://127.0.0.1:29500",  # Or another free port
+        init_method="tcp://127.0.0.1:29501",  # Or another free port
         rank=rank,
         world_size=world_size
     )
@@ -196,8 +196,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="Test Script with Seed Argument")
     parser.add_argument("--trial", type=int, default=0)
-    parser.add_argument("--max_iters", type=int, default=15)
-    parser.add_argument("--num_subdomains", type=int, default=1)
+    parser.add_argument("--max_iters", type=int, default=10000)
+    parser.add_argument("--num_subdomains", type=int, default=2)
     parser.add_argument("--num_replicas_per_subdomain",
                         type=int, default=1)
     parser.add_argument("--num_stages", type=int, default=2)
