@@ -30,7 +30,7 @@ See ``pyproject.toml`` file.
 ```bash
 git clone https://github.com/cruzas/DD4ML.git
 cd DD4ML
-pip install .
+python3 -m pip install .
 ```
 
 ## Usage
