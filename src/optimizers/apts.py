@@ -1,5 +1,6 @@
-import torch
 import time
+
+import torch
 import torch.distributed as dist
 
 
@@ -30,7 +31,7 @@ class APTS(torch.optim.Optimizer):
         ), **subdomain_optimizer_defaults)  # subdomain optimizer
         if 'TrustRegion' in str(global_optimizer):
             self.global_optimizer = global_optimizer(
-                model=model, **global_optimizer_defaults)  # TrustRegion optimizer
+                params=model.subdomain_params(), **global_optimizer_defaults)  # TrustRegion optimizer
         else:
             global_optimizer_defaults.update({'lr': lr})
             self.global_optimizer = global_optimizer(params=model.subdomain_params(
