@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd  # IMPORTANT: this should come after numpy!
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.utils.data.dataloader import DataLoader
 
 from datasets.char_dataset import *
 from src.models.gpt.skgpt.model import GPT
@@ -25,8 +24,6 @@ from src.utils import (closure, detect_environment, dprint, get_starting_info,
                        prepare_distributed_environment, set_seed,
                        setup_logging)
 
-# Some settings
-bias = True
 
 def get_config():
     C = CN()
@@ -46,24 +43,6 @@ def get_config():
     # trainer
     C.trainer = Trainer.get_default_config()
     return C
-
-def get_sample_input(train_dataset, config):
-    dummy_train_loader = DataLoader(
-        train_dataset,
-        sampler=torch.utils.data.RandomSampler(
-            train_dataset, replacement=True, num_samples=int(1e10)),
-        shuffle=False,
-        pin_memory=True,
-        batch_size=config.batch_size,
-        num_workers=config.num_workers,
-    )
-
-    x_batch, _ = next(iter(dummy_train_loader))
-    device = config.device
-    if device == 'auto':
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-    return x_batch.to(device)
 
 def main(rank, master_addr, master_port, world_size, args):
     # Initialize distributed environment
@@ -99,7 +78,7 @@ def main(rank, master_addr, master_port, world_size, args):
     config.trainer.model_handler = model_handler
 
     # construct the parallel model (overwrite the model)
-    random_input = get_sample_input(train_dataset, config.trainer)
+    random_input = train_dataset.get_sample_input(config.trainer)
     model = ParallelizedModel(model_handler, sample=random_input)
 
     # construct the trainer object
