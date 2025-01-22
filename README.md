@@ -35,6 +35,7 @@ python3 -m pip install .
 ```
 
 ## Usage
+Look into the tests folder. For example, you can run:
 ```bash
 python3 ./tests/chargpt/chargpt.py
 ```
