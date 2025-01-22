@@ -15,8 +15,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from src.models.gpt.mingpt.utils import CfgNode as CN
 from src.optimizers.trust_region import TrustRegion
+from src.utils import CfgNode as CN
 
 # -----------------------------------------------------------------------------
 

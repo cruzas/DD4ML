@@ -36,13 +36,13 @@
         "grad_norm_clip": 1.0,
         "subdomain_optimizer": "torch.optim.sgd.SGD",
         "subdomain_optimizer_args": {
-            "lr": 0.001,
+            "lr": 0.0003,
             "momentum": 0.9
         },
         "max_subdomain_iters": 3,
         "global_optimizer": "src.optimizers.trust_region.TrustRegion",
         "global_optimizer_args": {
-            "lr": 0.001,
+            "lr": 0.0003,
             "max_lr": 1.0,
             "min_lr": 0.0001,
             "nu": 0.5,
