@@ -5,8 +5,8 @@
         "work_dir": "../../saved_networks/tshakes/"
     },
     "data": {
-        "block_size": 128,
-        "percentage": 100.0
+        "percentage": 100.0,
+        "block_size": 128
     },
     "model": {
         "model_type": "gpt-mini",
