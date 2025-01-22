@@ -15,9 +15,8 @@ import torch.multiprocessing as mp
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
 
-from datasets.tinyshakespeare import *
-from src.models.skgpt.model import GPT
-from src.models.skgpt.trainer import Trainer
+from src.models.gpt.skgpt.model import GPT
+from src.models.gpt.skgpt.trainer import Trainer
 from src.optimizers.apts import APTS
 from src.optimizers.trust_region import TrustRegion
 from src.pmw.base_model import BaseModel
