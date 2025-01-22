@@ -4,6 +4,7 @@
         "work_dir": "../../saved_networks/chargpt/"
     },
     "data": {
+        "percentage": 100.0,
         "block_size": 128
     },
     "model": {

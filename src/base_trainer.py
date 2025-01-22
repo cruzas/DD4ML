@@ -4,6 +4,7 @@ so nothing in this file really has anything to do with GPT specifically.
 """
 
 import time
+from abc import ABC, abstractmethod
 from collections import defaultdict
 
 import torch
@@ -13,7 +14,7 @@ from src.utils import CfgNode as CN
 from src.utils import dprint
 
 
-class BaseTrainer:
+class BaseTrainer(ABC):
     @staticmethod
     def get_default_config():
         C = CN()
