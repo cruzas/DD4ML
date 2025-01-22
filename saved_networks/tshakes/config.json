@@ -54,5 +54,6 @@
             "norm_type": 2
         },
         "data_chunks_amount": 1
-    }
+    },
+    "num_shards": 1
 }
