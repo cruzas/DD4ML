@@ -9,12 +9,11 @@ from ast import literal_eval
 
 import numpy as np
 import pandas as pd  # IMPORTANT: this should come after numpy!
-import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
 
+from datasets.char_dataset import *
 from src.models.gpt.skgpt.model import GPT
 from src.models.gpt.skgpt.trainer import Trainer
 from src.optimizers.apts import APTS
@@ -22,14 +21,12 @@ from src.optimizers.trust_region import TrustRegion
 from src.pmw.base_model import BaseModel
 from src.pmw.model_handler import ModelHandler
 from src.pmw.parallelized_model import ParallelizedModel
-from src.utils import CfgNode as CN
 from src.utils import (closure, detect_environment, dprint, get_starting_info,
                        prepare_distributed_environment, set_seed,
                        setup_logging)
 
 # Some settings
 bias = True
-
 
 def get_config():
     C = CN()
@@ -49,50 +46,6 @@ def get_config():
     # trainer
     C.trainer = Trainer.get_default_config()
     return C
-
-
-class CharDataset(Dataset):
-    """
-    Emits batches of characters
-    """
-
-    @staticmethod
-    def get_default_config():
-        C = CN()
-        C.block_size = 128
-        C.percentage = 100.0
-        return C
-
-    def __init__(self, config, data):
-        self.config = config
-
-        chars = sorted(list(set(data)))
-        data_size, vocab_size = len(data), len(chars)
-        dprint(f'data has {data_size} characters, {vocab_size} unique.')
-
-        self.stoi = {ch: i for i, ch in enumerate(chars)}
-        self.itos = {i: ch for i, ch in enumerate(chars)}
-        self.vocab_size = vocab_size
-        self.data = data
-
-    def get_vocab_size(self):
-        return self.vocab_size
-
-    def get_block_size(self):
-        return self.config.block_size
-
-    def __len__(self):
-        return len(self.data) - self.config.block_size
-
-    def __getitem__(self, idx):
-        # grab a chunk of (block_size + 1) characters from the data
-        chunk = self.data[idx:idx + self.config.block_size + 1]
-        # encode every character to an integer
-        dix = [self.stoi[s] for s in chunk]
-        # return as tensors
-        x = torch.tensor(dix[:-1], dtype=torch.long)
-        y = torch.tensor(dix[1:], dtype=torch.long)
-        return x, y
 
 def get_sample_input(train_dataset, config):
     dummy_train_loader = DataLoader(
