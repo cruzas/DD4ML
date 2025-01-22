@@ -13,6 +13,19 @@ import torch
 import torch.distributed as dist
 
 
+def detect_environment():
+    # Example 1: Check for an environment variable set on the cluster
+    if 'SLURM_JOB_ID' in os.environ:  # Common in Slurm-managed clusters
+        return "cluster"
+    
+    # Example 2: Use hostname to differentiate
+    hostname = socket.gethostname()
+    if "cluster_name" in hostname:  # Replace 'cluster_name' with part of your cluster's hostname
+        return "cluster"
+    
+    # Default to local
+    return "local"
+
 def dprint(str_to_print): 
     '''
     Print only if the rank is 0 or if the code is running in a single node.
@@ -93,32 +106,25 @@ def find_free_port():
 
 
 def prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None, is_cuda_enabled=True):
-    if not is_cuda_enabled:
-        # TODO: Remove this line. It's just for debugging purposes.
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    if rank is None and master_addr is None and master_port is None and world_size is None:  # we are on a cluster
-        # print(f'Should be initializing {os.environ["SLURM_NNODES"]} nodes')
-        # Execute code on a cluster
+    backend = 'nccl' if is_cuda_enabled else 'gloo'
+    if rank is None and master_addr is None and master_port is None and world_size is None:  
+        # We are on a cluster
         os.environ['MASTER_PORT'] = '29501'
         os.environ['WORLD_SIZE'] = os.environ['SLURM_NNODES']
         os.environ['LOCAL_RANK'] = '0'
         os.environ['RANK'] = os.environ['SLURM_NODEID']
         node_list = os.environ['SLURM_NODELIST']
-        master_node = subprocess.getoutput(
-            f'scontrol show hostname {node_list} | head -n1'
-        )
+        master_node = subprocess.getoutput(f'scontrol show hostname {node_list} | head -n1')
         os.environ['MASTER_ADDR'] = master_node
-        dist.init_process_group(backend='nccl')
-    else:  # To execute on a PC
+        dist.init_process_group(backend=backend)
+    else:  # We are on a PC
         os.environ['MASTER_ADDR'] = master_addr
         os.environ['MASTER_PORT'] = master_port if master_port is not None else find_free_port()
-        dist.init_process_group(
-            backend='gloo', rank=rank, world_size=world_size)
+        dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
 
 def send_shape(shape: list, dst: int, device=None):
     if device is None:
-        device = torch.device('cuda') if dist.get_backend(
-        ) == 'nccl' else torch.device('cpu')
+        device = torch.device('cuda') if dist.get_backend() == 'nccl' else torch.device('cpu')
     for s in shape:
         dist.send(tensor=torch.tensor(
             s, dtype=torch.int32).to(device), dst=dst)
@@ -145,13 +151,10 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
     """
     NOTE: Losses from different chunks are averaged.
     """
-    # if model.__class__.__name__ != 'ParallelizedModel':
-    #     raise ValueError('Model must be an instance of the "ParallelizedModel".')
     if isinstance(criterion, type):
         raise ValueError('Criterion must be an instance of a class.')
     if model.model_handler.is_last_stage() and targets is not None and not outputs_only:
         targets = targets.chunk(data_chunks_amount)
-    # Compute loss
 
     def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount, sync_loss='global', grad_norm_clip=grad_norm_clip, outputs_only=outputs_only):
         '''
