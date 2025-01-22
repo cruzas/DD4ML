@@ -11,8 +11,8 @@ from torch.utils.data.dataloader import DataLoader
 
 from src.models.gpt.mingpt.model import GPT
 from src.models.gpt.mingpt.trainer import Trainer
-from src.models.gpt.mingpt.utils import CfgNode as CN
-from src.models.gpt.mingpt.utils import set_seed, setup_logging
+from src.utils import CfgNode as CN
+from src.utils import set_seed, setup_logging
 
 # -----------------------------------------------------------------------------
 
