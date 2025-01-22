@@ -3,39 +3,22 @@ Simple training loop; Boilerplate that could apply to any arbitrary neural netwo
 so nothing in this file really has anything to do with GPT specifically.
 """
 
-import time
-from collections import defaultdict
-
-import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch.utils.data.dataloader import DataLoader
 
+from src.base_trainer import *
 from src.optimizers.apts import APTS
 from src.optimizers.trust_region import TrustRegion
 from src.pmw.dataloaders import GeneralizedDistributedDataLoader
 from src.pmw.model_handler import ModelHandler
-from src.utils import CfgNode as CN
 from src.utils import closure, dprint
 
 
-class Trainer:
+class Trainer(BaseTrainer):
 
     @staticmethod
     def get_default_config():
-        C = CN()
-        # device to train on
-        C.device = 'auto'
-        # dataloder parameters
-        C.num_workers = 4
-        # optimizer parameters
-        C.max_iters = None
-        C.batch_size = 64
-        # the model we're using is so small that we can go a bit faster
-        C.learning_rate = 1e-3
-        C.betas = (0.9, 0.95) # in case of Adam optimizer used somewhere
-        C.weight_decay = 0.1  # only applied on matmul weights
-        C.grad_norm_clip = 1.0 # max norm for gradient clipping
+        C = BaseTrainer.get_default_config()
         # subdomain optimizer
         C.subdomain_optimizer = torch.optim.SGD
         C.subdomain_optimizer_args = {'lr' : C.learning_rate}
@@ -64,34 +47,7 @@ class Trainer:
         return C
 
     def __init__(self, config, model, train_dataset):
-        self.config = config
-        self.model = model
-        self.optimizer = None
-        self.train_dataset = train_dataset
-        self.callbacks = defaultdict(list)
-
-        # determine the device we'll train on
-        if config.device == 'auto':
-            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        else:
-            self.device = config.device
-        self.model = self.model.to(self.device)
-        dprint(f"running on device {self.device}")
-
-        # variables that will be assigned to trainer class later for logging and etc
-        self.iter_num = 0
-        self.iter_time = 0.0
-        self.iter_dt = 0.0
-
-    def add_callback(self, onevent: str, callback):
-        self.callbacks[onevent].append(callback)
-
-    def set_callback(self, onevent: str, callback):
-        self.callbacks[onevent] = [callback]
-
-    def trigger_callbacks(self, onevent: str):
-        for callback in self.callbacks.get(onevent, []):
-            callback(self)
+        super().__init__(config, model, train_dataset)
 
     def run(self):
         model, config = self.model, self.config
