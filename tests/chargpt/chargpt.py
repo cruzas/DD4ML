@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
 
-from datasets.char_dataset import CharDataset
+from src.datasets.char_dataset import CharDataset
 from src.models.gpt.mingpt.model import GPT
 from src.models.gpt.mingpt.trainer import Trainer
 from src.utils import CfgNode as CN

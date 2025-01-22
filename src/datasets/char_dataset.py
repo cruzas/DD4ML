@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data.dataloader import DataLoader
 
-from datasets.base_dataset import BaseDataset
+from src.datasets.base_dataset import BaseDataset
 from src.utils import CfgNode as CN
 from src.utils import dprint
 
@@ -64,3 +64,21 @@ class CharDataset(BaseDataset):
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         return x_batch.to(device)
+
+    def get_sample_target(self, config):
+        dummy_train_loader = DataLoader(
+            self,
+            sampler=torch.utils.data.RandomSampler(
+                self, replacement=True, num_samples=int(1e10)),
+            shuffle=False,
+            pin_memory=True,
+            batch_size=1,
+            num_workers=config.num_workers,
+        )
+
+        _, y_batch = next(iter(dummy_train_loader))
+        device = config.device
+        if device == 'auto':
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+        return y_batch.to(device)

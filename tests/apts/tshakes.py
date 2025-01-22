@@ -12,7 +12,7 @@ import pandas as pd  # IMPORTANT: this should come after numpy!
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from datasets.char_dataset import *
+from src.datasets.char_dataset import *
 from src.models.gpt.skgpt.model import GPT
 from src.models.gpt.skgpt.trainer import Trainer
 from src.optimizers.apts import APTS
