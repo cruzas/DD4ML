@@ -1,5 +1,6 @@
 # DD4ML
 Domain decomposition methods for machine learning.
+The code structure is inspired by minGPT: https://github.com/karpathy/minGPT/tree/master
 
 ## Authors
 * Samuel A. Cruz Alegría (1, 3); cruzas@usi.ch.
