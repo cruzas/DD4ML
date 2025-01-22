@@ -47,4 +47,7 @@ In case it's necessary, you may need to run the following:
 ```bash
 python3 -m pip install --force-reinstall .
 ```
-Based on your Python environment, you may need to also clear out the site-packages directory.
+Based on your Python environment, you may need to also clear out the site-packages directory. You can find it by using the following command:
+```bash
+python3 -m site
+```

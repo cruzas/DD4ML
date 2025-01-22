@@ -9,10 +9,10 @@ import torch
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
 
-from src.models.mingpt.model import GPT
-from src.models.mingpt.trainer import Trainer
-from src.models.mingpt.utils import CfgNode as CN
-from src.models.mingpt.utils import set_seed, setup_logging
+from src.models.gpt.mingpt.model import GPT
+from src.models.gpt.mingpt.trainer import Trainer
+from src.models.gpt.mingpt.utils import CfgNode as CN
+from src.models.gpt.mingpt.utils import set_seed, setup_logging
 
 # -----------------------------------------------------------------------------
 

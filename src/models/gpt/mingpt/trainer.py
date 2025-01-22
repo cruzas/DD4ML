@@ -9,7 +9,7 @@ from collections import defaultdict
 import torch
 from torch.utils.data.dataloader import DataLoader
 
-from src.models.mingpt.utils import CfgNode as CN
+from src.models.gpt.mingpt.utils import CfgNode as CN
 
 
 class Trainer:
