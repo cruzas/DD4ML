@@ -24,7 +24,8 @@ from src.pmw.base_model import BaseModel
 from src.pmw.model_handler import ModelHandler
 from src.pmw.parallelized_model import ParallelizedModel
 from src.utils import CfgNode as CN
-from src.utils import (closure, dprint, get_starting_info, set_seed,
+from src.utils import (closure, detect_environment, dprint, get_starting_info,
+                       prepare_distributed_environment, set_seed,
                        setup_logging)
 
 # Some settings
@@ -112,17 +113,14 @@ def get_sample_input(train_dataset, config):
 
     return x_batch.to(device)
 
-def main(rank, world_size, args):
-    # Initialize process group
-    dist.init_process_group(
-        backend="gloo",
-        init_method="tcp://127.0.0.1:29501",  # Or another free port
-        rank=rank,
-        world_size=world_size
-    )
-
-    # Print world size and rank
+def main(rank, master_addr, master_port, world_size, args):
+    # Initialize distributed environment
+    prepare_distributed_environment(rank, master_addr, master_port, world_size, is_cuda_enabled=torch.cuda.is_available())
     print(f"Rank {rank}/{world_size-1}")
+
+    if torch.cuda.is_available() and args['num_shards'] > 1:
+        # Number of GPUs should be the same on every rank
+        check_gpus_per_rank()
 
     # get default config and overrides from the command line, if any
     config = get_config()
@@ -150,7 +148,6 @@ def main(rank, world_size, args):
 
     # construct the parallel model (overwrite the model)
     random_input = get_sample_input(train_dataset, config.trainer)
-    print(f"Random input shape: {random_input.shape}")
     model = ParallelizedModel(model_handler, sample=random_input)
 
     # construct the trainer object
@@ -201,6 +198,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_replicas_per_subdomain",
                         type=int, default=1)
     parser.add_argument("--num_stages", type=int, default=2)
+    parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--data_chunks_amount", type=int, default=1)
@@ -210,27 +208,34 @@ if __name__ == '__main__':
     # parser.add_argument("--n_layer", type=int, default=6)
     # parser.add_argument("--n_head", type=int, default=6)
     # parser.add_argument("--n_embd", type=int, default=192)
-    # 
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--percentage", type=float, default=100.0)
     parser.add_argument("--num_workers", type=int, default=0)
-    # Subdomain iterations
     parser.add_argument("--max_subdomain_iters", type=int, default=3)
     args = parser.parse_args()
 
-    num_shards = 1
-    num_subdomains = args.num_subdomains
-    num_replicas_per_subdomain = args.num_replicas_per_subdomain
-    num_stages = args.num_stages
-    world_size = num_subdomains*num_replicas_per_subdomain*num_stages*num_shards
-    print("World size: ", world_size)
-
-    # Serialize args into a dictionary
+    # Serialize args into a dictionary for passing them to main
     args_dict = vars(args)
 
-    mp.spawn(
-        main,
-        args=(world_size, args_dict),
-        nprocs=world_size,
-        join=True
-    )
+    # Environment we are in
+    environment = detect_environment()
+
+    # For distributed environment initialization
+    rank = None
+    master_addr = None 
+    master_port = None
+    world_size = None
+    if environment == "local":
+        print("Code being executed locally...")
+        master_addr = "localhost"
+        master_port = "29501"
+        world_size = args.num_subdomains * args.num_replicas_per_subdomain * args.num_stages * args.num_shards
+        mp.spawn(
+            main,
+            args=(master_addr, master_port, world_size, args_dict),
+            nprocs=world_size,
+            join=True
+        )
+    else:
+        print("Code being executed on a cluster...")
+        main(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size, args=args_dict)
