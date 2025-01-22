@@ -1,3 +1,5 @@
+from collections import deque
+
 from src.models.gpt.base_gpt import *
 
 
@@ -23,7 +25,7 @@ class StartLayer(nn.Module):
         return x
 
 
-class GPT(nn.Module):
+class GPT(BaseGPT):
     """ GPT Language Model """
 
     @staticmethod
@@ -173,3 +175,11 @@ class GPT(nn.Module):
                     idx += 1
 
         return model_dict
+
+    def forward(self, x):
+        # Implemented in parallelized model
+        pass
+
+    def generate(self, x):
+        # Implemented in parallelized model
+        pass
