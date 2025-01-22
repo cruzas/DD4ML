@@ -13,6 +13,7 @@ Domain decomposition methods for machine learning.
 ## Collaborators
 * Alena Kopaničáková (6)
 
+## Universities
 1. Università della Svizzera italiana
 2. King Abdullah University of Science and Technology (KAUST)
 3. UniDistance Suisse
@@ -43,3 +44,4 @@ In case it's necessary, you may need to run the following:
 ```bash
 python3 -m pip install --force-reinstall .
 ```
+Based on your Python environment, you may need to clear out the site-packages directory.
