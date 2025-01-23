@@ -51,3 +51,15 @@ Based on your Python environment, you may need to also clear out the site-packag
 ```bash
 python3 -m site
 ```
+
+## Structure
+This library is meant to be general. 
+
+The src folder is structured as follows:
+- datasets (for processing data in rawdata)
+- models 
+- optimizers
+- pmw
+- rawdata
+
+You can extend the library by adding your own files in any of these modules. If you create a new folder within them, make sure to add an ```__init__.py``` file and then re-run ```python3 -m pip install .```, or ```python3 -m pip install --force-reinstall .``` if necessary. 
