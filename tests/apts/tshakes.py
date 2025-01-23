@@ -20,7 +20,8 @@ from src.optimizers.trust_region import TrustRegion
 from src.pmw.base_model import BaseModel
 from src.pmw.model_handler import ModelHandler
 from src.pmw.parallelized_model import ParallelizedModel
-from src.utils import (closure, detect_environment, dprint, get_starting_info,
+from src.utils import (check_gpus_per_rank, closure, detect_environment,
+                       dprint, get_rawdata_dir, get_starting_info,
                        prepare_distributed_environment, set_seed,
                        setup_logging)
 
@@ -63,7 +64,8 @@ def main(rank, master_addr, master_port, world_size, args):
 
     # construct the training dataset
     # don't worry we won't run out of file handles
-    text = open('../../src/rawdata/input.txt', 'r').read()
+    filepath = os.path.join(get_rawdata_dir(), 'tinyshakespeare.txt')
+    text = open(filepath, 'r').read()
     train_dataset = CharDataset(config.data, text)
 
     # construct the model
