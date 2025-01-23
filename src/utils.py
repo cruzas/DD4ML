@@ -124,6 +124,10 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
     else:  # We are on a PC
         os.environ['MASTER_ADDR'] = master_addr
         os.environ['MASTER_PORT'] = master_port if master_port is not None else find_free_port()
+        # Check if operating system is macOS
+        if sys.platform == 'darwin':
+            os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
         dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
 
 def send_shape(shape: list, dst: int, device=None):
