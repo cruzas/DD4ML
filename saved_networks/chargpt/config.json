@@ -20,7 +20,7 @@
     },
     "trainer": {
         "device": "auto",
-        "num_workers": 4,
+        "num_workers": 1,
         "max_iters": "null",
         "batch_size": 64,
         "learning_rate": 0.0005,
