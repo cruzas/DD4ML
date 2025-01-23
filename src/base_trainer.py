@@ -29,13 +29,15 @@ class BaseTrainer(ABC):
         C.betas = (0.9, 0.95)
         C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = 1.0 
+        C.num_epochs = 1 # in case epochs instead of iter
         return C
 
-    def __init__(self, config, model, train_dataset):
+    def __init__(self, config, model, train_dataset, test_dataset=None):
         self.config = config
         self.model = model
         self.optimizer = None
         self.train_dataset = train_dataset
+        self.test_dataset = test_dataset
         self.callbacks = defaultdict(list)
 
         # determine the device we'll train on

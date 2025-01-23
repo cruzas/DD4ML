@@ -1,1 +1,1 @@
-/Users/cruzalegriasamueladolfo/Documents/GitHub/DD4ML/tests/cifar10/parsgd_pmw.py
+parsgd_pmw.py
