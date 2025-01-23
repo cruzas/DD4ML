@@ -21,9 +21,9 @@ from src.pmw.base_model import BaseModel
 from src.pmw.model_handler import ModelHandler
 from src.pmw.parallelized_model import ParallelizedModel
 from src.utils import (check_gpus_per_rank, closure, detect_environment,
-                       dprint, get_rawdata_dir, get_starting_info,
-                       prepare_distributed_environment, set_seed,
-                       setup_logging)
+                       dprint, find_free_port, get_rawdata_dir,
+                       get_starting_info, prepare_distributed_environment,
+                       set_seed, setup_logging)
 
 
 def get_config():
@@ -107,7 +107,7 @@ def main(rank, master_addr, master_port, world_size, args):
                 dprint(completion)
             # save the latest model
             dprint("saving model")
-            model_filename = f"model_{config.model.model_type}_nsd_{config.model.num_subdomains}_nr_{config.model.num_replicas_per_subdomain}_nst_{config.model.num_stages}_s_{config.system.seed}_t_{config.system.trial}_i_{trainer.iter_num}.pt"
+            model_filename = f"model_{config.model.model_type}_nsd_{config.model.num_subdomains}_nr_{config.model.num_replicas_per_subdomain}_nst_{config.model.num_stages}_s_{config.system.seed}_t_{config.system.trial}_iter_{trainer.iter_num}.pt"
             ckpt_path = os.path.join(config.system.work_dir, model_filename)
 
             model.save_state_dict(ckpt_path)
@@ -161,7 +161,7 @@ if __name__ == '__main__':
     if environment == "local":
         print("Code being executed locally...")
         master_addr = "localhost"
-        master_port = "29501"
+        master_port = find_free_port()
         world_size = args.num_subdomains * args.num_replicas_per_subdomain * args.num_stages * args.num_shards
         mp.spawn(
             main,
