@@ -33,7 +33,7 @@
             0.95
         ],
         "weight_decay": 0.1,
-        "grad_norm_clip": 1.0,
+        "grad_norm_clip": 1000000000.0,
         "subdomain_optimizer": "torch.optim.sgd.SGD",
         "subdomain_optimizer_args": {
             "lr": 0.0003,

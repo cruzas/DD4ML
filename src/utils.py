@@ -449,7 +449,7 @@ class CfgNode:
             print("command line overwriting config attribute %s with %s" % (key, val))
             setattr(obj, leaf_key, val)
 
-    def merge_and_cleanup(self):
+    def merge_and_cleanup(self, keys_to_look=["system", "data", "model", "trainer"]):
         """
         Overwrite subdictionary values with corresponding upper-level values 
         and remove redundant upper-level keys.
@@ -457,9 +457,6 @@ class CfgNode:
         
         # Get dictionary keys
         keys = list(self.__dict__.keys())
-
-        # Keys to look into
-        keys_to_look = ["system", "data", "model", "trainer"]
 
         # Keys other than keys_to_look
         other_keys = [k for k in keys if k not in keys_to_look]
