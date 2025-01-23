@@ -23,9 +23,6 @@ The code uses minGPT and builds from it: https://github.com/karpathy/minGPT/tree
 5. University of Pavia
 6. University of Toulouse
 
-## Funding
-This work was initially supported by the Swiss Platform for Advanced Scientific Computing (PASC) project **ExaTrain** (funding periods 2017-2021 and 2021-2024) and by the Swiss National Science Foundation through the projects "ML<sup>2</sup> -- Multilevel and Domain Decomposition Methods for Machine Learning" (197041) and "Multilevel training of DeepONets -- multiscale and multiphysics applications" (206745). 
-
 ## Requirements
 See ``pyproject.toml`` file. 
 
@@ -42,16 +39,6 @@ Look into the tests folder. For example, you can run:
 python3 ./tests/chargpt/chargpt.py
 ```
 
-## Note
-In case it's necessary, you may need to run the following:
-```bash
-python3 -m pip install --force-reinstall .
-```
-Based on your Python environment, you may need to also clear out the site-packages directory. You can find it by using the following command:
-```bash
-python3 -m site
-```
-
 ## Structure
 This library is meant to be general. 
 
@@ -63,3 +50,23 @@ The src folder is structured as follows:
 - rawdata
 
 You can extend the library by adding your own files in any of these modules. If you create a new folder within them, make sure to add an ```__init__.py``` file and then re-run ```python3 -m pip install .```, or ```python3 -m pip install --force-reinstall .``` if necessary. 
+
+## Note
+In case it's necessary, you may need to run the following:
+```bash
+python3 -m pip install --force-reinstall .
+```
+Based on your Python environment, you may need to also clear out the site-packages directory. You can find it by using the following command:
+```bash
+python3 -m site
+```
+
+Before using using wandb locally on your computer, you need to make an account. Then, you can run the following command:
+```bash
+wandb login --relogin --host=http://127.0.0.1
+```
+You will need your API key: https://wandb.ai/authorize
+Once you have done this, your credentials are saved. For more information, please consult: https://docs.wandb.ai/quickstart/
+
+## Funding
+This work was initially supported by the Swiss Platform for Advanced Scientific Computing (PASC) project **ExaTrain** (funding periods 2017-2021 and 2021-2024) and by the Swiss National Science Foundation through the projects "ML<sup>2</sup> -- Multilevel and Domain Decomposition Methods for Machine Learning" (197041) and "Multilevel training of DeepONets -- multiscale and multiphysics applications" (206745). 
