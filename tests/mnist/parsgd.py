@@ -9,9 +9,35 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
-from src.utils import (detect_environment, dprint, get_rawdata_dir,
-                       prepare_distributed_environment)
+from src.models.cnn.trainer import Trainer
+from src.utils import CfgNode as CN
+from src.utils import (detect_environment, dprint, find_free_port,
+                       get_rawdata_dir, prepare_distributed_environment,
+                       set_seed, setup_logging)
 
+
+def get_config():
+
+    C = CN()
+
+    # system
+    C.system = CN()
+    C.system.seed = 3407
+    C.system.work_dir = '../../saved_networks/chargpt/'
+
+    # data
+    # C.data = MNISTDataset.get_default_config()
+
+    # model
+    C.model = CN()
+
+    # trainer
+    C.trainer = Trainer.get_default_config()
+    # the model we're using is so small that we can go a bit faster
+    C.trainer.learning_rate = 1e-3
+    C.trainer.momentum = 0.9
+
+    return C
 
 # Define a simple CNN model for MNIST
 class SimpleCNN(nn.Module):
@@ -31,56 +57,24 @@ class SimpleCNN(nn.Module):
         x = self.fc2(x)
         return x
 
-# Function for training a single epoch
-def train_epoch(rank, model, train_loader, criterion, optimizer, device, epoch, num_epochs):
-    model.train()
-    running_loss = 0.0
-
-    for batch_idx, (inputs, targets) in enumerate(train_loader):
-        inputs, targets = inputs.to(device), targets.to(device)
-
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
-
-        running_loss += loss.item()
-
-        # Print progress within the epoch
-        total_batches = len(train_loader)
-        progress = int(100 * (batch_idx + 1) / total_batches)
-        dprint(f"Epoch train [{epoch+1}/{num_epochs}] {progress}%\r")
-
-    return running_loss / len(train_loader)
-
-# Function for testing the model
-def test(model, test_loader, device):
-    model.eval()
-    correct = 0
-    total = 0
-
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(test_loader):
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            _, predicted = torch.max(outputs, 1)
-            total += targets.size(0)
-            correct += (predicted == targets).sum().item()
-        
-        progress = int(100 * (batch_idx + 1) / len(test_loader))
-        dprint(f"Test progress: {progress}%\r")
-
-    accuracy = 100.0 * correct / total
-    return accuracy
 
 # Main function for data-parallel training
 def main(rank, master_addr, master_port, world_size, args):
-    torch.manual_seed(0)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Set up the process group
+    # Initialize distributed environment
     prepare_distributed_environment(rank, master_addr, master_port, world_size, is_cuda_enabled=torch.cuda.is_available())
+    print(f"Rank {rank}/{world_size-1}")
+
+    if torch.cuda.is_available() and args['num_shards'] > 1:
+        # Number of GPUs should be the same on every rank
+        check_gpus_per_rank()
+
+    # get default config and overrides from the command line, if any
+    config = get_config()
+    config.merge_from_dict(args)
+    config.merge_and_cleanup(keys_to_look=['system', 'model', 'trainer'])
+    dprint(config)   
+    setup_logging(config)
+    set_seed(config.system.seed)
 
     # Define MNIST dataset and data loaders
     transform = transforms.Compose([
@@ -92,33 +86,37 @@ def main(rank, master_addr, master_port, world_size, args):
     train_dataset = torchvision.datasets.MNIST(root=rawdata_dir, train=True, download=True, transform=transform)
     test_dataset = torchvision.datasets.MNIST(root=rawdata_dir, train=False, download=True, transform=transform)
 
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
-    train_loader = DataLoader(train_dataset, batch_size=args["batch_size"], sampler=train_sampler, num_workers=args["num_workers"])
-    test_loader = DataLoader(test_dataset, batch_size=args["batch_size"], shuffle=False, num_workers=args["num_workers"])
-
     # Define the model (Simple CNN)
-    model = SimpleCNN().to(device)
+    model = SimpleCNN()
     if torch.cuda.is_available():
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
     else:
         model = torch.nn.parallel.DistributedDataParallel(model)
 
     # Define loss function and optimizer
-    criterion = nn.CrossEntropyLoss().to(device)
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+    config.trainer.rank = rank
+    config.trainer.world_size = world_size
+    trainer = Trainer(config.trainer, model, train_dataset, test_dataset)
 
-    # Training loop
-    for epoch in range(args["num_epochs"]):
-        train_loader.sampler.set_epoch(epoch)
-        running_loss = train_epoch(rank, model, train_loader, criterion, optimizer, device, epoch, args["num_epochs"])
+    # Define epoch-end callback
+    def epoch_end_callback(trainer):
+        dprint(f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt:.2f}s")
+        if trainer.epoch_num % 5 == 0:
+            dprint("Saving model...")
+            model_path = os.path.join(config.system.work_dir, f"model_epoch_{trainer.epoch_num}.pt")
+            torch.save(model.module.state_dict(), model_path)
 
-        dprint(f"\nEpoch [{epoch+1}/{args['num_epochs']}], Loss: {running_loss:.4f}")
+    # Define batch-end callback
+    def batch_end_callback(trainer):
+        dprint(f"Epoch [{trainer.epoch_num}/{trainer.config.num_epochs}] {trainer.epoch_progress}%\r")
 
-        # Test the model after each epoch
-        test_accuracy = test(model, test_loader, device)
-        dprint(f"Test Accuracy: {test_accuracy:.2f}%")
+    trainer.set_callback("on_epoch_end", epoch_end_callback)
+    trainer.set_callback("on_batch_end", batch_end_callback)
 
-    dprint("Training complete!")
+    # Run training
+    trainer.run()
+
+    dist.destroy_process_group()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -127,8 +125,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=20)
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--batch_size", type=int, default=2048)
-    parser.add_argument("--learning_rate", type=float, default=1e-2)
-    parser.add_argument("--percentage", type=float, default=100.0)
+    parser.add_argument("--learning_rate", type=float, default=1e-3)
+    parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--num_workers", type=int, default=1)
     args = parser.parse_args()
 
@@ -144,10 +142,10 @@ if __name__ == "__main__":
     master_port = None
     world_size = None
     if environment == "local":
-        print("Code being executed locally...")
         master_addr = "localhost"
-        master_port = "29501"
+        master_port = find_free_port()
         world_size = 2
+        print(f"Code being executed locally with {world_size} process(es)...")
         mp.spawn(
             main,
             args=(master_addr, master_port, world_size, args_dict),

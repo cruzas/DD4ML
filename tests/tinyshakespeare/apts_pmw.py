@@ -14,7 +14,7 @@ import torch.multiprocessing as mp
 
 from src.datasets.char_dataset import *
 from src.models.gpt.skgpt.model import GPT
-from src.models.gpt.skgpt.trainer import Trainer
+from src.models.gpt.skgpt.trainer_pmw import Trainer
 from src.optimizers.apts import APTS
 from src.optimizers.trust_region import TrustRegion
 from src.pmw.base_model import BaseModel
