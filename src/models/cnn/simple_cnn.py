@@ -13,20 +13,11 @@ class ConvBlock(nn.Module):
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
         self.relu = nn.ReLU()
         self.pool = nn.MaxPool2d(pool_size, stride=pool_size)
-        self.DEBUG = False
 
     def forward(self, x):
-        if self.DEBUG:
-            print("ConvBlock input shape:", x.shape)
         x = self.conv(x)
-        if self.DEBUG:
-            print("ConvBlock conv shape:", x.shape)
         x = self.relu(x)
-        if self.DEBUG:
-            print("ConvBlock relu shape:", x.shape)
         x = self.pool(x)
-        if self.DEBUG:
-            print("ConvBlock pool shape:", x.shape)
         return x
 
 class FullyConnectedBlock(nn.Module):
@@ -39,18 +30,10 @@ class FullyConnectedBlock(nn.Module):
         self.DEBUG = False
 
     def forward(self, x):
-        if self.DEBUG:
-            print("FullyConnectedBlock input shape:", x.shape)
         # Flatten the input tensor if not already flat
         x = x.view(x.size(0), -1)
-        if self.DEBUG:
-            print("FullyConnectedBlock flattened shape:", x.shape)
         x = self.fc(x)
-        if self.DEBUG:
-            print("FullyConnectedBlock fc shape:", x.shape)
         x = self.relu(x)
-        if self.DEBUG:
-            print("FullyConnectedBlock relu shape:", x.shape)
         return x
 
 

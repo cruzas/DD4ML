@@ -25,7 +25,7 @@ def get_config():
     C.system = CN()
     C.system.seed = 3407
     C.system.trial = 0
-    C.system.work_dir = '../../saved_networks/cifar10/parsgd/'
+    C.system.work_dir = '../../saved_networks/cifar10/parsgd_pmw/'
 
     # data
     C.data = CIFAR10Dataset.get_default_config()
@@ -80,7 +80,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, args=No
             dprint(f"Iteration {trainer.iter_num}, Loss: {trainer.loss:.4f}")
         if trainer.iter_num % 500 == 0:
             dprint("Saving model...")
-            model.save_state_dict(os.path.join(args["work_dir"], f"model_{config.model.model_type}_iter_{trainer.iter_num}.pt"))
+            model.save_state_dict(os.path.join(config.system.work_dir, f"model_iter_{trainer.iter_num}.pt"))
 
     trainer.set_callback("on_batch_end", batch_end_callback)
 
@@ -94,7 +94,6 @@ if __name__ == "__main__":
     parser.add_argument("--trial", type=int, default=0)
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--batch_size", type=int, default=1000)
-    parser.add_argument("--work_dir", type=str, default="../../saved_networks/cifar10/parsgd/")
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--num_workers", type=int, default=4)
     # for pmw
