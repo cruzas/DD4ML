@@ -2,135 +2,107 @@ import argparse
 import os
 
 import torch
+import torch.distributed as dist
 import torch.multiprocessing as mp
-import torch.nn as nn
-import torch.optim as optim
-import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
-from src.utils import (detect_environment, dprint, get_rawdata_dir,
-                       prepare_distributed_environment)
+from src.datasets.cifar10 import CIFAR10Dataset
+from src.models.cnn.simple_cnn import SimpleCNN
+from src.models.cnn.trainer import Trainer
+from src.pmw.model_handler import ModelHandler
+from src.pmw.parallelized_model import ParallelizedModel
+from src.utils import CfgNode as CN
+from src.utils import (check_gpus_per_rank, detect_environment, dprint,
+                       find_free_port, prepare_distributed_environment,
+                       set_seed, setup_logging)
 
 
-# Define a simple CNN model for CIFAR-10
-class SimpleCNN(nn.Module):
-    def __init__(self):
-        super(SimpleCNN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.fc1 = nn.Linear(64 * 8 * 8, 128)
-        self.fc2 = nn.Linear(128, 10)
+def get_config():
+    C = CN()
 
-    def forward(self, x):
-        x = self.pool(torch.relu(self.conv1(x)))
-        x = self.pool(torch.relu(self.conv2(x)))
-        x = x.view(-1, 64 * 8 * 8)
-        x = torch.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
+    # system
+    C.system = CN()
+    C.system.seed = 3407
+    C.system.trial = 0
+    C.system.work_dir = '../../saved_networks/cifar10/parsgd/'
 
-# Function for training a single epoch
-def train_epoch(rank, model, train_loader, criterion, optimizer, device, epoch, num_epochs):
-    model.train()
-    running_loss = 0.0
+    # data
+    C.data = CIFAR10Dataset.get_default_config()
+  
+    # model
+    C.model = SimpleCNN.get_default_config()
 
-    for batch_idx, (inputs, targets) in enumerate(train_loader):
-        inputs, targets = inputs.to(device), targets.to(device)
+    # trainer
+    C.trainer = Trainer.get_default_config()
+    return C
 
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
 
-        running_loss += loss.item()
-
-        total_batches = len(train_loader)
-        progress = int(100 * (batch_idx + 1) / total_batches)
-        dprint(f"Epoch train [{epoch+1}/{num_epochs}] {progress}%\r")
-
-    return running_loss / len(train_loader)
-
-# Function for testing the model
-def test(model, test_loader, device):
-    model.eval()
-    correct = 0
-    total = 0
-
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(test_loader):
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            _, predicted = torch.max(outputs, 1)
-            total += targets.size(0)
-            correct += (predicted == targets).sum().item()
-        
-        progress = int(100 * (batch_idx + 1) / len(test_loader))
-        dprint(f"Test progress: {progress}%\r")
-
-    accuracy = 100.0 * correct / total
-    return accuracy
-
-# Main function for data-parallel training
-def main(rank, master_addr, master_port, world_size, args):
-    torch.manual_seed(0)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Set up the process group
+# Main function
+def main(rank=None, master_addr=None, master_port=None, world_size=None, args=None):
     prepare_distributed_environment(rank, master_addr, master_port, world_size, is_cuda_enabled=torch.cuda.is_available())
+    print(f"Rank {rank}/{world_size-1}")
 
-    # Define CIFAR-10 dataset and data loaders
-    transform = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomCrop(32, padding=4),
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
-    ])
+    if torch.cuda.is_available() and args['num_shards'] > 1:
+        # Number of GPUs should be the same on every rank
+        check_gpus_per_rank()
 
-    rawdata_dir = get_rawdata_dir()
-    train_dataset = torchvision.datasets.CIFAR10(root=rawdata_dir, train=True, download=True, transform=transform)
-    test_dataset = torchvision.datasets.CIFAR10(root=rawdata_dir, train=False, download=True, transform=transform)
+    config = get_config()
+    config.merge_from_dict(args)
+    config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
+    dprint(config)   
+    setup_logging(config)
+    set_seed(config.system.seed)
 
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
-    train_loader = DataLoader(train_dataset, batch_size=args["batch_size"], sampler=train_sampler, num_workers=args["num_workers"])
-    test_loader = DataLoader(test_dataset, batch_size=args["batch_size"], shuffle=False, num_workers=args["num_workers"])
+    # Datasets 
+    train_dataset = CIFAR10Dataset(config.data)
+    config.model.input_channels = train_dataset.get_input_channels()
+    config.model.output_classes = train_dataset.get_output_classes()
 
-    # Define the model (Simple CNN)
-    model = SimpleCNN().to(device)
-    if torch.cuda.is_available():
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
-    else:
-        model = torch.nn.parallel.DistributedDataParallel(model)
+    # Define the model
+    model = SimpleCNN(config.model)
+    dprint(model)
 
-    # Define loss function and optimizer
-    criterion = nn.CrossEntropyLoss().to(device)
-    optimizer = optim.SGD(model.parameters(), lr=args["learning_rate"], momentum=0.9, weight_decay=5e-4)
+    # Model handler
+    model_handler = ModelHandler(model.model_dict, config.model.num_subdomains, config.model.num_replicas_per_subdomain)
+    config.trainer.model_handler = model_handler
 
-    # Training loop
-    for epoch in range(args["num_epochs"]):
-        train_loader.sampler.set_epoch(epoch)
-        running_loss = train_epoch(rank, model, train_loader, criterion, optimizer, device, epoch, args["num_epochs"])
+    # Construct the parallel model (overwrite the model)
+    sample_input = train_dataset.get_sample_input(config.trainer)
+    model = ParallelizedModel(model_handler, sample=sample_input)
 
-        dprint(f"\nEpoch [{epoch+1}/{args['num_epochs']}], Loss: {running_loss:.4f}")
+    # Define the trainer
+    trainer = Trainer(config.trainer, model, train_dataset)
 
-        # Test the model after each epoch
-        test_accuracy = test(model, test_loader, device)
-        dprint(f"Test Accuracy: {test_accuracy:.2f}%")
+    # Define batch-end callback
+    def batch_end_callback(trainer):
+        if trainer.iter_num % 10 == 0:
+            dprint(f"Iteration {trainer.iter_num}, Loss: {trainer.loss:.4f}")
+        if trainer.iter_num % 500 == 0:
+            dprint("Saving model...")
+            model.save_state_dict(os.path.join(args["work_dir"], f"model_{config.model.model_type}_iter_{trainer.iter_num}.pt"))
 
-    dprint("Training complete!")
+    trainer.set_callback("on_batch_end", batch_end_callback)
+
+    # Run training
+    trainer.run()
+
+    dist.destroy_process_group()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="CIFAR-10 Training Script with Simple CNN")
+    parser = argparse.ArgumentParser(description="CIFAR-10 Training with ParallelizedModel and Trainer")
     parser.add_argument("--trial", type=int, default=0)
-    parser.add_argument("--num_epochs", type=int, default=20)
     parser.add_argument("--seed", type=int, default=3407)
-    parser.add_argument("--batch_size", type=int, default=2048)
-    parser.add_argument("--learning_rate", type=float, default=1e-2)
-    parser.add_argument("--percentage", type=float, default=100.0)
+    parser.add_argument("--batch_size", type=int, default=1000)
+    parser.add_argument("--work_dir", type=str, default="../../saved_networks/cifar10/parsgd/")
+    parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--num_workers", type=int, default=4)
+    # for pmw
+    parser.add_argument("--num_subdomains", type=int, default=1)
+    parser.add_argument("--num_replicas_per_subdomain",
+                        type=int, default=1)
+    parser.add_argument("--num_stages", type=int, default=1)
+    parser.add_argument("--num_shards", type=int, default=1)
     args = parser.parse_args()
 
     # Serialize args into a dictionary for passing them to main
@@ -138,23 +110,17 @@ if __name__ == "__main__":
 
     # Environment we are in
     environment = detect_environment()
-
-    # For distributed environment initialization
     rank = None
-    master_addr = None 
+    master_addr = None
     master_port = None
     world_size = None
+
     if environment == "local":
         print("Code being executed locally...")
         master_addr = "localhost"
-        master_port = "29501"
-        world_size = 2
-        mp.spawn(
-            main,
-            args=(master_addr, master_port, world_size, args_dict),
-            nprocs=world_size,
-            join=True
-        )
+        master_port = find_free_port()
+        world_size = args.num_subdomains * args.num_replicas_per_subdomain * args.num_stages * args.num_shards
+        mp.spawn(main, args=(master_addr, master_port, world_size, args_dict), nprocs=world_size, join=True)
     else:
         print("Code being executed on a cluster...")
         main(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size, args=args_dict)

@@ -28,7 +28,7 @@ class BaseTrainer(ABC):
         C.learning_rate = 3e-4
         C.betas = (0.9, 0.95)
         C.weight_decay = 0.1  # only applied on matmul weights
-        C.grad_norm_clip = 1.0
+        C.grad_norm_clip = 1.0 
         return C
 
     def __init__(self, config, model, train_dataset):

@@ -27,3 +27,4 @@ dist/
 .DS_Store
 Thumbs.db
 *.gz
+/tests/rawdata/cifar-10-batches-py

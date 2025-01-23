@@ -9,12 +9,13 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 """
 
 import math
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from src.models.base_model import BaseModel
 from src.optimizers.trust_region import TrustRegion
 from src.utils import CfgNode as CN
 
@@ -103,7 +104,7 @@ class Block(nn.Module):
         x = x + self.mlpf(self.ln_2(x))
         return x
 
-class BaseGPT(nn.Module, ABC):
+class BaseGPT(BaseModel):
     """Abstract Base Class for GPT models."""
 
     @staticmethod
@@ -167,3 +168,5 @@ class BaseGPT(nn.Module, ABC):
     def generate(self, idx, max_new_tokens, **kwargs):
         """Generate sequences."""
         pass
+
+    
