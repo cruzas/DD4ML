@@ -24,7 +24,8 @@ dependencies = [
     "numpy",
     "pandas",
     "scipy",
-    "requests"
+    "requests",
+    "wandb"
 ]
 
 [tool.setuptools]
