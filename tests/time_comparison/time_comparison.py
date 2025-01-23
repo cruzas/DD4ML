@@ -68,7 +68,10 @@ def measure_time(model, trainer_class, dataset, sample_input, sample_target, tra
         loss_fn = torch.nn.CrossEntropyLoss()
         loss = loss_fn(outputs, targets)
         start_time = time.time()
-        loss.backward()
+        if not is_parallel:
+            loss.backward()
+        else:
+            model.backward(loss)
         backward_times.append(time.time() - start_time)
 
     # Compute average times
