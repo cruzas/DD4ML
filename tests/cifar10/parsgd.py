@@ -10,7 +10,8 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision.models import resnet18
 
-from src.utils import detect_environment, prepare_distributed_environment
+from src.utils import (detect_environment, get_rawdata_dir,
+                       prepare_distributed_environment)
 
 
 # Function for training a single epoch
@@ -64,6 +65,7 @@ def main(rank, master_addr, master_port, world_size, args):
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
     ])
 
+    rawdata_dir = get_rawdata_dir()
     train_dataset = torchvision.datasets.CIFAR10(root="./data", train=True, download=True, transform=transform)
     test_dataset = torchvision.datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
 
