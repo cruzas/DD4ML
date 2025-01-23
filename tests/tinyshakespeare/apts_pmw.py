@@ -33,7 +33,7 @@ def get_config():
     C.system = CN()
     C.system.seed = 3407
     C.system.trial = 0
-    C.system.work_dir = '../../saved_networks/tshakes/'
+    C.system.work_dir = '../../saved_networks/tinyshakespeare/apts_pmw/'
 
     # data
     C.data = CharDataset.get_default_config()
