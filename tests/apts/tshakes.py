@@ -63,7 +63,7 @@ def main(rank, master_addr, master_port, world_size, args):
 
     # construct the training dataset
     # don't worry we won't run out of file handles
-    text = open('../../input.txt', 'r').read()
+    text = open('../../src/rawdata/input.txt', 'r').read()
     train_dataset = CharDataset(config.data, text)
 
     # construct the model
