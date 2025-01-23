@@ -1,0 +1,24 @@
+{
+    "system": {
+        "seed": 3407,
+        "work_dir": "../../saved_networks/chargpt/"
+    },
+    "model": {},
+    "trainer": {
+        "device": "auto",
+        "num_workers": 1,
+        "max_iters": "null",
+        "batch_size": 2048,
+        "learning_rate": 0.001,
+        "betas": [
+            0.9,
+            0.95
+        ],
+        "weight_decay": 0.1,
+        "grad_norm_clip": 1.0,
+        "num_epochs": 20,
+        "data_chunks_amount": 1,
+        "momentum": 0.9
+    },
+    "trial": 0
+}

@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from src.datasets.cifar10 import CIFAR10Dataset
 from src.models.cnn.simple_cnn import SimpleCNN
-from src.models.cnn.trainer import Trainer
+from src.models.cnn.trainer_pmw import Trainer
 from src.pmw.model_handler import ModelHandler
 from src.pmw.parallelized_model import ParallelizedModel
 from src.utils import CfgNode as CN
