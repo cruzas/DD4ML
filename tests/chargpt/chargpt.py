@@ -13,7 +13,7 @@ from src.datasets.char_dataset import CharDataset
 from src.models.gpt.mingpt.model import GPT
 from src.models.gpt.mingpt.trainer import Trainer
 from src.utils import CfgNode as CN
-from src.utils import set_seed, setup_logging
+from src.utils import get_rawdata_dir, set_seed, setup_logging
 
 # -----------------------------------------------------------------------------
 
@@ -54,7 +54,8 @@ if __name__ == '__main__':
 
     # construct the training dataset
     # don't worry we won't run out of file handles
-    text = open('../../src/rawdata/input.txt', 'r').read()
+    filepath = os.path.join(get_rawdata_dir(), 'tinyshakespeare.txt')
+    text = open(filepath, 'r').read()
     train_dataset = CharDataset(config.data, text)
 
     # construct the model

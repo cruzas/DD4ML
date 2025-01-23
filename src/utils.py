@@ -13,6 +13,10 @@ import torch
 import torch.distributed as dist
 
 
+def get_rawdata_dir():
+    # Relative to this file, it is "./rawdata", but I want to get the absolute path
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), 'rawdata'))
+
 def detect_environment():
     # Example 1: Check for an environment variable set on the cluster
     if 'SLURM_JOB_ID' in os.environ:  # Common in Slurm-managed clusters
