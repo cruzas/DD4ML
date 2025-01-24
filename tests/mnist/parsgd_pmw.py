@@ -1,4 +1,5 @@
 import argparse
+import copy
 import os
 
 import torch
@@ -7,9 +8,10 @@ import torch.multiprocessing as mp
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
-from src.datasets.cifar10 import CIFAR10Dataset
-from src.models.cnn.simple_cnn import SimpleCNN
-from src.models.cnn.trainer_pmw import Trainer
+import wandb
+from src.datasets.mnist import MNISTDataset
+from src.models.cnn.mnist import CNNMNIST
+from src.models.cnn.mnist.trainer_pmw import Trainer
 from src.pmw.model_handler import ModelHandler
 from src.pmw.parallelized_model import ParallelizedModel
 from src.utils import CfgNode as CN
@@ -17,6 +19,7 @@ from src.utils import (check_gpus_per_rank, detect_environment, dprint,
                        find_free_port, prepare_distributed_environment,
                        set_seed, setup_logging)
 
+filename = os.path.basename(__file__).split(".")[0]
 
 def get_config():
     C = CN()
@@ -25,18 +28,17 @@ def get_config():
     C.system = CN()
     C.system.seed = 3407
     C.system.trial = 0
-    C.system.work_dir = '../../saved_networks/cifar10/parsgd_pmw/'
+    C.system.work_dir = f'../../saved_networks/mnist/{filename}/'
 
     # data
-    C.data = CIFAR10Dataset.get_default_config()
+    C.data = MNISTDataset.get_default_config()
   
     # model
-    C.model = SimpleCNN.get_default_config()
+    C.model = CNNMNIST.get_default_config()
 
     # trainer
     C.trainer = Trainer.get_default_config()
     return C
-
 
 # Main function
 def main(rank=None, master_addr=None, master_port=None, world_size=None, args=None):
@@ -54,13 +56,21 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, args=No
     setup_logging(config)
     set_seed(config.system.seed)
 
+    # Initialize wandb
+    if rank == 0:  # Only initialize wandb for the main process
+        wandb.init(project=f"mnist-training-{filename}", config=args, name=f"trial_{args['trial']}")
+
     # Datasets 
-    train_dataset = CIFAR10Dataset(config.data)
+    train_dataset = MNISTDataset(config.data)
     config.model.input_channels = train_dataset.get_input_channels()
     config.model.output_classes = train_dataset.get_output_classes()
+    
+    test_dataset_config = copy.deepcopy(config.data)
+    test_dataset_config.train = False
+    test_dataset = MNISTDataset(test_dataset_config)
 
     # Define the model
-    model = SimpleCNN(config.model)
+    model = CNNMNIST(config.model)
     dprint(model)
 
     # Model handler
@@ -71,26 +81,41 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, args=No
     sample_input = train_dataset.get_sample_input(config.trainer)
     model = ParallelizedModel(model_handler, sample=sample_input)
 
-    # Define the trainer
-    trainer = Trainer(config.trainer, model, train_dataset)
+    # Define optimizer
+    trainer = Trainer(config.trainer, model, train_dataset, test_dataset)
+
+    # Define epoch-end callback
+    def epoch_end_callback(trainer):
+        dprint(f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt:.2f}s")
+        if rank == 0:  # Log only from the main process
+            wandb.log({
+                "epoch": trainer.epoch_num,
+                "loss": trainer.loss,
+                "accuracy": trainer.accuracy,
+                "epoch_time": trainer.epoch_dt
+            })
+        if trainer.epoch_num % 5 == 0:
+            dprint("Saving model...")
+            model_path = os.path.join(config.system.work_dir, f"model_epoch_{trainer.epoch_num}.pt")
+            torch.save(model.module.state_dict(), model_path)
 
     # Define batch-end callback
     def batch_end_callback(trainer):
-        if trainer.iter_num % 10 == 0:
-            dprint(f"Iteration {trainer.iter_num}, Loss: {trainer.loss:.4f}")
-        if trainer.iter_num % 500 == 0:
-            dprint("Saving model...")
-            model.save_state_dict(os.path.join(config.system.work_dir, f"model_iter_{trainer.iter_num}.pt"))
+        dprint(f"Epoch [{trainer.epoch_num}/{trainer.config.num_epochs}] {trainer.epoch_progress}%\r")
 
+    trainer.set_callback("on_epoch_end", epoch_end_callback)
     trainer.set_callback("on_batch_end", batch_end_callback)
 
     # Run training
     trainer.run()
 
+    if rank == 0:
+        wandb.finish()
+
     dist.destroy_process_group()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="CIFAR-10 Training with ParallelizedModel and Trainer")
+    parser = argparse.ArgumentParser(description="MNIST Training with ParallelizedModel and Trainer")
     parser.add_argument("--trial", type=int, default=0)
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--batch_size", type=int, default=1000)

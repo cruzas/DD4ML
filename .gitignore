@@ -11,7 +11,7 @@ venv/
 *.pt
 
 # Results and logs
-results/
+tests/wandb_sweep/
 *.csv
 
 # IDE files
