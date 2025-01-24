@@ -7,9 +7,9 @@ from src.utils import CfgNode as CN
 from src.utils import dprint
 
 
-class CIFAR10Dataset(BaseDataset):
+class MNISTDataset(BaseDataset):
     """
-    CIFAR-10 dataset class following BaseDataset structure
+    MNIST dataset class following BaseDataset structure
     """
 
     @staticmethod
@@ -25,14 +25,12 @@ class CIFAR10Dataset(BaseDataset):
         
         # Define transformations
         self.transform = transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(32, padding=4),
             transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
+            transforms.Normalize((0.5,), (0.5,))
         ])
 
-        # Load CIFAR-10 dataset
-        self.data = datasets.CIFAR10(
+        # Load MNIST dataset
+        self.data = datasets.MNIST(
             root=self.config.root, 
             train=self.config.train, 
             download=self.config.download, 
@@ -41,16 +39,16 @@ class CIFAR10Dataset(BaseDataset):
         
         self.classes = self.data.classes
         
-        dprint(f'CIFAR-10 dataset loaded with {len(self.data)} images, {len(self.classes)} classes.')
+        dprint(f'MNIST dataset loaded with {len(self.data)} images, {len(self.classes)} classes.')
 
     def get_input_channels(self):
-        return 3  # RGB images
+        return 1  # black-and-white images
 
     def get_output_classes(self):
         return len(self.classes)
 
     def get_block_size(self):
-        return 32  # Image size for CIFAR-10
+        return 28  # Image size for MNIST
 
     def __len__(self):
         return len(self.data)
@@ -58,5 +56,3 @@ class CIFAR10Dataset(BaseDataset):
     def __getitem__(self, idx):
         image, label = self.data[idx]
         return image, label
-
-   

@@ -7,14 +7,10 @@ This code runs with our dictionary-defined model, which is instantiated as a Par
 Model handler takes care of the parallelized model logic. This is why this is slightly different from the trainer in mingpt.
 """
 import torch
-import torch.distributed as dist
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from src.base_trainer import *
-from src.pmw.model_handler import ModelHandler
-from src.utils import dprint
+from src.base_trainer import BaseTrainer
 
 
 class Trainer(BaseTrainer):

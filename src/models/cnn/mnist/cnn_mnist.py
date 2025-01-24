@@ -3,6 +3,7 @@ from collections import deque
 import torch.nn as nn
 
 from src.models.cnn.base_cnn import BaseCNN
+from src.utils import CfgNode as CN
 
 
 class ConvBlock(nn.Module):
@@ -27,18 +28,19 @@ class FullyConnectedBlock(nn.Module):
         super(FullyConnectedBlock, self).__init__()
         self.fc = nn.Linear(in_features, out_features)
         self.relu = nn.ReLU()
-        self.DEBUG = False
+        self.dropout = nn.Dropout(0.5)
 
     def forward(self, x):
         # Flatten the input tensor if not already flat
-        x = x.view(x.size(0), -1)
+        x = x.view(-1, x.size(1))
         x = self.fc(x)
         x = self.relu(x)
+        x = self.dropout(x)
         return x
 
 
-class SimpleCNN(BaseCNN):
-    """Simple CNN Model for CIFAR-10"""
+class CNNMNIST(BaseCNN):
+    """Simple CNN Model for MNIST"""
 
     @staticmethod
     def get_default_config():
@@ -56,17 +58,17 @@ class SimpleCNN(BaseCNN):
     def build_cnn_dictionary(self, config):
         model_dict = {}
 
-        # First Convolutional Block
+        # First Convolutional Block (conv1 + pool)
         model_dict['start'] = {
             'callable': {
                 'object': ConvBlock,
                 'settings': {
-                    'in_channels': config.input_channels,
+                    'in_channels': config.input_channels,    
                     'out_channels': 32,
                     'kernel_size': 3,
-                    'pool_size': 2,
-                    'stride': 2,
-                    'padding': 1,
+                    'pool_size': 2,      # Pooling down by factor of 2
+                    'stride': 1,         # Convolution stride
+                    'padding': 1,        # Keep spatial size consistent
                 },
             },
             'dst': {'to': ['conv2']},
@@ -75,7 +77,7 @@ class SimpleCNN(BaseCNN):
             'num_layer_shards': 1,
         }
 
-        # Second Convolutional Block
+        # Second Convolutional Block (conv2 + pool)
         model_dict['conv2'] = {
             'callable': {
                 'object': ConvBlock,
@@ -84,7 +86,7 @@ class SimpleCNN(BaseCNN):
                     'out_channels': 64,
                     'kernel_size': 3,
                     'pool_size': 2,
-                    'stride': 2,
+                    'stride': 1,
                     'padding': 1,
                 },
             },
@@ -99,7 +101,7 @@ class SimpleCNN(BaseCNN):
             'callable': {
                 'object': FullyConnectedBlock,
                 'settings': {
-                    'in_features': 64 * 2 * 2,
+                    'in_features': 64 * 7 * 7,  # Matches output from second pool
                     'out_features': 128,
                 },
             },
@@ -115,7 +117,7 @@ class SimpleCNN(BaseCNN):
                 'object': nn.Linear,
                 'settings': {
                     'in_features': 128,
-                    'out_features': config.output_classes,
+                    'out_features': config.output_classes,  
                     'bias': True,
                 },
             },
@@ -125,11 +127,12 @@ class SimpleCNN(BaseCNN):
             'num_layer_shards': 1,
         }
 
-        # Optionally reset all stages (if your pipeline approach needs it)
+        # Optionally reset all stages (if needed for your pipeline approach)
         for name in model_dict:
             model_dict[name]['stage'] = 0
 
         return self.set_stage(model_dict, config.num_stages)
+
 
     def forward(self, x):
         # Forward logic implemented in pipeline
