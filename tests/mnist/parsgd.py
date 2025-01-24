@@ -93,7 +93,7 @@ def main(rank, master_addr, master_port, world_size, args):
     else:
         model = torch.nn.parallel.DistributedDataParallel(model)
 
-    # Define loss function and optimizer
+    # Define optimizer
     config.trainer.rank = rank
     config.trainer.world_size = world_size
     trainer = Trainer(config.trainer, model, train_dataset, test_dataset)
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="MNIST Training Script with Simple CNN")
     parser.add_argument("--trial", type=int, default=0)
-    parser.add_argument("--num_epochs", type=int, default=20)
+    parser.add_argument("--num_epochs", type=int, default=10)
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--batch_size", type=int, default=2048)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
