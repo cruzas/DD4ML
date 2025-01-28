@@ -25,6 +25,19 @@ class BaseDataset(Dataset, ABC):
     def __getitem__(self, idx):
         pass
     
+    def compute_class_weights(self):
+        # Count the occurrences of each class in the dataset
+        labels = [label for _, label in self]
+        class_counts = Counter(labels)
+        total_samples = sum(class_counts.values())
+
+        # Compute class weights as the inverse of the frequency
+        class_weights = {cls: total_samples / count for cls, count in class_counts.items()}
+
+        # Convert to tensor and normalize
+        weights = torch.tensor([class_weights[i] for i in range(len(class_counts))], dtype=torch.float)
+        return weights / weights.sum()
+    
     def get_sample_input(self, config):
         dummy_train_loader = DataLoader(
             self,
