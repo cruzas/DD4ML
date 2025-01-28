@@ -14,6 +14,42 @@ import torch
 import torch.distributed as dist
 
 
+def get_model_and_trainer(args, config):
+    all_config = get_config(args['dataset_name'], args['model_name'], args['optimizer_name'])
+    all_config.merge_from_dict(args)
+    all_config.merge_and_cleanup(keys_to_look=["model", "trainer"])
+    
+    # Datasets
+    if args['dataset_name'] == "mnist":
+        dataset_class = MNISTDataset
+    elif args['dataset_name'] == "cifar10":
+        dataset_class = CIFAR10Dataset
+    else:
+        raise ValueError(f"Unknown dataset name: {args['dataset_name']}")
+
+    test_dataset_config = copy.deepcopy(config.data)
+    test_dataset_config.train = False 
+    
+    train_dataset = dataset_class(config.data)
+    test_dataset = dataset_class(config.data, train=False)
+    
+    # Define the model
+    model = config.model.model_class(config.model)
+    dprint(model)
+    # NOTE: regardless of the model class, it must define model_dict. 
+    model_handler = ModelHandler(model.model_dict, config.model)
+    config.trainer.model_handler = model_handler
+    
+    # Construct the parallel model (overwrite the model)
+    sample_input = train_dataset.get_sample_input(config.trainer)
+    model = ParallelizedModel(model_handler, sample=sample_input)
+    
+    # Define the optimizer
+    trainer = Trainer(config.trainer, model, train_dataset, test_dataset)
+    
+    return model, trainer
+    
+
 def get_config(dataset_name: str, model_name: str, optimizer_name: str = "sgd") -> CN:
     C = CN()
 
