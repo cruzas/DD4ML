@@ -18,6 +18,8 @@ class CIFAR10Dataset(BaseDataset):
         C.root = '../rawdata/'
         C.train = True
         C.download = True
+        C.input_channels = 3
+        C.output_classes = 10
         return C
 
     def __init__(self, config, data=None):

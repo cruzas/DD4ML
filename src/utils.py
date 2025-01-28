@@ -6,11 +6,47 @@ import socket
 import subprocess
 import sys
 from ast import literal_eval
+from collections import Counter
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.distributed as dist
+
+
+def get_config(dataset_name: str, model_name: str, optimizer_name: str = "sgd") -> CN:
+    C = CN()
+
+    # System
+    C.system = CN()
+    C.system.seed = 3407
+    C.system.trial = 0
+    C.system.work_dir = f'../../saved_networks/{dataset_name}/{model_name}/{optimizer_name}/'    
+
+    # Model
+    if "cnn" in model_name.lower():
+        from src.models.cnn.my_cnn import MyCNN
+        C.model = MyCNN.get_default_config()
+        C.model.model_class = MyCNN
+    # elif "resnet" in model_name.lower():
+        # TODO
+        
+    # Data
+    if dataset_name == "mnist":
+        from src.datasets.mnist import MNISTDataset
+        C.data = MNISTDataset.get_default_config()
+    elif dataset_name == "cifar10":
+        from src.datasets.cifar10 import CIFAR10Dataset
+        C.data = CIFAR10Dataset.get_default_config()
+    else:
+        raise ValueError(f"Unknown dataset name: {dataset_name}")
+    
+    C.model.input_channels = C.data.input_channels
+    C.model.output_classes = C.data.output_classes
+
+    # trainer
+    C.trainer = Trainer.get_default_config()
+    return C
 
 
 def get_rawdata_dir():

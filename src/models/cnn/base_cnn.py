@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from collections import deque
 
 from src.models.base_model import BaseModel
 from src.utils import CfgNode as CN
@@ -68,3 +69,37 @@ class BaseCNN(BaseModel):
     def forward(self, x):
         """Define the forward pass."""
         pass
+
+# ----------------------------------------------------------------
+# For child classes of BaseCNN
+class ConvBlock(nn.Module):
+    """Convolutional block with Conv2d, ReLU and MaxPool2d layers"""
+
+    def __init__(self, in_channels, out_channels, kernel_size, pool_size, stride, padding):
+        super(ConvBlock, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        self.relu = nn.ReLU()
+        self.pool = nn.MaxPool2d(pool_size, stride=pool_size)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        return x
+
+class FullyConnectedBlock(nn.Module):
+    """Fully connected block with Linear and ReLU layers"""
+
+    def __init__(self, in_features, out_features):
+        super(FullyConnectedBlock, self).__init__()
+        self.fc = nn.Linear(in_features, out_features)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.5)
+
+    def forward(self, x):
+        # Flatten the input tensor if not already flat
+        x = x.view(-1, x.size(1))
+        x = self.fc(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        return x
