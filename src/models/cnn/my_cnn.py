@@ -1,47 +1,8 @@
-from collections import deque
-
-import torch.nn as nn
-
-from src.models.cnn.base_cnn import BaseCNN
-from src.utils import CfgNode as CN
+from src.models.cnn.base_cnn import *
 
 
-class ConvBlock(nn.Module):
-    """Convolutional block with Conv2d, ReLU and MaxPool2d layers"""
-
-    def __init__(self, in_channels, out_channels, kernel_size, pool_size, stride, padding):
-        super(ConvBlock, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
-        self.relu = nn.ReLU()
-        self.pool = nn.MaxPool2d(pool_size, stride=pool_size)
-
-    def forward(self, x):
-        x = self.conv(x)
-        x = self.relu(x)
-        x = self.pool(x)
-        return x
-
-class FullyConnectedBlock(nn.Module):
-    """Fully connected block with Linear and ReLU layers"""
-
-    def __init__(self, in_features, out_features):
-        super(FullyConnectedBlock, self).__init__()
-        self.fc = nn.Linear(in_features, out_features)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.5)
-
-    def forward(self, x):
-        # Flatten the input tensor if not already flat
-        x = x.view(-1, x.size(1))
-        x = self.fc(x)
-        x = self.relu(x)
-        x = self.dropout(x)
-        return x
-
-
-class CNNMNIST(BaseCNN):
-    """Simple CNN Model for MNIST"""
-
+class MyCNN(BaseCNN):
+    
     @staticmethod
     def get_default_config():
         C = BaseCNN.get_default_config()
@@ -50,11 +11,11 @@ class CNNMNIST(BaseCNN):
         C.num_subdomains = 1
         C.num_replicas_per_subdomain = 1
         return C
-
+    
     def __init__(self, config):
         super().__init__(config)
         self.model_dict = self.build_cnn_dictionary(config)
-
+        
     def build_cnn_dictionary(self, config):
         model_dict = {}
 
