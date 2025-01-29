@@ -23,9 +23,7 @@ class Trainer(BaseTrainer):
     @staticmethod
     def get_default_config():
         C = BaseTrainer.get_default_config()
-        # data chunks amount
         C.data_chunks_amount = 1
-        C.momentum = 0.9
         C.use_pmw = False
         C.run_by_epoch = True # if False, run by iteration
 
@@ -37,7 +35,7 @@ class Trainer(BaseTrainer):
     def run(self):
         _, config = self.model, self.config
         
-        if use_pmw:
+        if config.use_pmw:
             self.train_loader = GeneralizedDistributedDataLoader(model_handler=config.model_handler, 
                                                             dataset=self.train_dataset, 
                                                             batch_size=config.batch_size, 

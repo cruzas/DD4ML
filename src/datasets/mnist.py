@@ -22,6 +22,13 @@ class MNISTDataset(BaseDataset):
     def __init__(self, config, data=None, transform=None):
         super().__init__(config, data, transform)
         
+        if transform is None:
+            # Define transformations
+            self.transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.5,), (0.5,))
+            ])
+        
         if data is None:
             # Load MNIST dataset
             self.data = datasets.MNIST(
@@ -30,13 +37,6 @@ class MNISTDataset(BaseDataset):
                 download=self.config.download, 
                 transform=self.transform
             )
-        
-        if transform is None:
-            # Define transformations
-            self.transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize((0.5,), (0.5,))
-            ])
         
         self.classes = self.data.classes
         dprint(f'MNIST dataset loaded with {len(self.data)} images, {len(self.classes)} classes.')

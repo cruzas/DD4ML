@@ -93,18 +93,25 @@ def get_config_model_and_trainer(args, wandb_config):
     test_dataset = dataset_class(test_dataset_config)
     
     # Define the model
-    model = all_config.model.model_class(all_config.model)
+    # Check if model_class has a method with build_*_dictionary 
+    if hasattr(all_config.model.model_class, "build_model_dict"):
+        model_dict = all_config.model.model_class(all_config.model).model_dict
+        if args["use_pmw"]:
+            # NOTE: regardless of the model class, it must define model_dict. 
+            model_handler = ModelHandler(model.model_dict, all_config.model)
+            all_config.trainer.model_handler = model_handler
+            
+            # Construct the parallel model (overwrite the model)
+            sample_input = train_dataset.get_sample_input(all_config.trainer)
+            model = ParallelizedModel(model_handler, sample=sample_input)
+        else:
+            from src.models.standard_model import build_standard_model
+            model = build_standard_model(model_dict)
+    else:
+        model = all_config.model.model_class(all_config.model)
+            
     dprint(model)
     
-    if args["use_pmw"]:
-        # NOTE: regardless of the model class, it must define model_dict. 
-        model_handler = ModelHandler(model.model_dict, all_config.model)
-        all_config.trainer.model_handler = model_handler
-        
-        # Construct the parallel model (overwrite the model)
-        sample_input = train_dataset.get_sample_input(all_config.trainer)
-        model = ParallelizedModel(model_handler, sample=sample_input)
-        
     # Define the criterion
     if wandb_config["criterion"] == "cross_entropy": 
         criterion = nn.CrossEntropyLoss()
