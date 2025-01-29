@@ -25,11 +25,12 @@ class Trainer(BaseTrainer):
         # data chunks amount
         C.data_chunks_amount = 1
         C.momentum = 0.9
+        C.use_pmw = False
 
         return C
 
-    def __init__(self, config, model, train_dataset):
-        super().__init__(config, model, train_dataset)
+    def __init__(self, config, model, train_dataset, test_dataset):
+        super().__init__(config, model, train_dataset, test_dataset)
 
     def run(self):
         model, config = self.model, self.config
@@ -44,6 +45,7 @@ class Trainer(BaseTrainer):
                                                         num_workers=config.num_workers, 
                                                         pin_memory=True)
 
+        
         criterion = nn.CrossEntropyLoss()
 
         model.train()

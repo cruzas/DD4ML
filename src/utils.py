@@ -30,7 +30,7 @@ def generic_run(rank=None, master_addr=None, master_port=None, world_size=None, 
     
     
 def get_config(dataset_name: str, model_name: str, optimizer: str = "sgd") -> CfgNode:
-    from src.trainer_pmw import Trainer
+    from src.trainer import Trainer
     C = CfgNode()
 
     # System
@@ -65,24 +65,24 @@ def get_config(dataset_name: str, model_name: str, optimizer: str = "sgd") -> Cf
     return C
 
     
-def get_config_model_and_trainer(args, config):
+def get_config_model_and_trainer(args, wandb_config):
     from src.pmw.model_handler import ModelHandler
     from src.pmw.parallelized_model import ParallelizedModel
-    from src.trainer_pmw import Trainer
+    from src.trainer import Trainer
     
-    all_config = get_config(config['dataset_name'], config['model_name'], config['optimizer'])
+    all_config = get_config(wandb_config['dataset_name'], wandb_config['model_name'], wandb_config['optimizer'])
     all_config.merge_from_dict(args)
     all_config.merge_and_cleanup(keys_to_look=["model", "trainer"])
     
     # Datasets
-    if config['dataset_name'] == "mnist":
+    if wandb_config['dataset_name'] == "mnist":
         from src.datasets.mnist import MNISTDataset
         dataset_class = MNISTDataset
-    elif config['dataset_name'] == "cifar10":
+    elif wandb_config['dataset_name'] == "cifar10":
         from src.datasets.cifar10 import CIFAR10Dataset
         dataset_class = CIFAR10Dataset
     else:
-        raise ValueError(f"Unknown dataset name: {config['dataset_name']}")
+        raise ValueError(f"Unknown dataset name: {wandb_config['dataset_name']}")
 
     test_dataset_config = copy.deepcopy(all_config.data)
     test_dataset_config.train = False 
@@ -93,16 +93,18 @@ def get_config_model_and_trainer(args, config):
     # Define the model
     model = all_config.model.model_class(all_config.model)
     dprint(model)
-    # NOTE: regardless of the model class, it must define model_dict. 
-    model_handler = ModelHandler(model.model_dict, config.model)
-    config.trainer.model_handler = model_handler
     
-    # Construct the parallel model (overwrite the model)
-    sample_input = train_dataset.get_sample_input(config.trainer)
-    model = ParallelizedModel(model_handler, sample=sample_input)
-    
+    if args["use_pmw"]:
+        # NOTE: regardless of the model class, it must define model_dict. 
+        model_handler = ModelHandler(model.model_dict, all_config.model)
+        all_config.trainer.model_handler = model_handler
+        
+        # Construct the parallel model (overwrite the model)
+        sample_input = train_dataset.get_sample_input(all_config.trainer)
+        model = ParallelizedModel(model_handler, sample=sample_input)
+        
     # Define the optimizer
-    trainer = Trainer(config.trainer, model, train_dataset, test_dataset)
+    trainer = Trainer(all_config.trainer, model, train_dataset, test_dataset)
     
     return all_config, model, trainer
     
