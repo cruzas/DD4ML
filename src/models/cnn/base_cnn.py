@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from collections import deque
 
-from src.models.base_model import BaseModel
+from src.models.base_model import *
 from src.utils import CfgNode as CN
 
 

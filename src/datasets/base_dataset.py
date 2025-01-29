@@ -2,8 +2,9 @@ from abc import ABC, abstractmethod
 
 from torch.utils.data import Dataset
 
-from src.utils import CfgNode as CN
+from src.utils import *
 
+CN = CfgNode
 
 class BaseDataset(Dataset, ABC):
 
