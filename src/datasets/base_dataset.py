@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections import Counter
 
 from torch.utils.data import Dataset
 
@@ -20,7 +21,7 @@ class BaseDataset(Dataset, ABC):
     def __init__(self, config, data, transform):
         self.config = config
         self.data = data
-        self.transform
+        self.transform = transform
 
     @abstractmethod
     def __len__(self):
