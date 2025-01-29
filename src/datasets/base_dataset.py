@@ -11,12 +11,16 @@ class BaseDataset(Dataset, ABC):
     @staticmethod
     def get_default_config():
         C = CN()
-        C.percentage = 100.0
+        C.train = True
+        C.download = True
+        C.root = "../rawdata/"
+        C.percentage = 100.0 # percentage of the dataset to use
         return C
 
-    def __init__(self, config, data):
+    def __init__(self, config, data, transform):
         self.config = config
         self.data = data
+        self.transform
 
     @abstractmethod
     def __len__(self):

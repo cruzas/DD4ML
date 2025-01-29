@@ -19,27 +19,28 @@ class CIFAR10Dataset(BaseDataset):
         C.output_classes = 10
         return C
 
-    def __init__(self, config, data=None):
-        super().__init__(config, data)
+    def __init__(self, config, data=None, transform=None):
+        super().__init__(config, data, transform)
         
-        # Define transformations
-        self.transform = transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(32, padding=4),
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
-        ])
+        if self.data is None:
+            # Load CIFAR-10 dataset
+            self.data = datasets.CIFAR10(
+                root=self.config.root, 
+                train=self.config.train, 
+                download=self.config.download, 
+                transform=self.transform
+            )
+        
+        if self.transform is None:
+            # Define transformations
+            self.transform = transforms.Compose([
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(32, padding=4),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
+            ])
 
-        # Load CIFAR-10 dataset
-        self.data = datasets.CIFAR10(
-            root=self.config.root, 
-            train=self.config.train, 
-            download=self.config.download, 
-            transform=self.transform
-        )
-        
-        self.classes = self.data.classes
-        
+        self.classes = self.data.classes        
         dprint(f'CIFAR-10 dataset loaded with {len(self.data)} images, {len(self.classes)} classes.')
 
     def get_input_channels(self):
