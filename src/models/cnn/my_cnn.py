@@ -14,9 +14,9 @@ class MyCNN(BaseCNN):
     
     def __init__(self, config):
         super().__init__(config)
-        self.model_dict = self.build_cnn_dictionary(config)
+        self.model_dict = self.build_model_dict(config)
         
-    def build_cnn_dictionary(self, config):
+    def build_model_dict(self, config):
         model_dict = {}
 
         # First Convolutional Block (conv1 + pool)

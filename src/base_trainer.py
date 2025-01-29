@@ -65,8 +65,9 @@ class BaseTrainer(ABC):
             callback(self)
     
     def compute_epoch_loss(self):
-        model.train()
         model, config = self.model, self.config
+        
+        model.train()
         criterion = self.criterion
         self.loss = 0.0 # epoch loss
         for batch_idx, (x, y) in enumerate(self.train_loader):    
@@ -101,6 +102,8 @@ class BaseTrainer(ABC):
         self.epoch_time = tnow
     
     def compute_accuracy(self):
+        model, config = self.model, self.config
+        
         model.eval()
         correct = 0
         total = 0
