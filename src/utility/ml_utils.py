@@ -8,13 +8,20 @@ import torch.distributed as dist
 def cross_entropy_transformers(logits, targets):
     return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
 
+import torch
+import torch.distributed as dist
+
+
 def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True, return_output=False, data_chunks_amount=1, grad_norm_clip=None, outputs_only=False):
     """
     NOTE: Losses from different chunks are averaged.
     """
     if isinstance(criterion, type):
         raise ValueError('Criterion must be an instance of a class.')
-    if model.model_handler.is_last_stage() and targets is not None and not outputs_only:
+
+    has_model_handler = hasattr(model, 'model_handler')
+
+    if has_model_handler and model.model_handler.is_last_stage() and targets is not None and not outputs_only:
         targets = targets.chunk(data_chunks_amount)
 
     def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount, sync_loss='global', grad_norm_clip=grad_norm_clip, outputs_only=outputs_only):
@@ -23,59 +30,67 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
         '''
         if sync_loss not in ['global', 'local']:
             raise ValueError('sync_loss must be either "global" or "local".')
+
         if zero_grad:
             model.zero_grad()
+
         with torch.set_grad_enabled(compute_grad):
-            outputs = model(inputs, chunks_amount=data_chunks_amount)
+            if has_model_handler:
+                outputs = model(inputs, chunks_amount=data_chunks_amount)
+            else:
+                outputs = model(inputs)
+
             if outputs_only:
                 return [output for output in outputs]
-        losses = [0] * data_chunks_amount
-        loss = torch.tensor(0.0).to(model.tensor_device)
-        if model.model_handler.is_last_stage():
+
+        losses = [0] * data_chunks_amount if has_model_handler else []
+        loss = torch.tensor(0.0, device=inputs.device)
+
+        if has_model_handler and model.model_handler.is_last_stage():
             for i, out in enumerate(outputs):
                 losses[i] = criterion(out, targets[i].to(out.device))
-            loss = torch.tensor(
-                (sum(losses)/len(losses)).item()).to(model.tensor_device)
-        # Average losses across replicas
-        if sync_loss == 'global':
-            if model.model_handler.is_last_stage():
-                dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM, group=model.model_handler.get_layers_copy_group(
-                    mode='global'))  # Summing the losses across final layers of each replicas
-                loss = loss/model.model_handler.tot_replicas
-            last_ranks = model.model_handler.get_stage_ranks(
-                stage_name='last', mode='global')
-            # each replica gets the average loss across all replicas (since we are averaging the losses first)
-            loss_broadcast = dist.broadcast(tensor=loss.detach(
-            ), src=last_ranks[0], group=model.model_handler.global_model_group, async_op=True)
-            # -> all subdomains will have the same loss
-        else:
-            if model.model_handler.is_last_stage():
-                # Summing the losses across shard 0 of final layers of each replicas within the same subdomain
-                dist.all_reduce(tensor=loss, op=dist.ReduceOp.SUM,
-                                group=model.model_handler.get_layers_copy_group(mode='local'))
-                loss = loss/model.num_replicas_per_subdomain
-            last_stage_ranks = model.model_handler.get_stage_ranks(
-                stage_name='last', mode='local')
-            if len(last_stage_ranks) > 1:
-                raise ValueError('Tensor sharding not implemented yet.')
-            # shard 0 of last layer of first model replica broadcasts the loss to all other replicas within the same subdomain
-            loss_broadcast = dist.broadcast(tensor=loss.detach(
-            ), src=last_stage_ranks[0], group=model.model_handler.get_sd_group(), async_op=True)
-            # -> each subdomains may have a different loss
+            loss = torch.tensor((sum(losses) / len(losses)).item(), device=model.tensor_device)
 
+        elif not has_model_handler:
+            loss = criterion(outputs, targets.to(outputs.device))
+
+        # Distributed processing (only if model_handler is present)
+        if has_model_handler:
+            if sync_loss == 'global':
+                if model.model_handler.is_last_stage():
+                    dist.all_reduce(loss, op=dist.ReduceOp.SUM, group=model.model_handler.get_layers_copy_group(mode='global'))
+                    loss = loss / model.model_handler.tot_replicas
+                last_ranks = model.model_handler.get_stage_ranks(stage_name='last', mode='global')
+                loss_broadcast = dist.broadcast(loss.detach(), src=last_ranks[0], group=model.model_handler.global_model_group, async_op=True)
+            else:
+                if model.model_handler.is_last_stage():
+                    dist.all_reduce(loss, op=dist.ReduceOp.SUM, group=model.model_handler.get_layers_copy_group(mode='local'))
+                    loss = loss / model.num_replicas_per_subdomain
+                last_stage_ranks = model.model_handler.get_stage_ranks(stage_name='last', mode='local')
+                if len(last_stage_ranks) > 1:
+                    raise ValueError('Tensor sharding not implemented yet.')
+                loss_broadcast = dist.broadcast(loss.detach(), src=last_stage_ranks[0], group=model.model_handler.get_sd_group(), async_op=True)
+
+        # Compute gradients
         if compute_grad and torch.is_grad_enabled():
-            model.backward(losses)
+            if has_model_handler:
+                model.backward(losses)
+            else:
+                loss.backward()
+            
             if grad_norm_clip is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm_clip) 
-        loss_broadcast.wait()
+
+        if has_model_handler:
+            loss_broadcast.wait()
+
         if return_output:
-            if model.model_handler.is_last_stage():
-                # Returning outputs here in case we want to compute the accuracy afterwards
-                return loss.item(), [output for output in outputs]
-            else:
-                return loss.item(), None
+            return loss.item(), [output for output in outputs] if has_model_handler else outputs
+
         return loss.item()
+
     return closure2
+
 
 def decide_tensor_device(ws, backend, gpu_id):
     if torch.cuda.is_available():
