@@ -1,10 +1,7 @@
 import torch
-from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
 
-from src.datasets.base_dataset import BaseDataset
-from src.utils import CfgNode as CN
-from src.utils import dprint
+from src.datasets.base_dataset import *
 
 
 class MNISTDataset(BaseDataset):
