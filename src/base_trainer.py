@@ -26,7 +26,7 @@ class BaseTrainer(ABC):
         C.max_iters = None
         C.batch_size = 64
         C.learning_rate = 3e-4
-        C.betas = (0.9, 0.95)
+        C.betas = (0.9, 0.999)
         C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = 1.0 
         C.epochs = 1 # in case epochs instead of iter

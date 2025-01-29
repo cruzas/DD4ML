@@ -31,6 +31,8 @@ def generic_run(rank=None, master_addr=None, master_port=None, world_size=None, 
     # Run training
     trainer.run()
     
+    # Destroy process group
+    dist.destroy_process_group()
     
 def get_config(dataset_name: str, model_name: str, optimizer: str = "sgd") -> CfgNode:
     from src.trainer import Trainer
