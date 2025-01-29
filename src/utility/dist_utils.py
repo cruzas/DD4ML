@@ -36,7 +36,7 @@ def worker(
             ),
             entity=entity,
             project=project,
-            count=1
+            # count=1
         )
     else:
         main_func(
@@ -127,7 +127,12 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
         node_list = os.environ['SLURM_NODELIST']
         master_node = subprocess.getoutput(f'scontrol show hostname {node_list} | head -n1')
         os.environ['MASTER_ADDR'] = master_node
-        dist.init_process_group(backend=backend)
+        
+        # Check if the default process group has been initialized
+        if not dist.is_initialized():
+            dist.init_process_group(backend=backend)
+        else:
+            print("Process group already initialized. Skipped initialization.")
     else:  # We are on a PC
         os.environ['MASTER_ADDR'] = "localhost" if master_addr is None else master_addr
         os.environ['MASTER_PORT'] = master_port if master_port is not None else find_free_port()
@@ -135,7 +140,10 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
         if sys.platform == 'darwin':
             os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
-        dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+        if not dist.is_initialized():
+            dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+        else:
+            print("Process group already initialized. Skipped initialization.")
 
 def send_shape(shape: list, dst: int, device=None):
     if device is None:
