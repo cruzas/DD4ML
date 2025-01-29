@@ -98,7 +98,8 @@ class FullyConnectedBlock(nn.Module):
 
     def forward(self, x):
         # Flatten the input tensor if not already flat
-        x = x.view(-1, x.size(1))
+        # x = x.view(-1, x.size(1))
+        x = x.view(x.size(0), -1)
         x = self.fc(x)
         x = self.relu(x)
         x = self.dropout(x)

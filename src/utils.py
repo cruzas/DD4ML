@@ -44,9 +44,12 @@ def get_config(dataset_name: str, model_name: str, optimizer: str = "sgd") -> Cf
 
     # Model
     if "cnn" in model_name.lower():
-        from src.models.cnn.my_cnn import MyCNN
-        C.model = MyCNN.get_default_config()
-        C.model.model_class = MyCNN
+        # from src.models.cnn.my_cnn import MyCNN
+        # C.model = MyCNN.get_default_config()
+        # C.model.model_class = MyCNN
+        from src.models.cnn.simple_cnn import SimpleCNN
+        C.model = CfgNode()
+        C.model.model_class = SimpleCNN
     # elif "resnet" in model_name.lower():
         # TODO
         
@@ -74,7 +77,9 @@ def get_config_model_and_trainer(args, wandb_config):
     
     all_config = get_config(wandb_config['dataset_name'], wandb_config['model_name'], wandb_config['optimizer'])
     all_config.merge_from_dict(args)
-    all_config.merge_and_cleanup(keys_to_look=["model", "trainer"])
+    all_config.merge_from_dict(wandb_config)
+    # all_config.merge_from_args(wandb_config)
+    all_config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
     
     # Datasets
     if wandb_config['dataset_name'] == "mnist":
@@ -108,7 +113,7 @@ def get_config_model_and_trainer(args, wandb_config):
             from src.models.standard_model import build_standard_model
             model = build_standard_model(model_dict)
     else:
-        model = all_config.model.model_class(all_config.model)
+        model = all_config.model.model_class()
             
     dprint(model)
     

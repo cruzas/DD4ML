@@ -35,7 +35,7 @@ class StandardModel(nn.Module):
 
                 outputs[name] = self.layers[name](inputs)
 
-        return outputs[self.model_dict.keys()[-1]]
+        return outputs[list(self.model_dict.keys())[-1]]
 
 
 def build_standard_model(model_dict):

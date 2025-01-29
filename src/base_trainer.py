@@ -70,6 +70,7 @@ class BaseTrainer(ABC):
         model.train()
         criterion = self.criterion
         self.loss = 0.0 # epoch loss
+        total_batches = len(self.train_loader)
         for batch_idx, (x, y) in enumerate(self.train_loader):    
             x, y = x.to(self.device), y.to(self.device)
             
@@ -90,7 +91,7 @@ class BaseTrainer(ABC):
                 
                     self.loss += self.optimizer.step(closure=general_closure, final_subdomain_closure=final_subdomain_closure)
                 else:
-                    self.loss += self.optimizer.step(closure)
+                    self.loss += self.optimizer.step(general_closure)
                 
             # Print progress within the epoch
             self.epoch_progress = 100.0 * (batch_idx + 1) / total_batches
@@ -108,7 +109,7 @@ class BaseTrainer(ABC):
         correct = 0
         total = 0
         with torch.no_grad():
-            for batch_idx, (x, y) in enumerate(test_loader):
+            for batch_idx, (x, y) in enumerate(self.test_loader):
                 x, y = x.to(self.device), y.to(self.device)
                 outputs = model(x)
                 _, predicted = torch.max(outputs, 1)
@@ -119,12 +120,10 @@ class BaseTrainer(ABC):
     
     def run_by_epoch(self):
         model, config = self.model, self.config
-        train_loader = self.train_loader
         
         self.total_start_time = time.time()
         self.epoch_num = 0
         self.epoch_time = time.time()
-        total_batches = len(train_loader)
         for epoch in range(config.epochs+1):
             self.compute_epoch_loss()
             self.compute_accuracy()
