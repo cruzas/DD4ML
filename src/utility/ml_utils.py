@@ -138,4 +138,3 @@ def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
 
     return starting_epoch, starting_num_iters, epoch_results, iter_results, starting_network
 
-

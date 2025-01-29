@@ -10,6 +10,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
 from src.base_trainer import *
 from src.pmw.dataloaders import GeneralizedDistributedDataLoader
@@ -26,56 +27,34 @@ class Trainer(BaseTrainer):
         C.data_chunks_amount = 1
         C.momentum = 0.9
         C.use_pmw = False
+        C.run_by_epoch = True # if False, run by iteration
 
         return C
 
-    def __init__(self, config, model, train_dataset, test_dataset):
-        super().__init__(config, model, train_dataset, test_dataset)
+    def __init__(self, config, model, optimizer, criterion, train_dataset, test_dataset):
+        super().__init__(config, model, optimizer, criterion, train_dataset, test_dataset)
 
     def run(self):
-        model, config = self.model, self.config
-
-        # setup the optimizer
-        self.optimizer = torch.optim.SGD(model.parameters(), lr=config.learning_rate, momentum=config.momentum)
-
-        train_loader = GeneralizedDistributedDataLoader(model_handler=config.model_handler, 
-                                                        dataset=self.train_dataset, 
-                                                        batch_size=config.batch_size, 
-                                                        shuffle=False, 
-                                                        num_workers=config.num_workers, 
-                                                        pin_memory=True)
-
+        _, config = self.model, self.config
         
-        criterion = nn.CrossEntropyLoss()
+        if use_pmw:
+            self.train_loader = GeneralizedDistributedDataLoader(model_handler=config.model_handler, 
+                                                            dataset=self.train_dataset, 
+                                                            batch_size=config.batch_size, 
+                                                            shuffle=False, 
+                                                            num_workers=config.num_workers, 
+                                                            pin_memory=True)
+            self.test_loader = GeneralizedDistributedDataLoader(model_handler=config.model_handler,
+                                                           dataset=self.test_dataset, 
+                                                           batch_size=config.batch_size, 
+                                                           shuffle=False, 
+                                                           num_workers=config.num_workers, 
+                                                           pin_memory=True)
+        else:
+            self.train_loader = DataLoader(self.train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, pin_memory=True)
+            self.test_loader = DataLoader(self.test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, pin_memory=True)
 
-        model.train()
-        self.iter_num = 0
-        self.iter_time = time.time()
-        data_iter = iter(train_loader)
-        while True:
-            # fetch the next batch (x, y) and re-init iterator if needed
-            try:
-                batch = next(data_iter)
-            except StopIteration:
-                data_iter = iter(train_loader)
-                batch = next(data_iter)
-            batch = [t.to(self.device) for t in batch]
-            x, y = batch
-        
-            if self.iter_num == 0:
-                first_closure = closure(x, y, criterion, model, data_chunks_amount=config.data_chunks_amount, compute_grad=False)
-                self.loss = first_closure()
-            else:
-                self.optimizer.zero_grad()      
-                general_closure = closure(x, y, criterion=criterion, model=model, data_chunks_amount=config.data_chunks_amount, compute_grad=True, grad_norm_clip=config.grad_norm_clip)        
-                self.loss = self.optimizer.step(closure=general_closure)
-            
-            self.trigger_callbacks('on_batch_end')
-            self.iter_num += 1
-            tnow = time.time()
-            self.iter_dt = tnow - self.iter_time
-            self.iter_time = tnow
-
-            # termination conditions
-            if config.max_iters is not None and self.iter_num >= config.max_iters:
-                break
+        if config.run_by_epoch:
+            self.run_by_epoch()
+        else:
+            self.run_by_iter()
