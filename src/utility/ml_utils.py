@@ -5,6 +5,9 @@ import torch
 import torch.distributed as dist
 
 
+def cross_entropy_transformers(logits, targets):
+    return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+
 def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True, return_output=False, data_chunks_amount=1, grad_norm_clip=None, outputs_only=False):
     """
     NOTE: Losses from different chunks are averaged.

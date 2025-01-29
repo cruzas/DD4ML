@@ -1,6 +1,9 @@
 import copy
 
 import pandas as pd
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 
 from src.utility.dist_utils import *
@@ -64,7 +67,6 @@ def get_config(dataset_name: str, model_name: str, optimizer: str = "sgd") -> Cf
     C.trainer = Trainer.get_default_config()
     return C
 
-    
 def get_config_model_and_trainer(args, wandb_config):
     from src.pmw.model_handler import ModelHandler
     from src.pmw.parallelized_model import ParallelizedModel
@@ -103,8 +105,40 @@ def get_config_model_and_trainer(args, wandb_config):
         sample_input = train_dataset.get_sample_input(all_config.trainer)
         model = ParallelizedModel(model_handler, sample=sample_input)
         
+    # Define the criterion
+    if wandb_config["criterion"] == "cross_entropy": 
+        criterion = nn.CrossEntropyLoss()
+    elif wandb_config["criterion"] == "weighted_cross_entropy":
+        criterion = nn.CrossEntropyLoss(weight=train_dataset.compute_class_weights())
+    elif wandb_config["criterion"] == "mse":
+        criterion = nn.MSELoss()
+    elif wandb_config["criterion"] == "cross_entropy_transformers":
+        criterion = cross_entropy_transformers
+    else:
+        raise ValueError(f"Unknown criterion: {wandb_config['criterion']}")
+    
     # Define the optimizer
-    trainer = Trainer(all_config.trainer, model, train_dataset, test_dataset)
+    if wandb_config["optimizer"] == "sgd":
+        optimizer = torch.optim.SGD(model.parameters(), lr=wandb_config["learning_rate"], momentum=0.9)
+    elif wandb_config["optimizer"] == "adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr=wandb_config["learning_rate"])
+    elif wandb_config["optimizer"] == "apts":
+        from src.optimizers.apts import APTS
+        all_config = APTS.setup_APTS_args(all_config)
+        optimizer = APTS(
+                            model=model,
+                            subdomain_optimizer=all_config.subdomain_optimizer,
+                            subdomain_optimizer_defaults=all_config.subdomain_optimizer_args,
+                            global_optimizer=all_config.global_optimizer,
+                            global_optimizer_defaults=all_config.global_optimizer_args,
+                            lr=all_config.learning_rate,
+                            max_subdomain_iter=all_config.max_subdomain_iters,
+                            dogleg=True,
+                            APTS_in_data_sync_strategy='average', 
+                            step_strategy='mean'
+                        )
+    
+    trainer = Trainer(all_config.trainer, model, optimizer, criterion, train_dataset, test_dataset)
     
     return all_config, model, trainer
     
