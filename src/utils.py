@@ -17,10 +17,16 @@ def parse_cmd_args():
     parser.add_argument("--sweep_config", type=str, default="../tests/wandb_sweep/sweep_config.yaml", help="Sweep configuration file") 
     parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
     parser.add_argument("--project", type=str, default="sgd_adam_hyperparameter_sweep", help="Wandb project")
-    parser.add_argument("--trials", type=int, default=3, help="Number of trials to run")
+    parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
     parser.add_argument("--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper")
     parser.add_argument("--work_dir", type=str, default="../saved_networks/wandb/", help="Directory to save models")
+    # In case we are not executing with wandb sweep
+    parser.add_argument("--dataset_name", type=str, default="mnist", help="Dataset name")
+    parser.add_argument("--model_name", type=str, default="simple_cnn", help="Model name")
+    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
+    parser.add_argument("--criterion", type=str, default="cross_entropy", help="Criterion name")
+    parser.add_argument("--learning_rate", type=float, default=0.01, help="Learning rate")
     args = parser.parse_args()
     return args 
 
@@ -43,6 +49,9 @@ def generic_run(rank=None, master_addr=None, master_port=None, world_size=None, 
     print(f"Rank {rank}/{world_size-1}")
     
     config, model, trainer = get_config_model_and_trainer(args, wandb_config)
+    if wandb_config is None and "sweep_config" in args:
+        # Remove sweep_config from args if it exists
+        args.pop("sweep_config")
     dprint(config)
     
     if epoch_end_callback is not None:
@@ -99,16 +108,26 @@ def get_config_model_and_trainer(args, wandb_config):
     from src.pmw.parallelized_model import ParallelizedModel
     from src.trainer import Trainer
     
-    all_config = get_config(wandb_config['dataset_name'], wandb_config['model_name'], wandb_config['optimizer'])
+    if wandb_config is None:
+        dataset_name = args["dataset_name"]
+        model_name = args["model_name"]
+        optimizer = args["optimizer"]
+    else:
+        dataset_name = wandb_config["dataset_name"]
+        model_name = wandb_config["model_name"]
+        optimizer = wandb_config["optimizer"]
+    
+    all_config = get_config(dataset_name, model_name, optimizer)
     all_config.merge_from_dict(args)
-    all_config.merge_from_dict(wandb_config)
+    if wandb_config is not None:
+        all_config.merge_from_dict(wandb_config)
     all_config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
     
     # Datasets
-    if wandb_config['dataset_name'] == "mnist":
+    if all_config.dataset_name == "mnist":
         from src.datasets.mnist import MNISTDataset
         dataset_class = MNISTDataset
-    elif wandb_config['dataset_name'] == "cifar10":
+    elif all_config.dataset_name == "cifar10":
         from src.datasets.cifar10 import CIFAR10Dataset
         dataset_class = CIFAR10Dataset
     else:
@@ -141,23 +160,31 @@ def get_config_model_and_trainer(args, wandb_config):
     dprint(model)
     
     # Define the criterion
-    if wandb_config["criterion"] == "cross_entropy": 
+    criterion_name = wandb_config["criterion"] if wandb_config is not None else args["criterion"]
+    if criterion_name == "cross_entropy": 
         criterion = nn.CrossEntropyLoss()
-    elif wandb_config["criterion"] == "weighted_cross_entropy":
+    elif criterion_name == "weighted_cross_entropy":
         criterion = nn.CrossEntropyLoss(weight=train_dataset.compute_class_weights())
-    elif wandb_config["criterion"] == "mse":
+    elif criterion_name == "mse":
         criterion = nn.MSELoss()
-    elif wandb_config["criterion"] == "cross_entropy_transformers":
+    elif criterion_name == "cross_entropy_transformers":
         criterion = cross_entropy_transformers
     else:
         raise ValueError(f"Unknown criterion: {wandb_config['criterion']}")
     
     # Define the optimizer
-    if wandb_config["optimizer"] == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(), lr=wandb_config["learning_rate"], momentum=0.9)
-    elif wandb_config["optimizer"] == "adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr=wandb_config["learning_rate"])
-    elif wandb_config["optimizer"] == "apts":
+    lr = wandb_config["learning_rate"] if wandb_config is not None else args["learning_rate"]
+    if all_config.optimizer == "sgd":
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+    elif all_config.optimizer == "adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    elif all_config.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    elif all_config.optimizer == "adagrad":
+        optimizer = torch.optim.Adagrad(model.parameters(), lr=lr)
+    elif all_config.optimizer == "rmsprop":
+        optimizer = torch.optim.RMSprop(model.parameters(), lr=lr)
+    elif all_config.optimizer == "apts":
         from src.optimizers.apts import APTS
         all_config = APTS.setup_APTS_args(all_config)
         optimizer = APTS(
