@@ -151,7 +151,7 @@ class Trainer():
     
     def compute_accuracy(self):
         model, config = self.model, self.config
-        
+
         model.eval()
         correct = 0
         total = 0
@@ -159,11 +159,16 @@ class Trainer():
             for batch_idx, (x, y) in enumerate(self.test_loader):
                 x, y = x.to(self.device), y.to(self.device)
                 outputs = model(x)
+
+                # Handle the case where outputs is a list (e.g., due to chunked data)
+                if isinstance(outputs, list):
+                    outputs = torch.stack(outputs).mean(dim=0)  # Average over chunks
+
                 _, predicted = torch.max(outputs, 1)
                 total += y.size(0)
                 correct += (predicted == y).sum().item()
-            
-        self.accuracy =  100.0 * correct / total
+
+        self.accuracy = 100.0 * correct / total
     
     def run_by_epoch(self):
         model, config = self.model, self.config

@@ -8,6 +8,14 @@ from src.utils import CfgNode as CN
 
 
 class BaseModel(nn.Module, ABC):
+    @staticmethod
+    def get_default_config():
+        C = CN()
+        C.num_stages = 1
+        C.num_subdomains = 1
+        C.num_replicas_per_subdomain = 1
+        return C
+    
     def set_stage(self, model_dict, num_stages):
         """
         In case of a model defined via a model dictionary.

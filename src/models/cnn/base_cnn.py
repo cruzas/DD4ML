@@ -10,7 +10,7 @@ class BaseCNN(BaseModel):
 
     @staticmethod
     def get_default_config():
-        C = CN()
+        C = BaseModel.get_default_config()
         # Either model_type or layer details must be given in the config
         C.model_type = 'cnn-small'
         C.input_channels = None  # Number of input channels (e.g., 3 for RGB images)
