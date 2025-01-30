@@ -11,6 +11,15 @@ from src.utility.mingpt_utils import *
 from src.utility.ml_utils import *
 
 
+def is_sweep_active(sweep_id, project, entity):
+    """Check if the sweep is still running before using it."""
+    api = wandb.Api()
+    try:
+        sweep = api.sweep(f"{entity}/{project}/{sweep_id}")
+        return sweep.state == "running"  # Only use if it's still running
+    except wandb.errors.CommError:
+        return False  # Sweep doesn't exist
+
 def generic_run(rank=None, master_addr=None, master_port=None, world_size=None, args=None, wandb_config=None, epoch_end_callback=None, batch_end_callback=None):
     use_wandb = wandb_config is not None  # Check if wandb should be used
     if use_wandb:
@@ -103,7 +112,7 @@ def get_config_model_and_trainer(args, wandb_config):
     # Check if model_class has a method with build_*_dictionary 
     if hasattr(all_config.model.model_class, "build_model_dict"):
         model_dict = all_config.model.model_class(all_config.model).model_dict
-        if args["use_pmw"]:
+        if all_config["use_pmw"]:
             # NOTE: regardless of the model class, it must define model_dict. 
             model_handler = ModelHandler(model.model_dict, all_config.model)
             all_config.trainer.model_handler = model_handler
