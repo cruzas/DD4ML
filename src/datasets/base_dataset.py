@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import Counter
 
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 
 from src.utils import *
 

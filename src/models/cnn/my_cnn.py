@@ -6,10 +6,6 @@ class MyCNN(BaseCNN):
     @staticmethod
     def get_default_config():
         C = BaseCNN.get_default_config()
-        # Pipelining options
-        C.num_stages = 1
-        C.num_subdomains = 1
-        C.num_replicas_per_subdomain = 1
         return C
     
     def __init__(self, config):

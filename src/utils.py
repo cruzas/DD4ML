@@ -19,7 +19,7 @@ def parse_cmd_args():
     parser.add_argument("--project", type=str, default="sgd_adam_hyperparameter_sweep", help="Wandb project")
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
-    parser.add_argument("--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper")
+    parser.add_argument("--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper")
     parser.add_argument("--work_dir", type=str, default="../saved_networks/wandb/", help="Directory to save models")
     # In case we are not executing with wandb sweep
     parser.add_argument("--dataset_name", type=str, default="mnist", help="Dataset name")
@@ -49,9 +49,6 @@ def generic_run(rank=None, master_addr=None, master_port=None, world_size=None, 
     print(f"Rank {rank}/{world_size-1}")
     
     config, model, trainer = get_config_model_and_trainer(args, wandb_config)
-    if wandb_config is None and "sweep_config" in args:
-        # Remove sweep_config from args if it exists
-        args.pop("sweep_config")
     dprint(config)
     
     if epoch_end_callback is not None:
@@ -77,12 +74,14 @@ def get_config(dataset_name: str, model_name: str, optimizer: str = "sgd") -> Cf
 
     # Model
     if "cnn" in model_name.lower():
-        # from src.models.cnn.my_cnn import MyCNN
-        # C.model = MyCNN.get_default_config()
-        # C.model.model_class = MyCNN
-        from src.models.cnn.simple_cnn import SimpleCNN
-        C.model = CfgNode()
-        C.model.model_class = SimpleCNN
+        from src.models.cnn.my_cnn import MyCNN
+        C.model = MyCNN.get_default_config()
+        C.model.model_class = MyCNN
+        
+        # from src.models.cnn.simple_cnn import SimpleCNN
+        # C.model = CfgNode()
+        # C.model.model_class = SimpleCNN
+        
     # elif "resnet" in model_name.lower():
         # TODO
         
@@ -118,9 +117,13 @@ def get_config_model_and_trainer(args, wandb_config):
         optimizer = wandb_config["optimizer"]
     
     all_config = get_config(dataset_name, model_name, optimizer)
-    all_config.merge_from_dict(args)
     if wandb_config is not None:
         all_config.merge_from_dict(wandb_config)
+    else:
+        if "sweep_config" in args:
+            # Remove sweep_config from args if it exists
+            args.pop("sweep_config")
+    all_config.merge_from_dict(args)
     all_config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
     
     # Datasets
@@ -142,16 +145,18 @@ def get_config_model_and_trainer(args, wandb_config):
     # Define the model
     # Check if model_class has a method with build_*_dictionary 
     if hasattr(all_config.model.model_class, "build_model_dict"):
+        # NOTE/REQUIRED: Regardless of the model class, it must define model_dict in this case.
         model_dict = all_config.model.model_class(all_config.model).model_dict
-        if all_config["use_pmw"]:
-            # NOTE: regardless of the model class, it must define model_dict. 
-            model_handler = ModelHandler(model.model_dict, all_config.model)
+        if all_config.trainer.use_pmw:
+            print("Using Parallel Model Wrapper and Model Handler")
+            model_handler = ModelHandler(model_dict, all_config.model.num_subdomains, all_config.model.num_replicas_per_subdomain)
             all_config.trainer.model_handler = model_handler
             
             # Construct the parallel model (overwrite the model)
             sample_input = train_dataset.get_sample_input(all_config.trainer)
             model = ParallelizedModel(model_handler, sample=sample_input)
         else:
+            # Builds a standard PyTorch model based on a dictionary structure of its components
             from src.models.standard_model import build_standard_model
             model = build_standard_model(model_dict)
     else:
