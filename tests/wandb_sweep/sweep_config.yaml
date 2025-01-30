@@ -20,5 +20,3 @@ parameters:
     values: ["cnn"]
   criterion:
     values: ["cross_entropy"]
-use_pmw: False
-work_dir: "../../saved_networks/"
