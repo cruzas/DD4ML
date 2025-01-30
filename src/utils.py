@@ -1,3 +1,4 @@
+import argparse
 import copy
 
 import pandas as pd
@@ -10,6 +11,18 @@ from src.utility.dist_utils import *
 from src.utility.mingpt_utils import *
 from src.utility.ml_utils import *
 
+
+def parse_cmd_args():
+    parser = argparse.ArgumentParser("Hyperparameter Sweep")
+    parser.add_argument("--sweep_config", type=str, default="../tests/wandb_sweep/sweep_config.yaml", help="Sweep configuration file") 
+    parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
+    parser.add_argument("--project", type=str, default="sgd_adam_hyperparameter_sweep", help="Wandb project")
+    parser.add_argument("--trials", type=int, default=3, help="Number of trials to run")
+    parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
+    parser.add_argument("--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper")
+    parser.add_argument("--work_dir", type=str, default="../saved_networks/wandb/", help="Directory to save models")
+    args = parser.parse_args()
+    return args 
 
 def is_sweep_active(sweep_id, project, entity):
     """Check if the sweep is still running before using it."""
@@ -89,7 +102,6 @@ def get_config_model_and_trainer(args, wandb_config):
     all_config = get_config(wandb_config['dataset_name'], wandb_config['model_name'], wandb_config['optimizer'])
     all_config.merge_from_dict(args)
     all_config.merge_from_dict(wandb_config)
-    # all_config.merge_from_args(wandb_config)
     all_config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
     
     # Datasets
