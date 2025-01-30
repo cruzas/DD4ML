@@ -15,7 +15,7 @@ except ImportError:
 def main(rank=None, master_addr=None, master_port=None, world_size=None, args=None, wandb_config=None, use_wandb=False):
     logging_fn = dprint if not use_wandb else (lambda x: wandb.log(x))
 
-    def epoch_end_callback(trainer, save_model=True, save_frequency=1):
+    def epoch_end_callback(trainer, save_model=False, save_frequency=5):
         dprint(f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt:.2f}s")
         if rank == 0 and use_wandb:
             logging_fn({
@@ -29,7 +29,6 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, args=No
         if save_model and trainer.epoch_num % save_frequency == 0:
             dprint("Saving model...")
             model_path = os.path.join(args["work_dir"], f"model_epoch_{trainer.epoch_num}.pt")
-            # Check if args["work_dir"] exists
             if not os.path.exists(args["work_dir"]):
                 os.makedirs(args["work_dir"])
             
@@ -49,17 +48,17 @@ def one_trial_hyperparam_sweep(args):
     sweep_id = None  # Initialize once
     entity = None
     project = None
-    
-    if WANDB_AVAILABLE:
+    use_wandb = False #WANDB_AVAILABLE
+    num_workers = args.num_workers  # or however many local processes you want
+    if use_wandb:
         os.environ["WANDB_START_METHOD"] = "thread"  
         with open(args.sweep_config, "r") as file:
             sweep_config = yaml.safe_load(file)
+        entity = args.entity
+        project = args.project
+        sweep_id = wandb.sweep(sweep_config, project=project)  # No need for redundant check
         
-    entity = args.entity
-    project = args.project
-    num_workers = args.num_workers  # or however many local processes you want
-    sweep_id = wandb.sweep(sweep_config, project=project)  # No need for redundant check
-    distributed_run(main, num_workers, sweep_id, entity, project, args_dict, WANDB_AVAILABLE)
+    distributed_run(main, num_workers, sweep_id, entity, project, args_dict, use_wandb)
         
 if __name__ == "__main__":
     args = parse_cmd_args()
