@@ -1,15 +1,32 @@
+import inspect
 import os
+from types import FunctionType
 
 import pandas as pd
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 
 
 def cross_entropy_transformers(logits, targets):
     return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
 
-import torch
-import torch.distributed as dist
+# Helper to detect function-only modules (no learned parameters).
+def is_function_module(info):
+    """
+    Return True if 'info' is for a 'function-like' module (e.g. relu),
+    False if it is a trainable nn.Module.
+    """
+    obj = info['callable']['object']
+    
+    # If 'obj' is a class inheriting from nn.Module, it has parameters.
+    if inspect.isclass(obj) and issubclass(obj, nn.Module):
+        return False
+    # If it's a Python function or a custom label (like 'method_view'),
+    # treat it as function-only (param-free).
+    if isinstance(obj, FunctionType) or isinstance(obj, str):
+        return True
+    return False
 
 
 def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True, return_output=False, data_chunks_amount=1, grad_norm_clip=None, outputs_only=False):
