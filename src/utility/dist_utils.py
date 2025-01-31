@@ -1,5 +1,6 @@
 import os
 import pickle
+import pprint
 import socket
 import subprocess
 import sys
@@ -88,7 +89,7 @@ def dprint(str_to_print):
     Print only if the rank is 0 or if the code is running in a single node.
     '''
     if not dist.is_initialized() or (dist.is_initialized() and dist.get_rank() == 0):
-        print(str_to_print)
+        pprint.pprint(str_to_print)
 
 
 def detect_environment():

@@ -22,7 +22,7 @@ class BaseCNN(BaseModel):
         return C
 
     def __init__(self, config):
-        super().__init__()
+        super().__init__(config)
         assert config.input_channels is not None
         assert config.output_classes is not None
 

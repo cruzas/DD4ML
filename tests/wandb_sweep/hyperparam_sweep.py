@@ -28,7 +28,8 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, args=No
 
         if save_model and trainer.epoch_num % save_frequency == 0:
             dprint("Saving model...")
-            model_path = os.path.join(args["work_dir"], f"model_epoch_{trainer.epoch_num}.pt")
+            project_name = wandb_config.project if use_wandb else args["project"]
+            model_path = os.path.join(args["work_dir"], f"model_{project_name}_{trainer.epoch_num}.pt")
             if not os.path.exists(args["work_dir"]):
                 os.makedirs(args["work_dir"])
             
@@ -48,7 +49,7 @@ def one_trial_hyperparam_sweep(args):
     sweep_id = None  # Initialize once
     entity = None
     project = None
-    use_wandb = False #WANDB_AVAILABLE
+    use_wandb = WANDB_AVAILABLE
     num_workers = args.num_workers  # or however many local processes you want
     if use_wandb:
         os.environ["WANDB_START_METHOD"] = "thread"  
