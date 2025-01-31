@@ -2,10 +2,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.models.cnn.base_cnn import BaseCNN
 
-class SimpleCNN(nn.Module):
-    def __init__(self):
-        super().__init__()
+
+class SimpleCNN(BaseCNN):
+    
+    @staticmethod
+    def get_default_config():
+        C = BaseCNN.get_default_config()
+        return C
+    
+    def __init__(self, config):
+        super().__init__(config)
         self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
