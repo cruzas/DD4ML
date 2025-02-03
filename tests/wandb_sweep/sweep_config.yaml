@@ -5,12 +5,14 @@ metric:
 parameters:
   learning_rate:
     # values: [0.001, 0.01, 0.1]
-    values: [0.001]
+    # values: [0.001]
+    values: [0.001, 0.01]
   batch_size:
-    # values: [1250, 2500, 5000]
-    values: [1250]
+    # values: [6250, 12500, 25000, 50000]
+    # values: [1250]
+    values: [6250, 12500]
   epochs: 
-    value: 1
+    value: 3
   optimizer: 
     # values: ["adam", "sgd"]
     values: ["sgd"]
