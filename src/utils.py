@@ -10,13 +10,14 @@ import wandb
 from src.utility.dist_utils import *
 from src.utility.mingpt_utils import *
 from src.utility.ml_utils import *
+from src.utility.wandb_utils import *
 
 
 def parse_cmd_args():
     parser = argparse.ArgumentParser("Hyperparameter Sweep")
     parser.add_argument("--sweep_config", type=str, default="sweep_config.yaml", help="Sweep configuration file") 
     parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
-    parser.add_argument("--project", type=str, default="sgd_adam_hyperparameter_sweep", help="Wandb project")
+    parser.add_argument("--project", type=str, default="sgd_hyperparameter_sweep", help="Wandb project")
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
     parser.add_argument("--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper")
@@ -27,6 +28,7 @@ def parse_cmd_args():
     parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
     parser.add_argument("--criterion", type=str, default="cross_entropy", help="Criterion name")
     parser.add_argument("--learning_rate", type=float, default=0.01, help="Learning rate")
+    parser.add_argument("--metric", type=str, choices=["loss", "accuracy"], default="loss", help="Metric to determine best learning rate")
     args = parser.parse_args()
     return args 
 
@@ -49,7 +51,7 @@ def generic_run(rank=None, master_addr=None, master_port=None, world_size=None, 
     print(f"Rank {rank}/{world_size-1}")
     
     config, model, trainer = get_config_model_and_trainer(args, wandb_config)
-    dprint(config)
+    dprint(str(config))
     
     if epoch_end_callback is not None:
         trainer.set_callback("on_epoch_end", epoch_end_callback)
