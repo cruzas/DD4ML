@@ -5,6 +5,34 @@ import torch.distributed as dist
 
 
 class APTS(torch.optim.Optimizer):
+    @staticmethod
+    def setup_APTS_args(config):
+        from src.optimizers.trust_region import TrustRegion
+        config.subdomain_optimizer = torch.optim.SGD
+        config.subdomain_optimizer_args = {'lr' : config.learning_rate}
+        
+        if config.subdomain_optimizer == torch.optim.Adam or config.subdomain_optimizer == torch.optim.AdamW:
+            config.subdomain_optimizer_args['betas'] = config.betas
+        elif config.subdomain_optimizer == torch.optim.SGD:
+            config.subdomain_optimizer_args['momentum'] = 0.9
+            
+        config.max_subdomain_iters = 3
+        # global optimizer
+        config.global_optimizer = TrustRegion
+        config.global_optimizer_args = {
+            'lr': config.learning_rate,
+            'max_lr': 10.0,
+            'min_lr': 0.0001,
+            'nu': 0.5,
+            'inc_factor': 2.0,
+            'dec_factor': 0.5,
+            'nu_1': 0.25,
+            'nu_2': 0.75,
+            'max_iter': 3, # To decrease gradient directly within the trust region method
+            'norm_type': 2
+        }
+        return config
+    
     def __init__(self, model, subdomain_optimizer, subdomain_optimizer_defaults, global_optimizer, global_optimizer_defaults, lr=0.01, max_subdomain_iter=0, dogleg=False, APTS_in_data_sync_strategy='average', step_strategy='mean'):
         super(APTS, self).__init__(model.parameters(), {
             'lr': lr, 'max_subdomain_iter': max_subdomain_iter, 'dogleg': dogleg})
