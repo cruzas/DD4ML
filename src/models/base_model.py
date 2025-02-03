@@ -1,13 +1,38 @@
 import math
+import pprint  # for debugging
 from abc import ABC, abstractmethod
 from collections import deque
 
+import torch
 import torch.fx as fx
 import torch.nn as nn
+import torch.nn.functional as F
 
 from src.utils import CfgNode as CN
 from src.utils import is_function_module
 
+# # Wrap view in a module
+# class View(nn.Module):
+#     def __init__(self, shape):
+#         super().__init__()
+#         self.shape = shape
+#     def forward(self, x):
+#         return x.view(*self.shape)
+
+# # Wrap F.relu in a module (alternatively, use nn.ReLU directly)
+# class ReLU(nn.Module):
+#     def forward(self, x):
+#         return F.relu(x)
+
+class FunctionModule(nn.Module):
+    def __init__(self, func, args=(), kwargs=None):
+        super().__init__()
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs if kwargs is not None else {}
+
+    def forward(self, x):
+        return self.func(x, *self.args, **self.kwargs)
 
 class BaseModel(nn.Module, ABC):
     @staticmethod
@@ -96,31 +121,26 @@ class BaseModel(nn.Module, ABC):
 
         return model_dict
 
-
     def as_model_dict(self):
         """
-        Symbolically traces 'model' and returns a dictionary describing each
-        sub-component (node) with fields: 'callable', 'dst', 'rcv', 'stage',
-        'num_layer_shards'.
+        Symbolically traces 'self' (nn.Module) and returns a dictionary describing each node.
         """
         if self.model_dict is not None:
             return self.model_dict
-        
+
         traced = fx.symbolic_trace(self)
         graph_dict = {}
         node_names = []
-        
+
         for node in traced.graph.nodes:
             if node.op in ('placeholder', 'output'):
                 continue  # Skip input and output nodes
 
             node_names.append(node.name)
-
-            # Determine sources (rcv) and destinations (dst)
             src_list = [arg.name for arg in node.args if isinstance(arg, fx.Node)]
             dst_list = [user.name for user in node.users]
 
-            # Retrieve module/function info
+            # Identify callable and settings.
             if node.op == 'call_module':
                 submodule = self.get_submodule(node.target)
                 obj = submodule.__class__
@@ -139,43 +159,66 @@ class BaseModel(nn.Module, ABC):
                         'out_features': submodule.out_features,
                         'bias':         submodule.bias is not None
                     }
+                elif isinstance(submodule, nn.BatchNorm2d):
+                    settings = {
+                        'num_features': submodule.num_features,
+                        'eps':          submodule.eps,
+                        'momentum':     submodule.momentum,
+                        'affine':       submodule.affine,
+                        'track_running_stats': submodule.track_running_stats
+                    }
                 else:
                     settings = {k: v for k, v in vars(submodule).items() if not k.startswith('_')}
+
             elif node.op == 'call_function':
-                obj = node.target
-                settings = dict(node.kwargs)
+                if node.target == F.relu:
+                    # Wrap F.relu dynamically.
+                    obj = FunctionModule
+                    settings = {'func': F.relu, 'args': (), 'kwargs': dict(node.kwargs)}
+                else:
+                    # Wrap any unexpected function.
+                    obj = FunctionModule
+                    settings = {'func': node.target, 'args': (), 'kwargs': dict(node.kwargs)}
+
             elif node.op == 'call_method':
-                obj = f"method_{node.target}"
-                settings = dict(node.kwargs)
+                if node.target == "view":
+                    pos_args = [arg for arg in node.args[1:] if not isinstance(arg, fx.Node)]
+                    # Wrap the tensor view method dynamically.
+                    obj = FunctionModule
+                    settings = {'func': torch.Tensor.view, 'args': tuple(pos_args), 'kwargs': {}}
+                else:
+                    # Wrap other methods dynamically.
+                    obj = FunctionModule
+                    settings = {'func': getattr(torch.Tensor, node.target), 'args': (), 'kwargs': dict(node.kwargs)}
             else:
                 obj = None
                 settings = {}
+
+            # Remove any spurious keys.
+            settings.pop("training", None)
 
             graph_dict[node.name] = {
                 'callable': {
                     'object': obj,
                     'settings': settings
                 },
-                'dst': {
-                    'to': dst_list
-                },
                 'rcv': {
                     'src': src_list,
                     'strategy': None
                 },
+                'dst': {
+                    'to': dst_list
+                },
                 'stage': 0,
                 'num_layer_shards': 1
             }
-        
-        # Identify first and last node keys
-        first_node = node_names[0]
-        last_node = node_names[-1]
 
-        # Rename their entries in graph_dict
+        # Rename first and last nodes to 'start' and 'finish'.
+        first_node, last_node = node_names[0], node_names[-1]
         graph_dict["start"] = graph_dict.pop(first_node)
         graph_dict["finish"] = graph_dict.pop(last_node)
 
-        # Update references in each node’s 'rcv' and 'dst'
+        # Update references: replace old names with 'start'/'finish'.
         for k, v in graph_dict.items():
             v["dst"]["to"] = [
                 "start" if x == first_node else "finish" if x == last_node else x
@@ -186,17 +229,8 @@ class BaseModel(nn.Module, ABC):
                 for x in v["rcv"]["src"]
             ]
 
-        # Clear 'src' in "start" and 'to' in "finish"
         graph_dict["start"]["rcv"]["src"] = []
         graph_dict["finish"]["dst"]["to"] = []
 
-        for info in graph_dict.values():
-            if "callable" in info and "settings" in info["callable"]:
-                info["callable"]["settings"].pop("training", None)
-
-        self.model_dict = BaseModel.set_stage(graph_dict, self.config.num_stages)
-        # TODO: when you have multiple stages, make sure to bundle callables with object type 'function' 
-        # in them together in a single stage and not separate them if possible.
-        return self.set_stage(graph_dict, self.config.num_stages)
-        
-        
+        self.model_dict = self.set_stage(graph_dict, self.config.num_stages)
+        return self.model_dict

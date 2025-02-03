@@ -17,7 +17,7 @@ def parse_cmd_args():
     parser.add_argument("--sweep_config", type=str, default="sweep_config.yaml", help="Sweep configuration file") 
     parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
     parser.add_argument("--project", type=str, default="sgd_adam_hyperparameter_sweep", help="Wandb project")
-    parser.add_argument("--trials", type=int, default=3, help="Number of trials to run")
+    parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
     parser.add_argument("--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper")
     parser.add_argument("--work_dir", type=str, default="../../saved_networks/wandb/", help="Directory to save models")
