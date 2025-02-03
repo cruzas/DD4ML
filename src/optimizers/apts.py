@@ -7,6 +7,7 @@ import torch.distributed as dist
 class APTS(torch.optim.Optimizer):
     @staticmethod
     def setup_APTS_args(config):
+        # TODO: streamline the specification of the sub/global domain optimizer and their parameters.
         from src.optimizers.trust_region import TrustRegion
         config.subdomain_optimizer = torch.optim.SGD
         config.subdomain_optimizer_args = {'lr' : config.learning_rate}
@@ -22,7 +23,7 @@ class APTS(torch.optim.Optimizer):
         config.global_optimizer_args = {
             'lr': config.learning_rate,
             'max_lr': 10.0,
-            'min_lr': 0.0001,
+            'min_lr': 1e-4,
             'nu': 0.5,
             'inc_factor': 2.0,
             'dec_factor': 0.5,

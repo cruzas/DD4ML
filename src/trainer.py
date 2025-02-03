@@ -212,3 +212,5 @@ class Trainer():
             self.iter_dt = tnow - self.iter_time
             self.iter_time = tnow
 
+    def compute_perplexity(self):
+        pass   
