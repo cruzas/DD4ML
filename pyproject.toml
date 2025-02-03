@@ -25,7 +25,9 @@ dependencies = [
     "pandas",
     "scipy",
     "requests",
-    "wandb"
+    "wandb",
+    "pyyaml"
+
 ]
 
 [tool.setuptools]

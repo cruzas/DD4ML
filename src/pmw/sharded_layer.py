@@ -1,5 +1,4 @@
 import math
-from inspect import isfunction
 
 import torch
 import torch.autograd as autograd
@@ -7,42 +6,57 @@ import torch.nn as nn
 from torch import autograd
 
 from src.pmw.base_model import BaseModel
+from src.utils import is_function_module
 
 
 # TODO: Implement this properly to actually perform sharding of the layers.
 class ShardedLayer(BaseModel):
     def __init__(self, layer_dict, layer_ranks):
         super().__init__()
-
         self.layer_dict = layer_dict
         self.layer_ranks = layer_ranks
-        if isfunction(layer_dict['callable']['object']) or len(layer_ranks) == 1:
-            # This has no sharding so it will run on the main shard rank only
-            if self.rank == layer_ranks[0]:
-                if isfunction(layer_dict['callable']['object']):
-                    self.layer = layer_dict['callable']['object']
-                else:
-                    self.layer = layer_dict['callable']['object'](**layer_dict['callable']['settings']).to(self.tensor_device)
-                
-                if isinstance(self.layer, nn.Linear):
-                    torch.nn.init.normal_(self.layer.weight, mean=0.0, std=0.02)
-                    if self.layer.bias is not None:
-                            torch.nn.init.zeros_(self.layer.bias)
-                elif isinstance(self.layer, nn.Embedding):
-                    torch.nn.init.normal_(self.layer.weight, mean=0.0, std=0.02)
-                elif isinstance(self.layer, nn.LayerNorm):
-                    torch.nn.init.zeros_(self.layer.bias)
-                    torch.nn.init.ones_(self.layer.weight)
 
-                for pn, p in self.layer.named_parameters():
-                    if pn.endswith('c_proj.weight'):
-                        torch.nn.init.normal_(
-                            p, mean=0.0, std=0.02/math.sqrt(2 * BaseModel.n_layer))
+        # Decide if this is a function or a trainable nn.Module
+        # isfunction(...) is from 'inspect' or 'torch.nn.functional'
+        # Adjust as needed if you have a different test.
+        obj = layer_dict['callable']['object']
+
+        # If no sharding or if it's a pure function: just handle it on rank[0].
+        if is_function_module(layer_dict) or len(layer_ranks) == 1:
+            if self.rank == layer_ranks[0]:
+                if is_function_module(layer_dict):
+                    # Pure function (like relu)
+                    self.layer = obj
+                else:
+                    # Single-rank trainable module
+                    self.layer = obj(**layer_dict['callable']['settings']).to(self.tensor_device)
+
+                    # Optional initialization
+                    # if isinstance(self.layer, nn.Linear):
+                    #     torch.nn.init.normal_(self.layer.weight, mean=0.0, std=0.02)
+                    #     if self.layer.bias is not None:
+                    #         torch.nn.init.zeros_(self.layer.bias)
+                    # elif isinstance(self.layer, nn.Embedding):
+                    #     torch.nn.init.normal_(self.layer.weight, mean=0.0, std=0.02)
+                    # elif isinstance(self.layer, nn.LayerNorm):
+                    #     torch.nn.init.zeros_(self.layer.bias)
+                    #     torch.nn.init.ones_(self.layer.weight)
+
+                    # Example of custom named-parameter initialization
+                    if hasattr(self.layer, "named_parameters"):
+                        for pn, p in self.layer.named_parameters():
+                            if pn.endswith('c_proj.weight'):
+                                torch.nn.init.normal_(
+                                    p,
+                                    mean=0.0,
+                                    std=0.02 / math.sqrt(2 * BaseModel.n_layer)
+                                )
         else:
-            # This has sharding...TODO
+            # Handle actual sharding here. 
             pass
-        
-        self.optim_groups = None # This will be set in the configure_params function
+
+        self.optim_groups = None  # Will be set later
+
 
     def configure_params(self, train_config):
         """
