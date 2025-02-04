@@ -9,9 +9,11 @@ parameters:
     value: 3
   optimizer: 
     values: ["apts"]
+  learning_rate: 
+    values: [0.01]
   dataset_name: 
     values: ["mnist"]
   model_name: 
-    values: ["cnn"]
+    values: ["big_cnn"]
   criterion:
     values: ["cross_entropy"]

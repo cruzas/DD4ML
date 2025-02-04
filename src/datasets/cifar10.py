@@ -17,6 +17,8 @@ class CIFAR10Dataset(BaseDataset):
         C.download = True
         C.input_channels = 3
         C.output_classes = 10
+        C.input_height = 32
+        C.input_width = 32
         return C
 
     def __init__(self, config, data=None, transform=None):
@@ -48,7 +50,7 @@ class CIFAR10Dataset(BaseDataset):
 
     def get_output_classes(self):
         return len(self.classes)
-
+    
     def get_block_size(self):
         return 32  # Image size for CIFAR-10
 

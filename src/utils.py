@@ -13,14 +13,19 @@ from src.utility.ml_utils import *
 from src.utility.wandb_utils import *
 
 
-def parse_cmd_args():
+def parse_cmd_args(APTS=False):
     parser = argparse.ArgumentParser("Hyperparameter Sweep")
     # NOTE: In particular, if you wish to use default arguments for your wandb files, change the following defaults
-    parser.add_argument("--sweep_config", type=str, default="config_apts.yaml", help="Sweep configuration file") 
     parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
-    parser.add_argument("--project", type=str, default="apts_tests", help="Wandb project")
-    parser.add_argument("--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper")
     parser.add_argument("--work_dir", type=str, default="../../saved_networks/wandb/", help="Directory to save models")
+    if not APTS:
+        parser.add_argument("--sweep_config", type=str, default="config_sgd.yaml", help="Sweep configuration file") 
+        parser.add_argument("--project", type=str, default="sgd_hyperparameter_sweep", help="Wandb project")
+        parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
+    elif APTS:
+        parser.add_argument("--sweep_config", type=str, default="config_apts.yaml", help="Sweep configuration file") 
+        parser.add_argument("--project", type=str, default="apts_tests", help="Wandb project")
+        parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
     # After here, more or less okay to leave as is if you wish
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run") # number of times to repeat each hyperparameter combination -> good for building averages
     parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
@@ -31,6 +36,15 @@ def parse_cmd_args():
     parser.add_argument("--criterion", type=str, default="cross_entropy", help="Criterion name")
     parser.add_argument("--learning_rate", type=float, default=0.01, help="Learning rate")
     parser.add_argument("--metric", type=str, choices=["loss", "accuracy"], default="loss", help="Metric to determine best learning rate")
+    # For APTS in case needed
+    parser.add_argument("--subdomain_optimizer", type=str, default="sgd", help="Subdomain optimizer")
+    parser.add_argument("--global_optimizer", type=str, default="trust_region", help="Global optimizer")
+    parser.add_argument("--max_subdomain_iters", type=int, default=3, help="Max iterations for subdomain optimizer")
+    # For pmw
+    parser.add_argument("--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper")
+    parser.add_argument("--num_subdomains", type=int, default=1, help="Number of subdomains")
+    parser.add_argument("--num_replicas_per_subdomain", type=int, default=1, help="Number of replicas per subdomain")
+    
     args = parser.parse_args()
     return args 
 
@@ -91,11 +105,22 @@ def get_config(dataset_name: str, model_name: str, optimizer: str = "sgd") -> Cf
         from src.models.cnn.simple_cnn import SimpleCNN
         C.model = SimpleCNN.get_default_config()
         C.model.model_class = SimpleCNN
-        
+    elif "big_cnn" in model_name.lower():
+        from src.models.cnn.big_cnn import BigCNN
+        C.model = BigCNN.get_default_config()
+        C.model.model_class = BigCNN
+    elif "simple_resnet" in model_name.lower():
+        from src.models.resnet.simple_resnet import SimpleResNet
+        C.model = SimpleResNet.get_default_config()
+        C.model.model_class = SimpleResNet
+    else:
+        raise ValueError(f"Unknown model name: {model_name}. Please, implement it in src/models/")
     # elif "resnet" in model_name.lower():
         # TODO
     
     C.model.input_channels = C.data.input_channels
+    C.model.input_height = C.data.input_height
+    C.model.input_width = C.data.input_width
     C.model.output_classes = C.data.output_classes
 
     # trainer
@@ -157,6 +182,12 @@ def get_config_model_and_trainer(args, wandb_config):
             
             # Construct the parallel model (overwrite the model)
             sample_input = train_dataset.get_sample_input(all_config.trainer)
+            # Based on the shape if the first dimension is 1, then it is a single sample.
+            # If so, get another sample to create a bigger batch.
+            if sample_input.shape[0] == 1:
+                other_sample = train_dataset.get_sample_input(all_config.trainer)
+                sample_input = torch.cat([sample_input, other_sample], dim=0)
+
             model = ParallelizedModel(model_handler, sample=sample_input)
         else:
             # Builds a standard PyTorch model based on a dictionary structure of its components
