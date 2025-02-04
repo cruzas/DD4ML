@@ -29,7 +29,10 @@ class ShardedLayer(BaseModel):
                     self.layer = obj
                 else:
                     # Single-rank trainable module
-                    self.layer = obj(**layer_dict['callable']['settings']).to(self.tensor_device)
+                    try:
+                        self.layer = obj(**layer_dict['callable']['settings']).to(self.tensor_device)
+                    except:
+                        print('asd')
 
                     # Optional initialization
                     # if isinstance(self.layer, nn.Linear):
