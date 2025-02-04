@@ -50,7 +50,7 @@ def one_trial_hyperparam_sweep(args):
     entity = None
     project = None
     use_wandb = WANDB_AVAILABLE
-    num_workers = args.num_workers  # or however many local processes you want
+    num_workers = args.num_subdomains * args.num_replicas_per_subdomain * args.num_stages  # or however many local processes you want
     if use_wandb:
         os.environ["WANDB_START_METHOD"] = "thread"  
         with open(args.sweep_config, "r") as file:
@@ -58,7 +58,7 @@ def one_trial_hyperparam_sweep(args):
         entity = args.entity
         project = args.project
         sweep_id = wandb.sweep(sweep_config, project=project)  # No need for redundant check
-        
+    
     distributed_run(main, num_workers, sweep_id, entity, project, args_dict, use_wandb)
         
 if __name__ == "__main__":

@@ -59,9 +59,14 @@ class Trainer():
 
         # determine the device we'll train on
         if config.device == 'auto':
-            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'   
         else:
             self.device = config.device
+        
+        # In case we are on a Mac with MPS enabled, we can use it as a device
+        if not self.config.use_pmw and self.device == 'cpu' and torch.backends.mps.is_available() and torch.backends.mps.is_built() and ((dist.is_initialized() and dist.get_world_size() == 1) or not dist.is_initialized()):
+            self.device = torch.device("mps")     
+             
         self.model = self.model.to(self.device)
         dprint(f"running on device {self.device}")
 
@@ -159,6 +164,7 @@ class Trainer():
             for batch_idx, (x, y) in enumerate(self.test_loader):
                 x, y = x.to(self.device), y.to(self.device)
                 outputs = model(x)
+                outputs = outputs.to(x.device)
 
                 # Handle the case where outputs is a list (e.g., due to chunked data)
                 if isinstance(outputs, list):
