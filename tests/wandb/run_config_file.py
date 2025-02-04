@@ -64,7 +64,7 @@ def one_trial_hyperparam_sweep(args):
 if __name__ == "__main__":
     args = parse_cmd_args()
     
-    for trial in range(args.trials):
+    for trial in range(max(args.trials, 3)):
         dprint(f"Running trial {trial+1}/{args.trials}")
         one_trial_hyperparam_sweep(args)
     

@@ -1,0 +1,17 @@
+method: grid
+metric:
+  name: train_loss
+  goal: minimize
+parameters:
+  batch_size:
+    values: [250, 500]
+  epochs: 
+    value: 3
+  optimizer: 
+    values: ["apts"]
+  dataset_name: 
+    values: ["mnist"]
+  model_name: 
+    values: ["cnn"]
+  criterion:
+    values: ["cross_entropy"]

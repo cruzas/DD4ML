@@ -36,6 +36,8 @@ python3 -m pip install .
 ## Usage
 Look into the tests folder. For example, you can run:
 ```bash
+open -a Docker
+wandb server start
 python3 ./tests/chargpt/chargpt.py
 ```
 

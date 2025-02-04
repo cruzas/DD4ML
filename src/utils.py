@@ -15,13 +15,15 @@ from src.utility.wandb_utils import *
 
 def parse_cmd_args():
     parser = argparse.ArgumentParser("Hyperparameter Sweep")
-    parser.add_argument("--sweep_config", type=str, default="sweep_config.yaml", help="Sweep configuration file") 
+    # NOTE: In particular, if you wish to use default arguments for your wandb files, change the following defaults
+    parser.add_argument("--sweep_config", type=str, default="config_apts.yaml", help="Sweep configuration file") 
     parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
-    parser.add_argument("--project", type=str, default="sgd_hyperparameter_sweep", help="Wandb project")
-    parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
-    parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
+    parser.add_argument("--project", type=str, default="apts_tests", help="Wandb project")
     parser.add_argument("--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper")
     parser.add_argument("--work_dir", type=str, default="../../saved_networks/wandb/", help="Directory to save models")
+    # After here, more or less okay to leave as is if you wish
+    parser.add_argument("--trials", type=int, default=1, help="Number of trials to run") # number of times to repeat each hyperparameter combination -> good for building averages
+    parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
     # In case we are not executing with wandb sweep
     parser.add_argument("--dataset_name", type=str, default="mnist", help="Dataset name")
     parser.add_argument("--model_name", type=str, default="simple_cnn", help="Model name")
@@ -85,11 +87,7 @@ def get_config(dataset_name: str, model_name: str, optimizer: str = "sgd") -> Cf
         raise ValueError(f"Unknown dataset name: {dataset_name}")
 
     # Model
-    if "cnn" in model_name.lower():
-        # from src.models.cnn.my_cnn import MyCNN
-        # C.model = MyCNN.get_default_config()
-        # C.model.model_class = MyCNN
-        
+    if "simple_cnn" in model_name.lower():
         from src.models.cnn.simple_cnn import SimpleCNN
         C.model = SimpleCNN.get_default_config()
         C.model.model_class = SimpleCNN
@@ -134,8 +132,11 @@ def get_config_model_and_trainer(args, wandb_config):
     elif all_config.dataset_name == "cifar10":
         from src.datasets.cifar10 import CIFAR10Dataset
         dataset_class = CIFAR10Dataset
+    elif all_config.dataset_name == "tinyshakespeare":
+        from src.datasets.tinyshakespeare import TinyShakespeareDataset
+        dataset_class = TinyShakespeare
     else:
-        raise ValueError(f"Unknown dataset name: {wandb_config['dataset_name']}")
+        raise ValueError(f"Unknown dataset name: {wandb_config['dataset_name']}. Please add it to ./src/datasets/")
 
     test_dataset_config = copy.deepcopy(all_config.data)
     test_dataset_config.train = False 
