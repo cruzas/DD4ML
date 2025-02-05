@@ -4,9 +4,9 @@ metric:
   goal: minimize
 parameters:
   learning_rate:
-    values: [0.001, 0.01]
+    values: [0.01]
   batch_size:
-    values: [250]
+    values: [250, 500]
   epochs: 
     value: 3
   optimizer: 
@@ -14,6 +14,6 @@ parameters:
   dataset_name: 
     values: ["mnist"]
   model_name: 
-    values: ["simple_cnn"]
+    values: ["simple_resnet"]
   criterion:
     values: ["cross_entropy"]

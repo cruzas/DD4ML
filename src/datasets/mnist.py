@@ -17,6 +17,8 @@ class MNISTDataset(BaseDataset):
         C.download = True
         C.input_channels = 1
         C.output_classes = 10
+        C.input_height = 28
+        C.input_width = 28
         return C
 
     def __init__(self, config, data=None, transform=None):

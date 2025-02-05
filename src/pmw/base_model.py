@@ -18,6 +18,12 @@ class BaseModel(nn.Module):
         self.tensor_device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         # Default device to store scalars
         self.default_device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        
+        # TODO: Study the following. Would be nice, but there's a lot of CPU-GPU movement when using pmw and it makes the code slow.
+        # if self.tensor_device == 'cpu' and torch.backends.mps.is_available() and torch.backends.mps.is_built() and ((dist.is_initialized() and dist.get_world_size() == 1) or not dist.is_initialized()):
+        #     self.tensor_device = torch.device("mps")    
+        #     self.default_device = torch.device("mps")
+        
         self.DEBUG = False
 
     def backend_device(self, tensor=torch.tensor([0])):
