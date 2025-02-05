@@ -64,7 +64,7 @@ class Trainer():
             self.device = config.device
         
         # In case we are on a Mac with MPS enabled, we can use it as a device
-        if not self.config.use_pmw and self.device == 'cpu' and torch.backends.mps.is_available() and torch.backends.mps.is_built() and ((dist.is_initialized() and dist.get_world_size() == 1) or not dist.is_initialized()):
+        if self.device == 'cpu' and torch.backends.mps.is_available() and torch.backends.mps.is_built() and ((dist.is_initialized() and dist.get_world_size() == 1) or not dist.is_initialized()):
             self.device = torch.device("mps")     
              
         self.model = self.model.to(self.device)
@@ -123,7 +123,8 @@ class Trainer():
         criterion = self.criterion
         self.loss = 0.0 # epoch loss
         total_batches = len(self.train_loader)
-        for batch_idx, (x, y) in enumerate(self.train_loader):    
+        for batch_idx, (x, y) in enumerate(self.train_loader):
+            batch_time_start = time.time()   
             x, y = x.to(self.device), y.to(self.device)
             
             if self.epoch_num == 0:
@@ -147,6 +148,7 @@ class Trainer():
                 
             # Print progress within the epoch
             self.epoch_progress = 100.0 * (batch_idx + 1) / total_batches
+            self.batch_dt = time.time() - batch_time_start
             self.trigger_callbacks('on_batch_end')
         
         self.loss = self.loss / total_batches
@@ -164,6 +166,9 @@ class Trainer():
             for batch_idx, (x, y) in enumerate(self.test_loader):
                 x, y = x.to(self.device), y.to(self.device)
                 outputs = model(x)
+                # Check if outputs is a list of length 1
+                if len(outputs) == 1:
+                    outputs = outputs[0]
                 outputs = outputs.to(x.device)
 
                 # Handle the case where outputs is a list (e.g., due to chunked data)
