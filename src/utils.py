@@ -171,30 +171,25 @@ def get_config_model_and_trainer(args, wandb_config):
     
     # Define the model
     # Check if model_class has a method with build_*_dictionary 
-    if hasattr(all_config.model.model_class, "as_model_dict"):
-        # NOTE/REQUIRED: Regardless of the model class, it must define model_dict in this case.
+    if all_config.trainer.use_pmw and hasattr(all_config.model.model_class, "as_model_dict"):
+        print("Using Parallel Model Wrapper and Model Handler")
         model = all_config.model.model_class(all_config.model)
         model_dict = model.as_model_dict()
-        if all_config.trainer.use_pmw:
-            print("Using Parallel Model Wrapper and Model Handler")
-            model_handler = ModelHandler(model_dict, all_config.model.num_subdomains, all_config.model.num_replicas_per_subdomain)
-            all_config.trainer.model_handler = model_handler
-            
-            # Construct the parallel model (overwrite the model)
-            sample_input = train_dataset.get_sample_input(all_config.trainer)
-            # Based on the shape if the first dimension is 1, then it is a single sample.
-            # If so, get another sample to create a bigger batch.
-            if sample_input.shape[0] == 1:
-                other_sample = train_dataset.get_sample_input(all_config.trainer)
-                sample_input = torch.cat([sample_input, other_sample], dim=0)
+        model_handler = ModelHandler(model_dict, all_config.model.num_subdomains, all_config.model.num_replicas_per_subdomain)
+        all_config.trainer.model_handler = model_handler
+        
+        # Construct the parallel model (overwrite the model)
+        sample_input = train_dataset.get_sample_input(all_config.trainer)
+        # Based on the shape if the first dimension is 1, then it is a single sample.
+        # If so, get another sample to create a bigger batch.
+        if sample_input.shape[0] == 1:
+            other_sample = train_dataset.get_sample_input(all_config.trainer)
+            sample_input = torch.cat([sample_input, other_sample], dim=0)
 
-            model = ParallelizedModel(model_handler, sample=sample_input)
-        else:
-            # Builds a standard PyTorch model based on a dictionary structure of its components
-            from src.models.standard_model import build_standard_model
-            model = build_standard_model(model_dict)
+        model = ParallelizedModel(model_handler, sample=sample_input)
+        
     else:
-        model = all_config.model.model_class()
+        model = all_config.model.model_class(all_config.model)
             
     dprint(model)
     
