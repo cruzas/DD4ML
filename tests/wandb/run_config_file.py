@@ -41,6 +41,7 @@ def main(rank=None, master_addr=None, master_port=None, world_size=None, args=No
     def batch_end_callback(trainer):
         dprint(f"Epoch [{trainer.epoch_num}/{trainer.config.epochs}] {trainer.epoch_progress}%. Batch time with {trainer.device}: {trainer.batch_dt:.2f}s")
     
+    batch_end_callback = None
     generic_run(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size, args=args, wandb_config=wandb_config if use_wandb else None, epoch_end_callback=epoch_end_callback, batch_end_callback=batch_end_callback)
         
 def one_trial_hyperparam_sweep(args):
