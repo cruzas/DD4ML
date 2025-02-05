@@ -30,8 +30,9 @@ class WeightParallelizedModel(BaseModel):
     def do_setup_phase(self, sample):
         loss = None
         self.subdomain.setup_phase = True
-        out = self.forward(sample.to(self.tensor_device),
-                           chunks_amount=1, reset_grad=True, compute_grad=True)
+        if sample.device != self.tensor_device:
+            sample = sample.to(self.tensor_device)
+        out = self.forward(sample, chunks_amount=1, reset_grad=True, compute_grad=True)
         if self.model_handler.is_last_stage():
             loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
         self.backward(losses=[loss])
@@ -50,8 +51,7 @@ class WeightParallelizedModel(BaseModel):
         return self.grad().norm(p=p)
 
     def parameters(self, clone=False):  # Returns the global parameters of the model
-        params = [
-            param.clone() if clone else param for param in self.subdomain.parameters()]
+        params = [param.clone() if clone else param for param in self.subdomain.parameters()]
         return WeightParallelizedTensor(params, self.backend, self.model_handler.get_replica_group(), self.rank)
 
     # Returns the subdomain gradient norm of the model
@@ -66,25 +66,23 @@ class WeightParallelizedModel(BaseModel):
                 self.zero_grad()  # Reset the gradients of the model before starting to accumulate them again
 
             # Initialize the chunk_shapes tensor to store the shapes of the chunks
-            chunk_shapes = torch.zeros(chunks_amount, dtype=torch.int32)
-            # If the rank is in the first layer's rank list, send the input to the next device
+            chunk_shapes = torch.zeros(chunks_amount, dtype=torch.int32, device=self.backend_device(x))
+
+            # If the rank is in the first stage, process the input
             if self.model_handler.is_first_stage():
                 # Chunkenize the input tensor
-                chunks = list(x.chunk(chunks_amount))
-                # Store the batch size of each chunk
-                chunk_shapes = torch.tensor(
-                    [chunk.shape[0] for chunk in chunks], dtype=torch.int32)
-            # Broadcast the chunk_shapes tensor to all the ranks (this allows to know the shape of the input tensor for each rank in the pipeline and prepare the recv function)
-            # NOTE: Necessary for broadcast to work correctly, as to can be asynchronous when transferring to CUDA devices. Broadcasting only the batch size | async operation to avoid blocking the first layer
-            chunk_shapes = chunk_shapes.to(self.backend_device(x))
-            dist.broadcast(tensor=chunk_shapes, src=self.first_stage_ranks[0], group=self.model_handler.get_replica_group(
-            ), async_op=False)  # broadcasting only the batch size | async operation to avoid blocking the first layer
-            # Go through the pipeline
+                chunks = x.chunk(chunks_amount)  # Direct tuple unpacking instead of list()
+                
+                # Store batch sizes efficiently
+                chunk_shapes[:len(chunks)] = torch.tensor([chunk.shape[0] for chunk in chunks], dtype=torch.int32, device=chunk_shapes.device)
+
+            # Broadcast chunk_shapes to all ranks
+            dist.broadcast(tensor=chunk_shapes, src=self.first_stage_ranks[0], group=self.model_handler.get_replica_group(), async_op=False)
+
+            # Iterate through pipeline
             for c in range(chunks_amount):
-                temp = chunks[c].to(
-                    self.tensor_device) if self.model_handler.is_first_stage() else None
-                self.subdomain.forward(
-                    num_chunks=chunks_amount, num_samples_in_chunk=chunk_shapes[c], chunk_id=c, x=temp, is_in_pipeline=True)
+                temp = chunks[c].to(self.tensor_device) if self.model_handler.is_first_stage() else None
+                self.subdomain.forward(num_chunks=chunks_amount, num_samples_in_chunk=chunk_shapes[c].item(), chunk_id=c, x=temp, is_in_pipeline=True)
 
         if self.model_handler.is_last_stage():
             return self.subdomain.outputs['finish']
