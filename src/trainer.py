@@ -6,6 +6,7 @@ Note:
 This code runs with our dictionary-defined model, which is instantiated as a ParallelizedModel object.
 Model handler takes care of the parallelized model logic. This is why this is slightly different from the trainer in mingpt.
 """
+import inspect
 import time
 from collections import defaultdict
 
@@ -40,7 +41,7 @@ class Trainer():
         C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = 1.0 
         C.epochs = 3 # in case epochs instead of iter
-        C.run_by_epoch = True # if False, run by iteration, typically for transformer networks
+        C.run_by_epoch = False # if False, run by iteration, typically for transformer networks
         
         # For pipelining via pwm library
         C.data_chunks_amount = 1
@@ -72,7 +73,7 @@ class Trainer():
 
         # variables that will be assigned to trainer class later for logging and etc
         self.total_start_time = 0.0 # for computing the total running time
-        if self.run_by_epoch:
+        if config.run_by_epoch:
             self.epoch_num = 0
             self.epoch_time = 0.0
             self.epoch_dt = 0.0
@@ -134,7 +135,7 @@ class Trainer():
                 general_closure = closure(x, y, criterion=criterion, model=model, data_chunks_amount=config.data_chunks_amount, compute_grad=True, grad_norm_clip=config.grad_norm_clip)   
                 
                 # Check if final_subdomain_closure is part of self.optimizer arguments
-                if hasattr(self.optimizer, 'final_subdomain_closure'):
+                if 'final_subdomain_closure' in inspect.signature(self.optimizer.step).parameters:
                     def final_subdomain_closure(outputs, y=y):
                         y_chunks = y.chunk(len(outputs))
                         loss = []
@@ -144,7 +145,7 @@ class Trainer():
                 
                     self.loss += self.optimizer.step(closure=general_closure, final_subdomain_closure=final_subdomain_closure)
                 else:
-                    self.loss += self.optimizer.step(general_closure)
+                    self.loss += self.optimizer.step(closure=general_closure)
                 
             # Print progress within the epoch
             self.epoch_progress = 100.0 * (batch_idx + 1) / total_batches
@@ -195,27 +196,40 @@ class Trainer():
             self.epoch_num += 1
     
     def run_by_iter(self):
+        model, config = self.model, self.config
+        
         model.train()
         self.iter_time = time.time()
-        data_iter = iter(train_loader)
+        self.data_iter = iter(self.train_loader)
         
         for self.iter_num in range(config.max_iters if config.max_iters is not None else float('inf')):
             # fetch the next batch (x, y) and re-init iterator if needed
             try:
-                batch = next(data_iter)
+                batch = next(self.data_iter)
             except StopIteration:
-                data_iter = iter(train_loader)
-                batch = next(data_iter)
+                self.data_iter = iter(self.train_loader)
+                batch = next(self.data_iter)
             batch = [t.to(self.device) for t in batch]
             x, y = batch
         
             if self.iter_num == 0:
-                first_closure = closure(x, y, criterion, model, data_chunks_amount=config.data_chunks_amount, compute_grad=False)
+                first_closure = closure(x, y, self.criterion, self.model, data_chunks_amount=config.data_chunks_amount, compute_grad=False)
                 self.loss = first_closure()
             else:
                 self.optimizer.zero_grad()      
-                general_closure = closure(x, y, criterion=criterion, model=model, data_chunks_amount=config.data_chunks_amount, compute_grad=True, grad_norm_clip=config.grad_norm_clip)        
-                self.loss = self.optimizer.step(closure=general_closure)
+                general_closure = closure(x, y, criterion=self.criterion, model=self.model, data_chunks_amount=config.data_chunks_amount, compute_grad=True, grad_norm_clip=config.grad_norm_clip)        
+                # Check if self.optimizer.step requires final_subdomain_closure
+                if 'final_subdomain_closure' in inspect.signature(self.optimizer.step).parameters: # for APTS
+                    def final_subdomain_closure(outputs, y=y):
+                        y_chunks = y.chunk(len(outputs))
+                        loss = []
+                        for i, o in enumerate(outputs):
+                            loss.append(self.criterion(o, y_chunks[i]))
+                        return loss
+                    
+                    self.loss = self.optimizer.step(closure=general_closure, final_subdomain_closure=final_subdomain_closure)
+                else:
+                    self.loss = self.optimizer.step(closure=general_closure)
             
             self.trigger_callbacks('on_batch_end')
             

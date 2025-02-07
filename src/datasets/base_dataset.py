@@ -18,10 +18,11 @@ class BaseDataset(Dataset, ABC):
         C.percentage = 100.0 # percentage of the dataset to use
         return C
 
-    def __init__(self, config, data, transform):
+    def __init__(self, config, data, transform=None):
         self.config = config
         self.data = data
-        self.transform = transform
+        if transform is not None:
+            self.transform = transform
 
     @abstractmethod
     def __len__(self):
