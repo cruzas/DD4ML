@@ -199,10 +199,10 @@ class Trainer():
         model, config = self.model, self.config
         
         model.train()
+        self.total_start_time = time.time()
         self.iter_time = time.time()
         self.data_iter = iter(self.train_loader)
-        
-        for self.iter_num in range(config.max_iters if config.max_iters is not None else float('inf')):
+        for self.iter_num in range(config.max_iters+1 if config.max_iters is not None else float('inf')):
             # fetch the next batch (x, y) and re-init iterator if needed
             try:
                 batch = next(self.data_iter)
@@ -231,10 +231,10 @@ class Trainer():
                 else:
                     self.loss = self.optimizer.step(closure=general_closure)
             
-            self.trigger_callbacks('on_batch_end')
-            
             tnow = time.time()
             self.iter_dt = tnow - self.iter_time
+            self.running_time = tnow - self.total_start_time
+            self.trigger_callbacks('on_batch_end')
             self.iter_time = tnow
 
     def compute_perplexity(self):
