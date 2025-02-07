@@ -4,12 +4,12 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 
-from src.pmw.base_model import BaseModel
+from src.pmw.base_pmw_model import BasePMWModel
 from src.pmw.data_and_weight_parallelized_subdomain import \
     DataAndWeightParallelizedSubdomain
 
 
-class ParallelizedModel(BaseModel):
+class ParallelizedModel(BasePMWModel):
     def __init__(self, model_handler, sample):
         '''
         Ranks that will be used are [0, ..., world_size - 1]

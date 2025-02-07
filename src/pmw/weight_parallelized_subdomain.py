@@ -6,11 +6,11 @@ import torch.distributed as dist
 from torch import autograd, nn
 
 import src.utils as utils
-from src.pmw.base_model import BaseModel
+from src.pmw.base_pmw_model import BasePMWModel
 from src.pmw.sharded_layer import ShardedLayer
 
 
-class WeightParallelizedSubdomain(BaseModel):
+class WeightParallelizedSubdomain(BasePMWModel):
     def __init__(self, model_handler):
         super().__init__()
         self.model_handler = model_handler
