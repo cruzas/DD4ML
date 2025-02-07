@@ -3,10 +3,10 @@ import math
 import torch
 import torch.distributed as dist
 
-from src.pmw.base_model import BaseModel
+from src.pmw.base_pmw_model import BasePMWModel
 
 
-class WeightParallelizedTensor(BaseModel):
+class WeightParallelizedTensor(BasePMWModel):
     def __init__(self, tensor, backend, master_group, rank):
         super().__init__()  # Call to the superclass (nn.Module) constructor
         self.tensor = tensor

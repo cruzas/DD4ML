@@ -6,6 +6,7 @@ import pandas as pd
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 def cross_entropy_transformers(logits, targets):

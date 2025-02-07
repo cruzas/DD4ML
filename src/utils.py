@@ -1,10 +1,9 @@
-import argparse
 import copy
 
 import pandas as pd
 import torch
+import torch.distributed as dist
 import torch.nn as nn
-import torch.nn.functional as F
 import wandb
 
 from src.utility.dist_utils import *
@@ -12,230 +11,222 @@ from src.utility.mingpt_utils import *
 from src.utility.ml_utils import *
 from src.utility.wandb_utils import *
 
+# Global mapping dictionaries
+DATASET_MAP = {
+    "mnist": ("src.datasets.mnist", "MNISTDataset"),
+    "cifar10": ("src.datasets.cifar10", "CIFAR10Dataset"),
+    "tinyshakespeare": ("src.datasets.tinyshakespeare", "TinyShakespeareDataset")
+}
 
-def parse_cmd_args(APTS=False):
-    parser = argparse.ArgumentParser("Hyperparameter Sweep")
-    # NOTE: In particular, if you wish to use default arguments for your wandb files, change the following defaults
-    parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
-    parser.add_argument("--work_dir", type=str, default="../../saved_networks/wandb/", help="Directory to save models")
-    if not APTS:
-        parser.add_argument("--sweep_config", type=str, default="config_sgd.yaml", help="Sweep configuration file") 
-        parser.add_argument("--project", type=str, default="sgd_hyperparameter_sweep", help="Wandb project")
-        parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
-    elif APTS:
-        parser.add_argument("--sweep_config", type=str, default="config_apts.yaml", help="Sweep configuration file") 
-        parser.add_argument("--project", type=str, default="apts_tests", help="Wandb project")
-        parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
-    # After here, more or less okay to leave as is if you wish
-    parser.add_argument("--trials", type=int, default=1, help="Number of trials to run") # number of times to repeat each hyperparameter combination -> good for building averages
-    parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
-    # In case we are not executing with wandb sweep
-    parser.add_argument("--dataset_name", type=str, default="mnist", help="Dataset name")
-    parser.add_argument("--model_name", type=str, default="simple_cnn", help="Model name")
-    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
-    parser.add_argument("--criterion", type=str, default="cross_entropy", help="Criterion name")
-    parser.add_argument("--learning_rate", type=float, default=0.01, help="Learning rate")
-    parser.add_argument("--metric", type=str, choices=["loss", "accuracy"], default="loss", help="Metric to determine best learning rate")
-    # For APTS in case needed
-    parser.add_argument("--subdomain_optimizer", type=str, default="sgd", help="Subdomain optimizer")
-    parser.add_argument("--global_optimizer", type=str, default="trust_region", help="Global optimizer")
-    parser.add_argument("--max_subdomain_iters", type=int, default=3, help="Max iterations for subdomain optimizer")
-    # For pmw
-    parser.add_argument("--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper")
-    parser.add_argument("--num_subdomains", type=int, default=1, help="Number of subdomains")
-    parser.add_argument("--num_replicas_per_subdomain", type=int, default=1, help="Number of replicas per subdomain")
+MODEL_MAP = {
+    "simple_cnn": ("src.models.cnn.simple_cnn", "SimpleCNN"),
+    "big_cnn": ("src.models.cnn.big_cnn", "BigCNN"),
+    "simple_resnet": ("src.models.resnet.simple_resnet", "SimpleResNet"),
+    "mingpt": ("src.models.gpt.mingpt.model", "GPT")
+}
+
+CRITERION_MAP = {
+    "cross_entropy": lambda train_ds=None: nn.CrossEntropyLoss(),
+    "weighted_cross_entropy": lambda train_ds: nn.CrossEntropyLoss(weight=train_ds.compute_class_weights()),
+    "mse": lambda train_ds=None: nn.MSELoss(),
+    "cross_entropy_transformers": lambda train_ds=None: cross_entropy_transformers
+}
+
+OPTIMIZER_MAP = {
+    "sgd": lambda model, lr: torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9),
+    "adam": lambda model, lr: torch.optim.Adam(model.parameters(), lr=lr),
+    "adamw": lambda model, lr: torch.optim.AdamW(model.parameters(), lr=lr),
+    "adagrad": lambda model, lr: torch.optim.Adagrad(model.parameters(), lr=lr),
+    "rmsprop": lambda model, lr: torch.optim.RMSprop(model.parameters(), lr=lr)
+}
+
+
+def broadcast_dict(d, src=0):
+    """
+    Broadcasts a dictionary from the source rank to all other ranks.
+    Uses PyTorch's `dist.broadcast_object_list` to share data.
+    """
+    obj_list = [d] if dist.get_rank() == src else [None]  # Only source rank has the data
+    dist.broadcast_object_list(obj_list, src=src)  # Broadcast
+    return obj_list[0]  # Return the received dictionary
+
+
+def import_attr(module_path: str, class_name: str):
+    module = __import__(module_path, fromlist=[class_name])
+    return getattr(module, class_name)
+
+def generic_run(rank=None, master_addr=None, master_port=None, world_size=None,
+                args=None, wandb_config=None, epoch_end_callback=None, batch_end_callback=None):
     
-    args = parser.parse_args()
-    return args 
+    use_wandb = wandb_config is not None
 
-def is_sweep_active(sweep_id, project, entity):
-    """Check if the sweep is still running before using it."""
-    api = wandb.Api()
-    try:
-        sweep = api.sweep(f"{entity}/{project}/{sweep_id}")
-        return sweep.state == "running"  # Only use if it's still running
-    except wandb.errors.CommError:
-        return False  # Sweep doesn't exist
-
-def generic_run(rank=None, master_addr=None, master_port=None, world_size=None, args=None, wandb_config=None, epoch_end_callback=None, batch_end_callback=None):
-    use_wandb = wandb_config is not None  # Check if wandb should be used
     if use_wandb:
-        wandb.init(config=wandb_config)
-        wandb_config = wandb.config  # Assign updated config
+        if rank == 0:  # Only rank 0 should initialize wandb
+            if wandb.run is None:
+                wandb.init(config=wandb_config)
+            wandb_config = dict(wandb.config)  # Store the selected hyperparameters
+        else:
+            wandb_config = {}  # Other ranks wait for broadcast
 
-    prepare_distributed_environment(rank, master_addr, master_port, world_size, is_cuda_enabled=torch.cuda.is_available())
-    print(f"Rank {rank}/{world_size-1}")
-    
+        # Ensure all ranks use the same hyperparameters by broadcasting from rank 0
+        wandb_config = broadcast_dict(wandb_config, src=0)
+
+    else:
+        wandb_config = {}
+
+    # Load config, model, and trainer with synchronized hyperparameters
     config, model, trainer = get_config_model_and_trainer(args, wandb_config)
-    dprint(str(config))
-    
-    if epoch_end_callback is not None:
+    dprint(config)
+
+    if epoch_end_callback and trainer.config.run_by_epoch:
         trainer.set_callback("on_epoch_end", epoch_end_callback)
-    if batch_end_callback is not None:
+    if batch_end_callback and not trainer.config.run_by_epoch:
         trainer.set_callback("on_batch_end", batch_end_callback)
-    
-    # Run training
+
     trainer.run()
-    
-    # Destroy process group
-    dist.destroy_process_group()
     
 def get_config(dataset_name: str, model_name: str, optimizer: str = "sgd") -> CfgNode:
     from src.trainer import Trainer
     C = CfgNode()
 
-    # System
+    # System configuration
     C.system = CfgNode()
     C.system.seed = 3407
     C.system.trial = 0
-    C.system.work_dir = f'../../saved_networks/{dataset_name}/{model_name}/{optimizer}/'    
+    C.system.work_dir = f'../../saved_networks/{dataset_name}/{model_name}/{optimizer}/'
 
-    # Data
-    if dataset_name == "mnist":
-        from src.datasets.mnist import MNISTDataset
-        C.data = MNISTDataset.get_default_config()
-    elif dataset_name == "cifar10":
-        from src.datasets.cifar10 import CIFAR10Dataset
-        C.data = CIFAR10Dataset.get_default_config()
-    else:
+    # Data configuration using DATASET_MAP
+    if dataset_name not in DATASET_MAP:
         raise ValueError(f"Unknown dataset name: {dataset_name}")
+    ds_module, ds_class_name = DATASET_MAP[dataset_name]
+    dataset_cls = import_attr(ds_module, ds_class_name)
+    C.data = dataset_cls.get_default_config()
 
-    # Model
-    if "simple_cnn" in model_name.lower():
-        from src.models.cnn.simple_cnn import SimpleCNN
-        C.model = SimpleCNN.get_default_config()
-        C.model.model_class = SimpleCNN
-    elif "big_cnn" in model_name.lower():
-        from src.models.cnn.big_cnn import BigCNN
-        C.model = BigCNN.get_default_config()
-        C.model.model_class = BigCNN
-    elif "simple_resnet" in model_name.lower():
-        from src.models.resnet.simple_resnet import SimpleResNet
-        C.model = SimpleResNet.get_default_config()
-        C.model.model_class = SimpleResNet
-    else:
-        raise ValueError(f"Unknown model name: {model_name}. Please, implement it in src/models/")
-    # elif "resnet" in model_name.lower():
-        # TODO
+    # Model configuration using MODEL_MAP
+    key = next((k for k in MODEL_MAP if k in model_name.lower()), None)
+    if key is None:
+        raise ValueError(f"Unknown model name: {model_name}. Please implement it in src/models/")
+    model_module, model_class_name = MODEL_MAP[key]
+    model_cls = import_attr(model_module, model_class_name)
+    C.model = model_cls.get_default_config()
+    C.model.model_class = model_cls
     
-    C.model.input_channels = C.data.input_channels
-    C.model.input_height = C.data.input_height
-    C.model.input_width = C.data.input_width
-    C.model.output_classes = C.data.output_classes
+    # For image-processing models
+    if getattr(C.data, 'input_channels', None) is not None:
+        C.model.input_channels = C.data.input_channels
+    if getattr(C.data, 'input_height', None) is not None:
+        C.model.input_height = C.data.input_height
+    if getattr(C.data, 'input_width', None) is not None:
+        C.model.input_width = C.data.input_width
+    if getattr(C.data, 'output_classes', None) is not None:
+        C.model.output_classes = C.data.output_classes    
 
-    # trainer
+    # Trainer configuration
     C.trainer = Trainer.get_default_config()
     return C
+
 
 def get_config_model_and_trainer(args, wandb_config):
     from src.pmw.model_handler import ModelHandler
     from src.pmw.parallelized_model import ParallelizedModel
     from src.trainer import Trainer
-    
-    if wandb_config is None:
-        dataset_name = args["dataset_name"]
-        model_name = args["model_name"]
-        optimizer = args["optimizer"]
-    else:
-        dataset_name = wandb_config["dataset_name"]
-        model_name = wandb_config["model_name"]
-        optimizer = wandb_config["optimizer"]
-    
-    all_config = get_config(dataset_name, model_name, optimizer)
+
+    config_src = wandb_config if wandb_config is not None else args
+    dataset_name = config_src["dataset_name"]
+    model_name = config_src["model_name"]
+    optimizer_name = config_src["optimizer"]
+
+    all_config = get_config(dataset_name, model_name, optimizer_name)
     if wandb_config is not None:
         all_config.merge_from_dict(wandb_config)
     else:
-        if "sweep_config" in args:
-            args.pop("sweep_config")
+        args.pop("sweep_config", None)
     all_config.merge_from_dict(args)
     all_config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
-    
-    # Datasets
-    if all_config.dataset_name == "mnist":
-        from src.datasets.mnist import MNISTDataset
-        dataset_class = MNISTDataset
-    elif all_config.dataset_name == "cifar10":
-        from src.datasets.cifar10 import CIFAR10Dataset
-        dataset_class = CIFAR10Dataset
-    elif all_config.dataset_name == "tinyshakespeare":
-        from src.datasets.tinyshakespeare import TinyShakespeareDataset
-        dataset_class = TinyShakespeare
-    else:
-        raise ValueError(f"Unknown dataset name: {wandb_config['dataset_name']}. Please add it to ./src/datasets/")
+
+    # Dataset instantiation using DATASET_MAP
+    if all_config.dataset_name not in DATASET_MAP:
+        raise ValueError(f"Unknown dataset name: {all_config.dataset_name}. Please add it to ./src/datasets/")
+    ds_module, ds_class_name = DATASET_MAP[all_config.dataset_name]
+    dataset_cls = import_attr(ds_module, ds_class_name)
 
     test_dataset_config = copy.deepcopy(all_config.data)
-    test_dataset_config.train = False 
-    
-    train_dataset = dataset_class(all_config.data)
-    test_dataset = dataset_class(test_dataset_config)
-    
-    # Define the model
-    # Check if model_class has a method with build_*_dictionary 
+    test_dataset_config.train = False
+
+    train_dataset = dataset_cls(all_config.data)
+    test_dataset = dataset_cls(test_dataset_config)
+
+    # For GPT models
+    if getattr(train_dataset, 'vocab_size', None) is not None:
+        all_config.model.vocab_size = train_dataset.get_vocab_size()
+    if getattr(train_dataset, 'block_size', None) is not None:
+        all_config.model.block_size = train_dataset.get_block_size()
+
+    # if getattr(all_config.model, 'n_layer', None) is not None:
+    #     BaseModel.n_layer = all_config.model.n_layer
+
+    # Model instantiation and optional parallelization
     if all_config.trainer.use_pmw and hasattr(all_config.model.model_class, "as_model_dict"):
-        print("Using Parallel Model Wrapper and Model Handler")
-        model = all_config.model.model_class(all_config.model)
-        model_dict = model.as_model_dict()
-        model_handler = ModelHandler(model_dict, all_config.model.num_subdomains, all_config.model.num_replicas_per_subdomain)
+        dprint("Using Parallel Model Wrapper and Model Handler")
+        model_instance = all_config.model.model_class(all_config.model)
+        model_dict = model_instance.as_model_dict()
+        model_handler = ModelHandler(model_dict, all_config.model.num_subdomains,
+                                     all_config.model.num_replicas_per_subdomain)
         all_config.trainer.model_handler = model_handler
-        
-        # Construct the parallel model (overwrite the model)
+
         sample_input = train_dataset.get_sample_input(all_config.trainer)
-        # Based on the shape if the first dimension is 1, then it is a single sample.
-        # If so, get another sample to create a bigger batch.
         if sample_input.shape[0] == 1:
             other_sample = train_dataset.get_sample_input(all_config.trainer)
             sample_input = torch.cat([sample_input, other_sample], dim=0)
-
         model = ParallelizedModel(model_handler, sample=sample_input)
-        
     else:
         model = all_config.model.model_class(all_config.model)
-            
-    dprint(model)
-    
-    # Define the criterion
-    criterion_name = wandb_config["criterion"] if wandb_config is not None else args["criterion"]
-    if criterion_name == "cross_entropy": 
-        criterion = nn.CrossEntropyLoss()
-    elif criterion_name == "weighted_cross_entropy":
-        criterion = nn.CrossEntropyLoss(weight=train_dataset.compute_class_weights())
-    elif criterion_name == "mse":
-        criterion = nn.MSELoss()
-    elif criterion_name == "cross_entropy_transformers":
-        criterion = cross_entropy_transformers
-    else:
-        raise ValueError(f"Unknown criterion: {wandb_config['criterion']}")
-    
-    # Define the optimizer
-    lr = wandb_config["learning_rate"] if wandb_config is not None else args["learning_rate"]
-    if all_config.optimizer == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
-    elif all_config.optimizer == "adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    elif all_config.optimizer == "adamw":
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    elif all_config.optimizer == "adagrad":
-        optimizer = torch.optim.Adagrad(model.parameters(), lr=lr)
-    elif all_config.optimizer == "rmsprop":
-        optimizer = torch.optim.RMSprop(model.parameters(), lr=lr)
-    elif all_config.optimizer == "apts":
-        from src.optimizers.apts import APTS
-        all_config = APTS.setup_APTS_args(all_config)
-        optimizer = APTS(
-                            model=model,
-                            subdomain_optimizer=all_config.subdomain_optimizer,
-                            subdomain_optimizer_defaults=all_config.subdomain_optimizer_args,
-                            global_optimizer=all_config.global_optimizer,
-                            global_optimizer_defaults=all_config.global_optimizer_args,
-                            lr=all_config.learning_rate,
-                            max_subdomain_iter=all_config.max_subdomain_iters,
-                            dogleg=True,
-                            APTS_in_data_sync_strategy='average', 
-                            step_strategy='mean'
-                        )
-    
-    trainer = Trainer(all_config.trainer, model, optimizer, criterion, train_dataset, test_dataset)
-    
-    return all_config, model, trainer
-    
 
+    dprint(model)
+
+    # Criterion selection using CRITERION_MAP
+    criterion_key = wandb_config["criterion"] if wandb_config is not None else args["criterion"]
+    if criterion_key not in CRITERION_MAP:
+        raise ValueError(f"Unknown criterion: {criterion_key}")
+    criterion = CRITERION_MAP[criterion_key](train_dataset if "weighted" in criterion_key else None)
+
+    # Optimizer selection using OPTIMIZER_MAP
+    lr = wandb_config["learning_rate"] if wandb_config is not None else args["learning_rate"]
+    if optimizer_name in OPTIMIZER_MAP:
+        optimizer_obj = OPTIMIZER_MAP[optimizer_name](model, lr)
+        # Check if all_config.trainer.subdomain_optimizer exists and if so remove it
+        if hasattr(all_config.trainer, "subdomain_optimizer"):
+            del all_config.trainer.subdomain_optimizer
+        if hasattr(all_config.trainer, "subdomain_optimizer_args"):
+            del all_config.trainer.subdomain_optimizer_args
+        if hasattr(all_config.trainer, "global_optimizer"):
+            del all_config.trainer.global_optimizer
+        if hasattr(all_config.trainer, "global_optimizer_args"):
+            del all_config.trainer.global_optimizer_args
+    elif optimizer_name == "apts":
+        from src.optimizers.apts import APTS
+        all_config.trainer = APTS.setup_APTS_args(all_config.trainer)
+        optimizer_obj = APTS(
+            model=model,
+            subdomain_optimizer=all_config.trainer.subdomain_optimizer,
+            subdomain_optimizer_defaults=all_config.trainer.subdomain_optimizer_args,
+            global_optimizer=all_config.trainer.global_optimizer,
+            global_optimizer_defaults=all_config.trainer.global_optimizer_args,
+            lr=all_config.trainer.learning_rate,
+            max_subdomain_iter=all_config.trainer.max_subdomain_iters,
+            dogleg=True,
+            APTS_in_data_sync_strategy='average', 
+            step_strategy='mean'
+        )
+    else:
+        raise ValueError(f"Unknown optimizer: {optimizer_name}")
+
+    # Check if all_config.dataset_name has "shakespeare" in it
+    # Make sure to check for other text datasets in the future
+    if "shakespeare" in all_config.dataset_name:
+        all_config.trainer.run_by_epoch = False
+    else:
+        all_config.trainer.run_by_epoch = True
+
+    trainer = Trainer(all_config.trainer, model, optimizer_obj, criterion, train_dataset, test_dataset)
+    return all_config, model, trainer

@@ -2,11 +2,11 @@ import torch
 import torch.distributed as dist
 
 import src.utils as utils
-from src.pmw.base_model import BaseModel
+from src.pmw.base_pmw_model import BasePMWModel
 from src.pmw.weight_parallelized_model import WeightParallelizedModel
 
 
-class DataAndWeightParallelizedSubdomain(BaseModel):
+class DataAndWeightParallelizedSubdomain(BasePMWModel):
     def __init__(self, model_handler, sample):
         super().__init__()
         '''

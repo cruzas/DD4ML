@@ -5,12 +5,13 @@ import torch.autograd as autograd
 import torch.nn as nn
 from torch import autograd
 
-from src.pmw.base_model import BaseModel
+from src.models.base_model import BaseModel
+from src.pmw.base_pmw_model import BasePMWModel
 from src.utils import is_function_module
 
 
 # TODO: Implement this properly to actually perform sharding of the layers.
-class ShardedLayer(BaseModel):
+class ShardedLayer(BasePMWModel):
     def __init__(self, layer_dict, layer_ranks):
         super().__init__()
         self.layer_dict = layer_dict
@@ -27,6 +28,7 @@ class ShardedLayer(BaseModel):
                 if is_function_module(layer_dict):
                     # Pure function (like relu)
                     self.layer = obj
+                    print("This should never be printed in sharded layer...")
                 else:
                     # Single-rank trainable module
                     try:
@@ -35,15 +37,15 @@ class ShardedLayer(BaseModel):
                         print('asd')
 
                     # Optional initialization
-                    # if isinstance(self.layer, nn.Linear):
-                    #     torch.nn.init.normal_(self.layer.weight, mean=0.0, std=0.02)
-                    #     if self.layer.bias is not None:
-                    #         torch.nn.init.zeros_(self.layer.bias)
-                    # elif isinstance(self.layer, nn.Embedding):
-                    #     torch.nn.init.normal_(self.layer.weight, mean=0.0, std=0.02)
-                    # elif isinstance(self.layer, nn.LayerNorm):
-                    #     torch.nn.init.zeros_(self.layer.bias)
-                    #     torch.nn.init.ones_(self.layer.weight)
+                    if isinstance(self.layer, nn.Linear):
+                        torch.nn.init.normal_(self.layer.weight, mean=0.0, std=0.02)
+                        if self.layer.bias is not None:
+                            torch.nn.init.zeros_(self.layer.bias)
+                    elif isinstance(self.layer, nn.Embedding):
+                        torch.nn.init.normal_(self.layer.weight, mean=0.0, std=0.02)
+                    elif isinstance(self.layer, nn.LayerNorm):
+                        torch.nn.init.zeros_(self.layer.bias)
+                        torch.nn.init.ones_(self.layer.weight)
 
                     # Example of custom named-parameter initialization
                     if hasattr(self.layer, "named_parameters"):
@@ -150,3 +152,9 @@ class ShardedLayer(BaseModel):
         """
         # USE THIS: https://pytorch.org/docs/stable/distributed.html#torch.distributed.recv_object_list
         pass
+    
+    def as_model_dict(self):
+        """
+        Convert the model to a dictionary representation.
+        """
+        return self.layer_dict

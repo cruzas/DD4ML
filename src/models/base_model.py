@@ -13,15 +13,18 @@ from src.utils import is_function_module
 
 
 class BaseModel(nn.Module, ABC):
+    n_layer = None
+    
     @staticmethod
     def get_default_config():
         C = CN()
+        # In case of using pmw
         C.num_stages = None
         C.num_subdomains = 1
         C.num_replicas_per_subdomain = 1
         return C
 
-    def __init__(self, config):
+    def __init__(self, config=None):
         super().__init__()
         self.config = config
         self.model_dict = None
@@ -99,7 +102,7 @@ class BaseModel(nn.Module, ABC):
 
         return self.model_dict
 
-    @abstractmethod
-    def as_model_dict(self):
-        # Was a bit too difficult to implement. Maybe TODO later
-        pass
+    # @abstractmethod
+    # def as_model_dict(self):
+    #     # Was a bit too difficult to implement. Maybe TODO later
+    #     pass

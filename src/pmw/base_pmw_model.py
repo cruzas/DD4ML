@@ -7,7 +7,7 @@ import torch.nn as nn
 import src.utils as utils
 
 
-class BaseModel(nn.Module):
+class BasePMWModel(nn.Module):
     n_layer = None
 
     def __init__(self):

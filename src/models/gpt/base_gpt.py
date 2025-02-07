@@ -109,7 +109,7 @@ class BaseGPT(BaseModel):
 
     @staticmethod
     def get_default_config():
-        C = CN()
+        C = BaseModel.get_default_config()
         # either model_type or (n_layer, n_head, n_embd) must be given in the config
         C.model_type = 'gpt-mini'
         C.n_layer = None
@@ -125,7 +125,7 @@ class BaseGPT(BaseModel):
         return C
 
     def __init__(self, config):
-        super().__init__()
+        super().__init__(config)
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.block_size = config.block_size
