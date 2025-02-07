@@ -6,12 +6,12 @@ import torch.distributed as dist
 import torch.nn as nn
 
 import src.utils as utils
-from src.pmw.base_model import BaseModel
+from src.pmw.base_pmw_model import BasePMWModel
 from src.pmw.weight_parallelized_subdomain import WeightParallelizedSubdomain
 from src.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 
-class WeightParallelizedModel(BaseModel):
+class WeightParallelizedModel(BasePMWModel):
     def __init__(self, model_handler, sample):
         '''
         NOTE: grad_norm function returns the infinity norm of the subdomain gradient of the model (i.e. restricted to the current rank).
