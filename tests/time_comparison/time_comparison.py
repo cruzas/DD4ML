@@ -8,7 +8,7 @@ from src.datasets.char_dataset import CharDataset
 from src.models.gpt.mingpt.model import GPT as SequentialGPT
 from src.models.gpt.mingpt.trainer import Trainer
 from src.models.gpt.skgpt.model import GPT as ParallelGPT
-from src.pmw.base_model import BaseModel
+from src.pmw.base_pmw_model import BasePMWModel
 from src.pmw.model_handler import ModelHandler
 from src.pmw.parallelized_model import ParallelizedModel
 from src.utils import CfgNode as CN
@@ -123,7 +123,7 @@ def main(rank=None, world_size=None, args=None):
     par_config.model.num_stages = 2
     parallel_model = ParallelGPT(par_config.model)
     dprint(f"Parallel config: {par_config}")
-    BaseModel.n_layer = par_config.model.n_layer # Bit of a hack for now
+    BasePMWModel.n_layer = par_config.model.n_layer # Bit of a hack for now
 
     par_forward_time, par_backward_time = measure_time(
         parallel_model, Trainer, dataset, sample_input, sample_target, par_config.trainer, is_parallel=True

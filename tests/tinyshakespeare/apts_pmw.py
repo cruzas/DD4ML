@@ -17,7 +17,7 @@ from src.models.gpt.skgpt.model import GPT
 from src.models.gpt.skgpt.trainer_pmw import Trainer
 from src.optimizers.apts import APTS
 from src.optimizers.trust_region import TrustRegion
-from src.pmw.base_model import BaseModel
+from src.pmw.base_pmw_model import BasePMWModel
 from src.pmw.model_handler import ModelHandler
 from src.pmw.parallelized_model import ParallelizedModel
 from src.utils import (check_gpus_per_rank, closure, detect_environment,
@@ -72,7 +72,7 @@ def main(rank, master_addr, master_port, world_size, args):
     config.model.vocab_size = train_dataset.get_vocab_size()
     config.model.block_size = train_dataset.get_block_size()
     model = GPT(config.model)
-    BaseModel.n_layer = config.model.n_layer # Bit of a hack for now
+    BasePMWModel.n_layer = config.model.n_layer # Bit of a hack for now
     dprint(model)
 
     # construct the model handler
