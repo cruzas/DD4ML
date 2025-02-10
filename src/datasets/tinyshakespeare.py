@@ -13,7 +13,6 @@ class TinyShakespeareDataset(BaseDataset):
     @staticmethod
     def get_default_config():
         C = BaseDataset.get_default_config()
-        C.root = '../rawdata/'
         C.filename = 'tinyshakespeare.txt'
         C.vocab_size = None
         C.block_size = 128
