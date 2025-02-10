@@ -38,7 +38,7 @@ Look into the tests folder. For example, you can run:
 ```bash
 open -a Docker
 wandb server start
-python3 ./tests/chargpt/chargpt.py
+python3 ./tests/run_config_file.py --sweep_config="./tests/config_files/config_sgd.yaml"
 ```
 
 ## Structure
