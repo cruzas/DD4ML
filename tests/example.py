@@ -44,6 +44,9 @@ def main(rank, master_addr, master_port, world_size, args=None):
     local_rank = int(os.environ['LOCAL_RANK'])
     torch.cuda.set_device(local_rank)
 
+    # Print number of GPUs available on this device
+    print(f"Number of GPUs available: {torch.cuda.device_count()}")
+
     # Print global and local rank
     print(f'Global rank: {rank}, Local rank: {local_rank}')
 
@@ -62,7 +65,7 @@ def main(rank, master_addr, master_port, world_size, args=None):
     optimizer = optim.SGD(ddp_model.parameters(), lr=0.01)
 
     ddp_model.train()
-    for epoch in range(10):
+    for epoch in range(3):
         sampler.set_epoch(epoch)
         epoch_loss = 0.0
         num_batches = 0

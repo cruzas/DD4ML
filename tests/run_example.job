@@ -2,11 +2,11 @@
 #SBATCH --job-name=example
 #SBATCH --output=./log_files/example.out
 #SBATCH --error=./log_files/example.err
-#SBATCH --nodes=1
+#SBATCH --nodes=2
 #SBATCH --account=c24
 #SBATCH --time=00:30:00
 #SBATCH --ntasks-per-core=1
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:4
 #SBATCH --hint=nomultithread
