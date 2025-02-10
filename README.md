@@ -41,6 +41,8 @@ wandb server start
 python3 ./tests/run_config_file.py --sweep_config="./tests/config_files/config_sgd.yaml"
 ```
 
+Note: it is **not** necessary to use wandb. For more details, look at ```./tests/README.md```
+
 ## Structure
 This library is meant to be general. 
 
