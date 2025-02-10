@@ -7,6 +7,11 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from src.utils import detect_environment, prepare_distributed_environment
+
+print(f"Cuda available: {torch.cuda.is_available()}")  # Should print True if CUDA is available
+print(f"Torch version: {torch.__version__}")  # Check if it's a CUDA version
+
 class SimpleCNN(nn.Module):
     def __init__(self):
         super(SimpleCNN, self).__init__()
@@ -29,15 +34,15 @@ class SimpleCNN(nn.Module):
         x = self.features(x)
         return self.classifier(x)
 
-def train():
+def main(rank, master_addr, master_port, world_size, args=None):
+    # Initialize the distributed environment
+    prepare_distributed_environment(rank, master_addr, master_port, world_size, is_cuda_enabled=torch.cuda.is_available())
+    
     # Environment variables set by torchrun
-    rank = int(os.environ['RANK'])
-    world_size = int(os.environ['WORLD_SIZE'])
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
     local_rank = int(os.environ['LOCAL_RANK'])
     torch.cuda.set_device(local_rank)
-
-    # Initialize process group using the env:// method.
-    dist.init_process_group(backend='nccl', init_method='env://')
 
     # Print global and local rank
     print(f'Global rank: {rank}, Local rank: {local_rank}')
@@ -70,4 +75,13 @@ def train():
     dist.destroy_process_group()
 
 if __name__ == '__main__':
-    train()
+    # Environment we are in
+    environment = detect_environment()
+
+    # For distributed environment initialization
+    rank = None
+    master_addr = None 
+    master_port = None
+    world_size = None
+    print("Code being executed on a cluster...")
+    main(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size)

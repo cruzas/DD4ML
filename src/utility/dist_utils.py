@@ -48,6 +48,8 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
                 'RANK': os.environ.get('SLURM_NODEID', '0'),
                 'MASTER_ADDR': subprocess.getoutput(f"scontrol show hostname {os.environ.get('SLURM_NODELIST')} | head -n1")
             })
+            rank = int(env_vars['RANK'])
+            world_size = int(env_vars['WORLD_SIZE'])
         else:  # Local environment
             env_vars.update({
                 'MASTER_ADDR': master_addr or "localhost",

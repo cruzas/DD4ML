@@ -33,6 +33,12 @@ cd DD4ML
 python3 -m pip install .
 ```
 
+## CUDA Support
+For GPU support, install the appropriate CUDA-enabled version of PyTorch before installing this package. For example, to install PyTorch with CUDA 12.4:
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+```
+
 ## Usage
 Look into the tests folder. For example, you can run:
 ```bash
