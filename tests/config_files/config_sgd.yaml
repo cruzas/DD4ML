@@ -6,7 +6,7 @@ parameters:
   learning_rate:
     values: [0.01]
   batch_size:
-    values: [250, 500]
+    values: [250]
   epochs: 
     value: 2 # used for any other model other than LLMs
   max_iters:
