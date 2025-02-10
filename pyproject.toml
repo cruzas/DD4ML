@@ -3,6 +3,7 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
+dynamic = ["version"] 
 name = "DD4ML"
 version = "0.1.0"
 description = "A PyTorch-based project for domain decomposition methods for machine learning."
@@ -32,3 +33,4 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["*"]

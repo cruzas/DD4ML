@@ -1,0 +1,27 @@
+#!/bin/bash
+#SBATCH --job-name=example
+#SBATCH --output=./log_files/example.out
+#SBATCH --error=./log_files/example.err
+#SBATCH --nodes=1
+#SBATCH --account=c24
+#SBATCH --time=00:30:00
+#SBATCH --ntasks-per-core=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --gres=gpu:4
+#SBATCH --hint=nomultithread
+#SBATCH --constraint=gpu
+#SBATCH --partition=debug
+#SBATCH --exclusive
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export NCCL_DEBUG=INFO
+export NCCL_IB_HCA=ipogif0
+export NCCL_IB_CUDA_SUPPORT=1
+
+RUNPATH=/capstor/scratch/cscs/scruzale/DD4ML/tests
+cd $RUNPATH || exit
+
+# Run the training script
+srun python3 -u example.py 
+echo "Test done $(date)"
