@@ -22,6 +22,12 @@ export NCCL_IB_CUDA_SUPPORT=1
 RUNPATH=/capstor/scratch/cscs/scruzale/DD4ML/tests
 cd $RUNPATH || exit
 
+source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
+module load cray/23.12
+source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
+module load cray-python/3.11.5
+source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
+
 # Run the training script
-srun python3 -u example.py 
+srun /opt/cray/pe/python/3.11.5/bin/python -u example.py 
 echo "Test done $(date)"

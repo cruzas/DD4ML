@@ -1,0 +1,11 @@
+Unloading the cpe module is insufficient to restore the system defaults.
+Please run 'source
+/opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.[csh|sh]'. 
+Traceback (most recent call last):
+  File "/capstor/scratch/cscs/scruzale/DD4ML/tests/example.py", line 10, in <module>
+    from src.utils import detect_environment, prepare_distributed_environment
+  File "/capstor/scratch/cscs/scruzale/DD4ML/src/utils.py", line 7, in <module>
+    import wandb
+ModuleNotFoundError: No module named 'wandb'
+srun: error: nid005844: task 0: Exited with exit code 1
+srun: Terminating StepId=385257.0
