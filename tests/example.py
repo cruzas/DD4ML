@@ -56,7 +56,7 @@ def main(rank, master_addr, master_port, world_size, args=None):
     ])
     dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
     sampler = torch.utils.data.distributed.DistributedSampler(dataset, num_replicas=world_size, rank=rank)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=128, sampler=sampler)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=250, sampler=sampler)
 
     criterion = nn.CrossEntropyLoss().cuda(local_rank)
     optimizer = optim.SGD(ddp_model.parameters(), lr=0.01)
@@ -64,6 +64,8 @@ def main(rank, master_addr, master_port, world_size, args=None):
     ddp_model.train()
     for epoch in range(10):
         sampler.set_epoch(epoch)
+        epoch_loss = 0.0
+        num_batches = 0
         for inputs, targets in dataloader:
             inputs = inputs.cuda(local_rank, non_blocking=True)
             targets = targets.cuda(local_rank, non_blocking=True)
@@ -71,6 +73,19 @@ def main(rank, master_addr, master_port, world_size, args=None):
             loss = criterion(ddp_model(inputs), targets)
             loss.backward()
             optimizer.step()
+
+            epoch_loss += loss.item()
+            num_batches += 1
+
+        # Reduce epoch loss and batch count across all processes
+        epoch_loss_tensor = torch.tensor(epoch_loss, device=local_rank)
+        num_batches_tensor = torch.tensor(num_batches, device=local_rank)
+        dist.all_reduce(epoch_loss_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(num_batches_tensor, op=dist.ReduceOp.SUM)
+        average_loss = epoch_loss_tensor.item() / num_batches_tensor.item()
+
+        if rank == 0:
+            print(f"Epoch {epoch+1}, Average Loss: {average_loss:.4f}")
 
     dist.destroy_process_group()
 
