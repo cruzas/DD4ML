@@ -17,13 +17,13 @@ try:
 except ImportError:
     WANDB_AVAILABLE = False
 
-def parse_cmd_args(APTS=True):
+def parse_cmd_args(APTS=False):
     parser = argparse.ArgumentParser("Running configuration file (or defaults if no wandb file is provided)...")
     parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
-    parser.add_argument("--work_dir", type=str, default="../../saved_networks/wandb/", help="Directory to save models")
+    parser.add_argument("--work_dir", type=str, default="../saved_networks/wandb/", help="Directory to save models")
     
     if not APTS:
-        parser.add_argument("--sweep_config", type=str, default="config_sgd.yaml", help="Sweep configuration file") 
+        parser.add_argument("--sweep_config", type=str, default="./config_files/config_sgd.yaml", help="Sweep configuration file") 
         parser.add_argument("--project", type=str, default="sgd_hyperparameter_sweep", help="Wandb project")
         parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
         parser.add_argument("--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper")
@@ -37,7 +37,7 @@ def parse_cmd_args(APTS=True):
         parser.add_argument("--num_subdomains", type=int, default=2, help="Number of subdomains")
         parser.add_argument("--num_replicas_per_subdomain", type=int, default=1, help="Number of replicas per subdomain")
     
-    parser.add_argument("--trials", type=int, default=2, help="Number of trials to run")
+    parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
     parser.add_argument("--dataset_name", type=str, default="mnist", help="Dataset name")
     parser.add_argument("--model_name", type=str, default="simple_cnn", help="Model name")

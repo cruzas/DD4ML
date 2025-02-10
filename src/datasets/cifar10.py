@@ -12,7 +12,6 @@ class CIFAR10Dataset(BaseDataset):
     @staticmethod
     def get_default_config():
         C = BaseDataset.get_default_config()
-        C.root = '../rawdata/'
         C.train = True
         C.download = True
         C.input_channels = 3

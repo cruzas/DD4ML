@@ -4,16 +4,18 @@ metric:
   goal: minimize
 parameters:
   batch_size:
-    values: [250, 500]
+    values: [64]
   epochs: 
-    value: 3
+    value: 2
+  max_iters:
+    values: [10]
   optimizer: 
     values: ["apts"]
   learning_rate: 
     values: [0.01]
   dataset_name: 
-    values: ["mnist"]
+    values: ["tinyshakespeare"]
   model_name: 
-    values: ["big_cnn"]
+    values: ["mingpt"]
   criterion:
-    values: ["cross_entropy"]
+    values: ["cross_entropy_transformers"]

@@ -32,3 +32,5 @@ Thumbs.db
 /src/rawdata
 /tests/rawdata
 /tests/wandb/wandb
+/tests/wandb
+/wandb

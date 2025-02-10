@@ -1,0 +1,21 @@
+method: grid
+metric:
+  name: train_loss
+  goal: minimize
+parameters:
+  learning_rate:
+    values: [0.01]
+  batch_size:
+    values: [250, 500]
+  epochs: 
+    value: 2 # used for any other model other than LLMs
+  max_iters:
+    value: 10 # used for LLMs
+  optimizer: 
+    values: ["sgd"]
+  dataset_name: 
+    values: ["tinyshakespeare"] # ["mnist"] # 
+  model_name: 
+    values: ["mingpt"] # ["simple_cnn"] # 
+  criterion:
+    values: ["cross_entropy_transformers"] # ["cross_entropy"]  
