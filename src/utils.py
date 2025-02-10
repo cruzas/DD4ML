@@ -9,8 +9,12 @@ import wandb
 from src.utility.dist_utils import *
 from src.utility.mingpt_utils import *
 from src.utility.ml_utils import *
-from src.utility.wandb_utils import *
-
+# Check whether wandb exists
+try:
+    from src.utility.wandb_utils import *
+except ImportError:
+    pass
+    
 # Global mapping dictionaries
 DATASET_MAP = {
     "mnist": ("src.datasets.mnist", "MNISTDataset"),
