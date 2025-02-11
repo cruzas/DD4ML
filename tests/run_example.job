@@ -28,6 +28,15 @@ source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
 module load cray-python/3.11.5
 source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
 
+# Launch WandB server on master node
+if [ "$SLURM_NODEID" -eq "0" ]; then
+    wandb server init --port 8080 &
+    sleep 10  # Allow time for the server to start
+fi
+
+# Set the WandB server URL for all nodes (adjust hostname as needed)
+export WANDB_BASE_URL="http://$(hostname -s):8080"
+
 # Run the training script
 srun /opt/cray/pe/python/3.11.5/bin/python -u example.py 
 echo "Test done $(date)"
