@@ -13,7 +13,7 @@ The code uses minGPT and builds from it: https://github.com/karpathy/minGPT/tree
 * Prof. Dr. Rolf Krause (2, 3); rolf.krause@kaust.edu.sa
 
 ## Collaborators
-* Alena Kopaničáková (6)
+* Prof. Dr. Alena Kopaničáková (6)
 
 ## Universities
 1. Università della Svizzera italiana
