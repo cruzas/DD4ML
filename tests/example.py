@@ -1,4 +1,5 @@
 import os
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -9,8 +10,16 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from src.utils import detect_environment, prepare_distributed_environment
 
-print(f"Cuda available: {torch.cuda.is_available()}")  # Should print True if CUDA is available
-print(f"Torch version: {torch.__version__}")  # Check if it's a CUDA version
+print(f"Cuda available: {torch.cuda.is_available()}")
+print(f"Torch version: {torch.__version__}")
+
+# Try to import wandb
+try:
+    import wandb
+    wandb_available = True
+except ImportError:
+    wandb_available = False
+    print("WandB is not available. Logging to stdout.")
 
 class SimpleCNN(nn.Module):
     def __init__(self):
@@ -38,17 +47,21 @@ def main(rank, master_addr, master_port, world_size, args=None):
     # Initialize the distributed environment
     prepare_distributed_environment(rank, master_addr, master_port, world_size, is_cuda_enabled=torch.cuda.is_available())
     
-    # Environment variables set by torchrun
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     local_rank = int(os.environ['LOCAL_RANK'])
     torch.cuda.set_device(local_rank)
 
-    # Print number of GPUs available on this device
     print(f"Number of GPUs available: {torch.cuda.device_count()}")
+    print(f"Global rank: {rank}, Local rank: {local_rank}")
 
-    # Print global and local rank
-    print(f'Global rank: {rank}, Local rank: {local_rank}')
+    # Initialize wandb if available on rank 0
+    if wandb_available and rank == 0:
+        wandb.init(project="my_project", config={
+            "epochs": 3,
+            "batch_size": 250,
+            "learning_rate": 0.01
+        })
 
     model = SimpleCNN().cuda(local_rank)
     ddp_model = DDP(model, device_ids=[local_rank])
@@ -89,14 +102,16 @@ def main(rank, master_addr, master_port, world_size, args=None):
 
         if rank == 0:
             print(f"Epoch {epoch+1}, Average Loss: {average_loss:.4f}")
+            if wandb_available:
+                wandb.log({"epoch": epoch+1, "average_loss": average_loss})
 
     dist.destroy_process_group()
 
-if __name__ == '__main__':
-    # Environment we are in
-    environment = detect_environment()
+    if wandb_available and rank == 0:
+        wandb.finish()
 
-    # For distributed environment initialization
+if __name__ == '__main__':
+    environment = detect_environment()
     rank = None
     master_addr = None 
     master_port = None
