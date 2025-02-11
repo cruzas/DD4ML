@@ -5,7 +5,7 @@ The code uses minGPT and builds from it: https://github.com/karpathy/minGPT/tree
 
 ## Authors
 * Samuel A. Cruz Alegría (1, 3); cruzas@usi.ch.
-* Ken Trotti (2); ken.trotti@usi.ch
+* Dr. Ken Trotti (2); ken.trotti@usi.ch
 * Marc Salvadó Benasco (1, 3, 4); marc.salvado@usi.ch
 * Shega Likaj (1, 2, 3); shega.likaj@usi.ch
 * Bindi Capriqi (1, 2, 3); bindi.capriqi@kaust.edu.sa
