@@ -102,13 +102,9 @@ class Trainer():
                                                             shuffle=False, 
                                                             num_workers=config.num_workers, 
                                                             pin_memory=True)
-            self.test_loader = GeneralizedDistributedDataLoader(model_handler=config.model_handler,
-                                                           dataset=self.test_dataset, 
-                                                           batch_size=config.batch_size, 
-                                                           shuffle=False, 
-                                                           num_workers=config.num_workers, 
-                                                           pin_memory=True)
+            self.test_loader = DataLoader(self.test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, pin_memory=True)
         else:
+            # TODO: Make sure this also works in a standard PyTorch distributed setting 
             self.train_loader = DataLoader(self.train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, pin_memory=True)
             self.test_loader = DataLoader(self.test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, pin_memory=True)
 
@@ -158,37 +154,51 @@ class Trainer():
         self.epoch_time = tnow
     
     def compute_accuracy(self):
-        model, config = self.model, self.config
-
+        model = self.model
         model.eval()
         correct = 0
         total = 0
+        accuracy = 0
+        
+        cond_std = not hasattr(model, 'model_handler')
+        cond_d_a = hasattr(model, 'model_handler') and model.model_handler.is_last_stage() 
+        cond_d_b = False
+        if not cond_std:
+            first_last_stage_rank = model.model_handler.get_stage_ranks(stage_name='last', mode='global')[0]
+            cond_d_b = dist.get_rank() == first_last_stage_rank
         with torch.no_grad():
-            for batch_idx, (x, y) in enumerate(self.test_loader):
+            for _, (x, y) in enumerate(self.test_loader):
                 x, y = x.to(self.device), y.to(self.device)
                 outputs = model(x)
-                # Check if outputs is a list of length 1
-                if len(outputs) == 1:
+                
+                if not cond_std:
+                    assert len(outputs) == 1 
                     outputs = outputs[0]
-                outputs = outputs.to(x.device)
+                    
+                if cond_std or (cond_d_a and cond_d_b):
+                    outputs = outputs.to(x.device)
+                    _, predicted = torch.max(outputs, 1)
+                    total += y.size(0)
+                    correct += (predicted == y).sum().item()
 
-                # Handle the case where outputs is a list (e.g., due to chunked data)
-                if isinstance(outputs, list):
-                    outputs = torch.stack(outputs).mean(dim=0)  # Average over chunks
+            if not cond_std:
+                # Broadcast correct and total to all ranks
+                correct = torch.tensor(correct, device=model.tensor_device)
+                total = torch.tensor(total, device=model.tensor_device)
+                dist.broadcast(correct, src=first_last_stage_rank, async_op=False)
+                dist.broadcast(total, src=first_last_stage_rank, async_op=False)
+                correct = correct.item()
+                total = total.item()
+                
+            self.accuracy = 100.0 * correct / total
 
-                _, predicted = torch.max(outputs, 1)
-                total += y.size(0)
-                correct += (predicted == y).sum().item()
-
-        self.accuracy = 100.0 * correct / total
-    
     def run_by_epoch(self):
-        model, config = self.model, self.config
+        config = self.config
         
         self.total_start_time = time.time()
         self.epoch_num = 0
         self.epoch_time = time.time()
-        for epoch in range(config.epochs+1):
+        for _ in range(config.epochs+1):
             self.compute_epoch_loss()
             self.compute_accuracy()
             self.running_time = time.time() - self.total_start_time
