@@ -21,8 +21,7 @@ class BaseDataset(Dataset, ABC):
     def __init__(self, config, data, transform=None):
         self.config = config
         self.data = data
-        if transform is not None:
-            self.transform = transform
+        self.transform = transform
 
     @abstractmethod
     def __len__(self):
