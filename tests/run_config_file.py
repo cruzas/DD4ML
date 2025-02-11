@@ -18,30 +18,16 @@ except ImportError:
 
 def parse_cmd_args(APTS=False):
     parser = argparse.ArgumentParser("Running configuration file...")
+    # Always-added arguments.
     parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
     parser.add_argument("--work_dir", type=str, default="../saved_networks/wandb/", help="Directory to save models")
-    
-    # Default parameters differ by APTS flag.
-    defaults = {
-        "sweep_config": "./config_files/config_apts.yaml" if APTS else "./config_files/config_sgd.yaml",
-        "project": "apts_tests" if APTS else "sgd_hyperparameter_sweep",
-        "num_stages": 2, # if APTS else 1,
-        "use_pmw": True,# True if APTS else False,
-        "num_subdomains": 1 if APTS else 1,
-        "num_replicas_per_subdomain": 1
-    }
-    help_msgs = {
-        "sweep_config": "Sweep configuration file",
-        "project": "Wandb project",
-        "num_stages": "Number of stages",
-        "use_pmw": "Use Parallel Model Wrapper",
-        "num_subdomains": "Number of subdomains",
-        "num_replicas_per_subdomain": "Number of replicas per subdomain"
-    }
-    for arg, default in defaults.items():
-        parser.add_argument(f"--{arg}", type=type(default), default=default, help=help_msgs[arg])
-    
-    # Common arguments.
+    parser.add_argument("--sweep_config", type=str,
+                        default=("./config_files/config_apts.yaml" if APTS else "./config_files/config_sgd.yaml"),
+                        help="Sweep configuration file")
+    parser.add_argument("--project", type=str,
+                        default=("apts_tests" if APTS else "sgd_hyperparameter_sweep"),
+                        help="Wandb project")
+    parser.add_argument("--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper")
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
     parser.add_argument("--dataset_name", type=str, default="mnist", help="Dataset name")
@@ -51,10 +37,22 @@ def parse_cmd_args(APTS=False):
     parser.add_argument("--learning_rate", type=float, default=0.01, help="Learning rate")
     parser.add_argument("--metric", type=str, choices=["loss", "accuracy"], default="loss",
                         help="Metric to determine best learning rate")
-    parser.add_argument("--subdomain_optimizer", type=str, default="sgd", help="Subdomain optimizer")
-    parser.add_argument("--global_optimizer", type=str, default="trust_region", help="Global optimizer")
-    parser.add_argument("--max_subdomain_iters", type=int, default=3, help="Max iterations for subdomain optimizer")
-    
+
+    # Preliminary parse to check conditions.
+    args, _ = parser.parse_known_args()
+
+    # Add PMW-related arguments only if use_pmw is True.
+    if args.use_pmw:
+        parser.add_argument("--num_stages", type=int, default=(2 if APTS else 1), help="Number of stages")
+        parser.add_argument("--num_subdomains", type=int, default=1, help="Number of subdomains")
+        parser.add_argument("--num_replicas_per_subdomain", type=int, default=1, help="Number of replicas per subdomain")
+
+    # Add APTS-related arguments only if "apts" is in the sweep_config string.
+    if "apts" in args.sweep_config.lower():
+        parser.add_argument("--subdomain_optimizer", type=str, default="sgd", help="Subdomain optimizer")
+        parser.add_argument("--global_optimizer", type=str, default="trust_region", help="Global optimizer")
+        parser.add_argument("--max_subdomain_iters", type=int, default=3, help="Max iterations for subdomain optimizer")
+
     return parser.parse_args()
 
 def main(rank, master_addr, master_port, world_size, args):
@@ -112,9 +110,11 @@ def main(rank, master_addr, master_port, world_size, args):
 def run_local(args, sweep_config):
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = (args["num_subdomains"] *
-                  args["num_replicas_per_subdomain"] *
-                  args["num_stages"])
+    world_size = 1
+    if args["use_pmw"]:
+        world_size = (args["num_subdomains"] *
+                    args["num_replicas_per_subdomain"] *
+                    args["num_stages"])
     
     def spawn_training():
         mp.spawn(main, args=(master_addr, master_port, world_size, args),
@@ -129,10 +129,11 @@ def run_local(args, sweep_config):
 def run_cluster(args, sweep_config):
     prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None)
     rank = dist.get_rank()
-    world_size = (args["num_subdomains"] *
-                  args["num_replicas_per_subdomain"] *
-                  args["num_stages"])
-    
+    world_size = dist.get_world_size()
+    if args["use_pmw"]:
+        assert world_size == (args["num_subdomains"] *
+                            args["num_replicas_per_subdomain"] *
+                            args["num_stages"]), "World size does not match the number of subdomains, replicas, and stages specified."
     if WANDB_AVAILABLE and rank == 0:
         sweep_id = wandb.sweep(sweep=sweep_config, project=args["project"])
         wandb.agent(sweep_id,
