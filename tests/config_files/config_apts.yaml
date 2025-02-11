@@ -14,8 +14,11 @@ parameters:
   learning_rate: 
     values: [0.01]
   dataset_name: 
-    values: ["tinyshakespeare"]
+    values: ["mnist"] 
+    # values: ["tinyshakespeare"]
   model_name: 
-    values: ["mingpt"]
+    values: ["simple_cnn"] 
+    # values: ["mingpt"]
   criterion:
-    values: ["cross_entropy_transformers"]
+    values: ["cross_entropy"] # ["cross_entropy_transformers"]
+    # values: ["cross_entropy_transformers"]

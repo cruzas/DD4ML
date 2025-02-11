@@ -16,7 +16,7 @@ try:
 except ImportError:
     WANDB_AVAILABLE = False
 
-def parse_cmd_args(APTS=True):
+def parse_cmd_args(APTS=False):
     parser = argparse.ArgumentParser("Running configuration file...")
     parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
     parser.add_argument("--work_dir", type=str, default="../saved_networks/wandb/", help="Directory to save models")
@@ -25,9 +25,9 @@ def parse_cmd_args(APTS=True):
     defaults = {
         "sweep_config": "./config_files/config_apts.yaml" if APTS else "./config_files/config_sgd.yaml",
         "project": "apts_tests" if APTS else "sgd_hyperparameter_sweep",
-        "num_stages": 2 if APTS else 1,
-        "use_pmw": True if APTS else False,
-        "num_subdomains": 2 if APTS else 1,
+        "num_stages": 2, # if APTS else 1,
+        "use_pmw": True,# True if APTS else False,
+        "num_subdomains": 1 if APTS else 1,
         "num_replicas_per_subdomain": 1
     }
     help_msgs = {
@@ -102,8 +102,8 @@ def main(rank, master_addr, master_port, world_size, args):
                 "loss": trainer.loss,
                 "running_time": trainer.running_time
             })
-        # if trainer.iter_num % 10 == 0:
-        dprint(f"iter_dt {trainer.iter_dt:.2f}s; iter {trainer.iter_num}: train loss {trainer.loss:.5f}")
+        if trainer.iter_num % 10 == 0:
+            dprint(f"iter_dt {trainer.iter_dt:.2f}s; iter {trainer.iter_num}: train loss {trainer.loss:.5f}")
     
     generic_run(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size,
                 args=trial_args, wandb_config=wandb_config if use_wandb else None,

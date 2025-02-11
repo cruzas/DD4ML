@@ -14,8 +14,11 @@ parameters:
   optimizer: 
     values: ["sgd"]
   dataset_name: 
-    values: ["tinyshakespeare"] # ["mnist"] # 
+    values: ["mnist"]
+    # values: ["tinyshakespeare"] 
   model_name: 
-    values: ["mingpt"] # ["simple_cnn"] # 
+    values: ["simple_cnn"]
+    # values: ["mingpt"] 
   criterion:
-    values: ["cross_entropy_transformers"] # ["cross_entropy"]  
+    values: ["cross_entropy"] 
+    # values: ["cross_entropy_transformers"] 
