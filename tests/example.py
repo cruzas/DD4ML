@@ -57,12 +57,15 @@ def main(rank, master_addr, master_port, world_size, args=None):
 
     # Initialize wandb if available on rank 0
     if wandb_available and rank == 0:
-        wandb.init(project="my_project", config={
+        wandb.init(project="example", config={
             "epochs": 3,
             "batch_size": 250,
             "learning_rate": 0.01
         })
 
+    if rank == 0:
+        print("Finished with wandb.init...")
+        
     model = SimpleCNN().cuda(local_rank)
     ddp_model = DDP(model, device_ids=[local_rank])
 
