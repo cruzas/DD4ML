@@ -5,7 +5,7 @@ The code uses minGPT and builds from it: https://github.com/karpathy/minGPT/tree
 
 ## Authors
 * Samuel A. Cruz Alegría (1, 3); cruzas@usi.ch.
-* Ken Trotti (2); ken.trotti@usi.ch
+* Dr. Ken Trotti (2); ken.trotti@usi.ch
 * Marc Salvadó Benasco (1, 3, 4); marc.salvado@usi.ch
 * Shega Likaj (1, 2, 3); shega.likaj@usi.ch
 * Bindi Capriqi (1, 2, 3); bindi.capriqi@kaust.edu.sa
@@ -13,7 +13,7 @@ The code uses minGPT and builds from it: https://github.com/karpathy/minGPT/tree
 * Prof. Dr. Rolf Krause (2, 3); rolf.krause@kaust.edu.sa
 
 ## Collaborators
-* Alena Kopaničáková (6)
+* Prof. Dr. Alena Kopaničáková (6)
 
 ## Universities
 1. Università della Svizzera italiana
@@ -31,6 +31,12 @@ See ``pyproject.toml`` file.
 git clone https://github.com/cruzas/DD4ML.git
 cd DD4ML
 python3 -m pip install .
+```
+
+## CUDA Support
+For GPU support, install the appropriate CUDA-enabled version of PyTorch before installing this package. For example, to install PyTorch with CUDA 12.4:
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
 ## Usage

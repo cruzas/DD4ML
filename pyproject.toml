@@ -17,7 +17,7 @@ authors = [
 ]
 license = { file = "LICENSE" }
 dependencies = [
-    "torch",
+    "torch", # Default CPU version
     "torchvision",
     "torchaudio",
     "matplotlib",
@@ -30,5 +30,6 @@ dependencies = [
 
 ]
 
-[tool.setuptools]
-packages = ["src"]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]

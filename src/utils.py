@@ -4,13 +4,18 @@ import pandas as pd
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-import wandb
 
+import wandb
 from src.utility.dist_utils import *
 from src.utility.mingpt_utils import *
 from src.utility.ml_utils import *
-from src.utility.wandb_utils import *
 
+# Check whether wandb exists
+try:
+    from src.utility.wandb_utils import *
+except ImportError:
+    pass
+    
 # Global mapping dictionaries
 DATASET_MAP = {
     "mnist": ("src.datasets.mnist", "MNISTDataset"),
@@ -75,7 +80,7 @@ def generic_run(rank=None, master_addr=None, master_port=None, world_size=None,
         wandb_config = {}
 
     # Load config, model, and trainer with synchronized hyperparameters
-    config, model, trainer = get_config_model_and_trainer(args, wandb_config)
+    config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)
 
     if epoch_end_callback and trainer.config.run_by_epoch:
@@ -125,6 +130,33 @@ def get_config(dataset_name: str, model_name: str, optimizer: str = "sgd") -> Cf
     C.trainer = Trainer.get_default_config()
     return C
 
+def remove_keys(config, keys_to_remove):
+    if isinstance(config, dict):
+        for k in keys_to_remove:
+            if k in config:
+                del config[k]
+        for k, v in list(config.items()):  # Use list to avoid dictionary size change during iteration
+            config[k] = remove_keys(v, keys_to_remove)
+    elif isinstance(config, CfgNode):
+        for k in keys_to_remove:
+            if k in config.__dict__:  # Check in config.__dict__ for CfgNode
+                del config.__dict__[k]
+        for k, v in list(config.__dict__.items()):  # Iterate over CfgNode's attributes
+            config.__dict__[k] = remove_keys(v, keys_to_remove)
+    return config
+
+def make_std_config(config):
+    # Make sure that we have a standard configuration
+    use_pmw = getattr(config.trainer, "use_pmw", False)
+    if not use_pmw:
+        keys_to_remove = ["num_stages", "num_subdomains", "num_replicas_per_subdomain", "model_handler"]
+        # Recursively remove every key from keys_to_remove from config and any subfield of config, e.g. config.trainer
+        config = remove_keys(config, keys_to_remove)
+    
+    if config.optimizer != "apts":
+        keys_to_remove = ["subdomain_optimizer", "subdomain_optimizer_args", "global_optimizer", "global_optimizer_args"]
+        config = remove_keys(config, keys_to_remove)
+    return config
 
 def get_config_model_and_trainer(args, wandb_config):
     from src.pmw.model_handler import ModelHandler
@@ -162,9 +194,9 @@ def get_config_model_and_trainer(args, wandb_config):
     if getattr(train_dataset, 'block_size', None) is not None:
         all_config.model.block_size = train_dataset.get_block_size()
 
-    # if getattr(all_config.model, 'n_layer', None) is not None:
-    #     BaseModel.n_layer = all_config.model.n_layer
-
+    # Clean up config 
+    all_config = make_std_config(all_config)
+    
     # Model instantiation and optional parallelization
     if all_config.trainer.use_pmw and hasattr(all_config.model.model_class, "as_model_dict"):
         dprint("Using Parallel Model Wrapper and Model Handler")
@@ -181,7 +213,7 @@ def get_config_model_and_trainer(args, wandb_config):
         model = ParallelizedModel(model_handler, sample=sample_input)
     else:
         model = all_config.model.model_class(all_config.model)
-
+        
     dprint(model)
 
     # Criterion selection using CRITERION_MAP

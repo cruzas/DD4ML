@@ -41,13 +41,25 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
         env_vars = {}
 
         if comp_env != 'local':  # SLURM cluster environment
-            env_vars.update({
-                'MASTER_PORT': '29501',
-                'WORLD_SIZE': os.environ.get('SLURM_NNODES', '1'),
-                'LOCAL_RANK': '0',
-                'RANK': os.environ.get('SLURM_NODEID', '0'),
-                'MASTER_ADDR': subprocess.getoutput(f"scontrol show hostname {os.environ.get('SLURM_NODELIST')} | head -n1")
-            })
+            if is_cuda_enabled and torch.cuda.device_count() > 1:
+                print("Multi-GPU setup detected.")
+                env_vars.update({
+                    'MASTER_PORT': '29501',  # Consider using a free port instead.
+                    'WORLD_SIZE': os.environ.get('SLURM_NTASKS', '1'),
+                    'LOCAL_RANK': os.environ.get('SLURM_LOCALID', '0'),
+                    'RANK': os.environ.get('SLURM_PROCID', '0'),
+                    'MASTER_ADDR': subprocess.getoutput(f"scontrol show hostname {os.environ.get('SLURM_NODELIST')} | head -n1")
+                })
+            else:
+                env_vars.update({
+                    'MASTER_PORT': '29501',
+                    'WORLD_SIZE': os.environ.get('SLURM_NNODES', '1'),
+                    'LOCAL_RANK': os.environ.get('SLURM_LOCALID', '0'),
+                    'RANK': os.environ.get('SLURM_NODEID', '0'),
+                    'MASTER_ADDR': subprocess.getoutput(f"scontrol show hostname {os.environ.get('SLURM_NODELIST')} | head -n1")
+                })
+            rank = int(env_vars['RANK'])
+            world_size = int(env_vars['WORLD_SIZE'])
         else:  # Local environment
             env_vars.update({
                 'MASTER_ADDR': master_addr or "localhost",

@@ -34,3 +34,5 @@ Thumbs.db
 /tests/wandb/wandb
 /tests/wandb
 /wandb
+tests/log_files/
+/rawdata
