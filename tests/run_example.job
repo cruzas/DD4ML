@@ -3,7 +3,6 @@
 #SBATCH --output=./log_files/example.out
 #SBATCH --error=./log_files/example.err
 #SBATCH --nodes=2
-#SBATCH --account=c24
 #SBATCH --time=00:30:00
 #SBATCH --ntasks-per-core=1
 #SBATCH --ntasks-per-node=4
@@ -14,28 +13,32 @@
 #SBATCH --partition=debug
 #SBATCH --exclusive
 
+# Source the environment file
+source ~/.slurm_env
+
+# Use the account name from the environment
+#SBATCH --account=$SLURM_ACCOUNT
+
+# Environment variables
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export NCCL_DEBUG=INFO
 export NCCL_IB_HCA=ipogif0
 export NCCL_IB_CUDA_SUPPORT=1
 
+# Path to the script
 RUNPATH=/capstor/scratch/cscs/scruzale/DD4ML/tests
 cd $RUNPATH || exit
 
+# Load required modules
 source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
 module load cray/23.12
 source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
 module load cray-python/3.11.5
 source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
 
-# Launch WandB server on master node
-if [ "$SLURM_NODEID" -eq "0" ]; then
-    wandb server init --port 8080 &
-    sleep 10  # Allow time for the server to start
-fi
-
-# Set the WandB server URL for all nodes (adjust hostname as needed)
-export WANDB_BASE_URL="http://$(hostname -s):8080"
+# Source the WandB environment
+source ~/.wandb_env
+export WANDB_MODE=online
 
 # Run the training script
 srun /opt/cray/pe/python/3.11.5/bin/python -u example.py 
