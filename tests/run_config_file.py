@@ -1,6 +1,5 @@
 import argparse
 import os
-
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -16,7 +15,7 @@ try:
 except ImportError:
     WANDB_AVAILABLE = False
 
-def parse_cmd_args(APTS=False):
+def parse_cmd_args(APTS=True):
     parser = argparse.ArgumentParser("Running configuration file...")
     
     # Check if WANDB_MODE is set to 'online'
@@ -33,7 +32,7 @@ def parse_cmd_args(APTS=False):
     parser.add_argument("--project", type=str,
                         default=("apts_tests" if APTS else "sgd_hyperparameter_sweep"),
                         help="Wandb project")
-    parser.add_argument("--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper")
+    parser.add_argument("--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper")
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
     parser.add_argument("--dataset_name", type=str, default="mnist", help="Dataset name")
@@ -50,7 +49,7 @@ def parse_cmd_args(APTS=False):
     # Add PMW-related arguments only if use_pmw is True.
     if args.use_pmw:
         parser.add_argument("--num_stages", type=int, default=(2 if APTS else 1), help="Number of stages")
-        parser.add_argument("--num_subdomains", type=int, default=1, help="Number of subdomains")
+        parser.add_argument("--num_subdomains", type=int, default=2, help="Number of subdomains")
         parser.add_argument("--num_replicas_per_subdomain", type=int, default=1, help="Number of replicas per subdomain")
 
     # Add APTS-related arguments only if "apts" is in the sweep_config string.
@@ -66,7 +65,7 @@ def main(rank, master_addr, master_port, world_size, args):
     if not dist.is_initialized():
         prepare_distributed_environment(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size, is_cuda_enabled=torch.cuda.is_available())
     use_wandb = WANDB_AVAILABLE
-    print(f"Rank {rank}/{world_size - 1} ready. Using wandb: {use_wandb}")
+    print(f"Rank {rank}/{world_size - 1} ready. Using wandb: {use_wandb}. Number of GPUs: {torch.cuda.device_count()}. Number of GPUs I can see {os.environ['CUDA_VISIBLE_DEVICES']}.")
     
     wandb_config = {}
     if use_wandb and rank == 0:
