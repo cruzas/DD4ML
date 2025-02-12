@@ -1,8 +1,8 @@
 ## Usage
 
-It is relatively straightforward to execute a tests.
+It is relatively straightforward to execute a test.
 
-In a ***local** environment (e.g. PC), you can, for example, run the following:
+In a ***local*** environment (e.g. PC), you can, for example, run the following:
 ```bash
 open -a Docker
 wandb server start
