@@ -26,7 +26,8 @@ export NCCL_IB_HCA=ipogif0
 export NCCL_IB_CUDA_SUPPORT=1
 
 # Set the RUNPATH to the directory of the SLURM script
-RUNPATH=<path_to_your_tests_directory>
+source ~/.tests_runpath
+RUNPATH=$TESTS_RUNPATH
 cd $RUNPATH || exit
 
 # Load required modules
