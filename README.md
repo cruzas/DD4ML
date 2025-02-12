@@ -50,7 +50,7 @@ python3 ./tests/run_config_file.py --sweep_config="./tests/config_files/config_s
 In a ***cluster*** environment, e.g. managed by SLURM, you can run:
 ```bash
 cd tests
-./submit_jobs.sh
+./submit_job.sh
 ```
 
 Note: 
