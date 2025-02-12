@@ -18,8 +18,14 @@ except ImportError:
 
 def parse_cmd_args(APTS=False):
     parser = argparse.ArgumentParser("Running configuration file...")
+    
+    # Check if WANDB_MODE is set to 'online'
+    wandb_entity_default = "cruzaslocal"
+    if os.getenv("WANDB_MODE") == "online":
+        wandb_entity_default = "cruzas-universit-della-svizzera-italiana"
+    
     # Always-added arguments.
-    parser.add_argument("--entity", type=str, default="cruzaslocal", help="Wandb entity")
+    parser.add_argument("--entity", type=str, default=wandb_entity_default, help="Wandb entity")
     parser.add_argument("--work_dir", type=str, default="../saved_networks/wandb/", help="Directory to save models")
     parser.add_argument("--sweep_config", type=str,
                         default=("./config_files/config_apts.yaml" if APTS else "./config_files/config_sgd.yaml"),
@@ -55,11 +61,10 @@ def parse_cmd_args(APTS=False):
 
     return parser.parse_args()
 
+
 def main(rank, master_addr, master_port, world_size, args):
     if not dist.is_initialized():
-        prepare_distributed_environment(rank=rank, master_addr=master_addr,
-                                        master_port=master_port, world_size=world_size,
-                                        is_cuda_enabled=torch.cuda.is_available())
+        prepare_distributed_environment(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size, is_cuda_enabled=torch.cuda.is_available())
     use_wandb = WANDB_AVAILABLE
     print(f"Rank {rank}/{world_size - 1} ready. Using wandb: {use_wandb}")
     
@@ -67,6 +72,7 @@ def main(rank, master_addr, master_port, world_size, args):
     if use_wandb and rank == 0:
         wandb.init(entity=args["entity"], project=args["project"])
         wandb_config = dict(wandb.config)
+    dist.barrier()
     wandb_config = broadcast_dict(wandb_config, src=0) if use_wandb else {}
     trial_args = {**args, **wandb_config}
     
@@ -127,7 +133,7 @@ def run_local(args, sweep_config):
         spawn_training()
 
 def run_cluster(args, sweep_config):
-    prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None)
+    prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None, is_cuda_enabled=torch.cuda.is_available())
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     if args["use_pmw"]:
