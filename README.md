@@ -34,20 +34,30 @@ python3 -m pip install .
 ```
 
 ## CUDA Support
-For GPU support, install the appropriate CUDA-enabled version of PyTorch before installing this package. For example, to install PyTorch with CUDA 12.4:
+For ***GPU support***, install the appropriate CUDA-enabled version of PyTorch before installing this package. For example, to install PyTorch with CUDA 12.4:
 ```bash
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
 ## Usage
-Look into the tests folder. For example, you can run:
+Look into the tests folder. 
+
+In a ***local*** environment (e.g. PC), for example, you can run:
 ```bash
 open -a Docker
 wandb server start
 python3 ./tests/run_config_file.py --sweep_config="./tests/config_files/config_sgd.yaml"
 ```
 
-Note: it is **not** necessary to use wandb. For more details, look at ```./tests/README.md```
+In a ***cluster*** environment, e.g. managed by SLURM, you can run:
+```bash
+cd tests
+./submit_jobs.sh
+```
+
+Note: 
+- The code works with or without wandb. If you need it, make sure to install wandb accordingly. 
+- In a cluster environment, you can set wandb usage by setting ```export USE_WANDB=1``` in ```./tests/submit_jobs.sh```.
 
 ## Structure
 This library is meant to be general. 
@@ -57,7 +67,7 @@ The src folder is structured as follows:
 - models 
 - optimizers
 - pmw
-- rawdata
+- utility
 
 You can extend the library by adding your own files in any of these modules. If you create a new folder within them, make sure to add an ```__init__.py``` file and then re-run ```python3 -m pip install .```, or ```python3 -m pip install --force-reinstall .``` if necessary. 
 
