@@ -55,7 +55,7 @@ cd tests
 
 Note: 
 - The code works with or without wandb. If you need it, make sure to install wandb accordingly. 
-- In a cluster environment, you can set wandb usage by setting ```export USE_WANDB=1``` in ```./tests/submit_jobs.sh```.
+- In a cluster environment, you can set wandb usage by setting ```export USE_WANDB=1``` in ```./tests/submit_job.sh```.
 
 ## Structure
 This library is meant to be general. 
