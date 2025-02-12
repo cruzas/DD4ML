@@ -42,5 +42,5 @@ source ~/.wandb_env
 export WANDB_MODE=online
 
 # Run the training script
-srun /opt/cray/pe/python/3.11.5/bin/python -u example.py 
+srun /opt/cray/pe/python/3.11.5/bin/python -u wandb_example.py 
 echo "Test done $(date)"
