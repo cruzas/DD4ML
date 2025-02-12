@@ -13,6 +13,14 @@ from src.utils import detect_environment, prepare_distributed_environment
 print(f"Cuda available: {torch.cuda.is_available()}")
 print(f"Torch version: {torch.__version__}")
 
+# Try to import wandb
+try:
+    import wandb
+    wandb_available = True
+except ImportError:
+    wandb_available = False
+    print("WandB is not available. Logging to stdout.")
+
 class SimpleCNN(nn.Module):
     def __init__(self):
         super(SimpleCNN, self).__init__()
@@ -37,8 +45,7 @@ class SimpleCNN(nn.Module):
 
 def main(rank, master_addr, master_port, world_size, args=None):
     # Initialize the distributed environment
-    prepare_distributed_environment(rank, master_addr, master_port, world_size,
-                                    is_cuda_enabled=torch.cuda.is_available())
+    prepare_distributed_environment(rank, master_addr, master_port, world_size, is_cuda_enabled=torch.cuda.is_available())
     
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -48,6 +55,17 @@ def main(rank, master_addr, master_port, world_size, args=None):
     print(f"Number of GPUs available: {torch.cuda.device_count()}")
     print(f"Global rank: {rank}, Local rank: {local_rank}")
 
+    # Initialize wandb if available on rank 0
+    if wandb_available and rank == 0:
+        wandb.init(project="example", config={
+            "epochs": 3,
+            "batch_size": 250,
+            "learning_rate": 0.01
+        })
+
+    if rank == 0:
+        print("Finished with wandb.init...")
+        
     model = SimpleCNN().cuda(local_rank)
     ddp_model = DDP(model, device_ids=[local_rank])
 
@@ -55,8 +73,7 @@ def main(rank, master_addr, master_port, world_size, args=None):
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
-    dataset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                           download=True, transform=transform)
+    dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
     sampler = torch.utils.data.distributed.DistributedSampler(dataset, num_replicas=world_size, rank=rank)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=250, sampler=sampler)
 
@@ -88,8 +105,13 @@ def main(rank, master_addr, master_port, world_size, args=None):
 
         if rank == 0:
             print(f"Epoch {epoch+1}, Average Loss: {average_loss:.4f}")
+            if wandb_available:
+                wandb.log({"epoch": epoch+1, "average_loss": average_loss})
 
     dist.destroy_process_group()
+
+    if wandb_available and rank == 0:
+        wandb.finish()
 
 if __name__ == '__main__':
     environment = detect_environment()

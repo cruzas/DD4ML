@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=example
-#SBATCH --output=./log_files/example.out
-#SBATCH --error=./log_files/example.err
+#SBATCH --output=./log_files/wandb_example.out
+#SBATCH --error=./log_files/wandb_example.err
 #SBATCH --nodes=2
 #SBATCH --time=00:30:00
 #SBATCH --ntasks-per-core=1
