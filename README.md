@@ -40,8 +40,6 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 ```
 
 ## Usage
-Look into the tests folder. 
-
 In a ***local*** environment (e.g. PC), for example, you can run:
 ```bash
 open -a Docker
