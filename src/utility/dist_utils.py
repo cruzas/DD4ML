@@ -1,16 +1,12 @@
 import os
 import pickle
-import pprint
 import socket
 import subprocess
 import sys
 from contextlib import closing
-
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
-import wandb
-
+import random
 
 def dprint(to_print):
     '''
@@ -33,45 +29,41 @@ def find_free_port():
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return str(s.getsockname()[1])
 
-def prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None, is_cuda_enabled=False):
+def get_shared_random_master_port(master_port=None, seed=42):
+    if master_port is not None:
+        return str(master_port)
+    random.seed(seed)
+    return str(random.randint(0, 6500))
+
+def prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None, is_cuda_enabled=torch.cuda.is_available()):
+    if dist.is_initialized():
+        print("Process group already initialized. Skipping initialization...")
+        return
+    
     backend = 'nccl' if is_cuda_enabled else 'gloo'
     comp_env = detect_environment()
-    
-    if not dist.is_initialized():
-        env_vars = {}
+    env_vars = {}
+    if comp_env != 'local':  # SLURM cluster environment
+        multi_gpu = is_cuda_enabled and torch.cuda.device_count() > 1
+        env_vars['MASTER_PORT'] = get_shared_random_master_port(master_port, seed=12345) # TODO: Currently random so may not always be a free port. Whatever strategy you choose, make sure it is the same across all processes.
+        env_vars['MASTER_ADDR'] = subprocess.getoutput(f"scontrol show hostname {os.environ.get('SLURM_NODELIST')} | head -n1")
+        env_vars['WORLD_SIZE'] = os.environ.get('SLURM_NTASKS', '1') if multi_gpu else os.environ.get('SLURM_NNODES', '1')
+        env_vars['RANK'] = os.environ.get('SLURM_PROCID', '0') if multi_gpu else os.environ.get('SLURM_NODEID', '0')
+        env_vars['LOCAL_RANK'] = os.environ.get('SLURM_LOCALID', '0')
+        if multi_gpu: print("Multi-GPU setup detected.")
+        rank = int(env_vars['RANK'])
+        world_size = int(env_vars['WORLD_SIZE'])
+    else:  # Local environment
+        env_vars['MASTER_ADDR'] = master_addr or "localhost"
+        env_vars['MASTER_PORT'] = master_port or find_free_port()
+        if sys.platform == 'darwin':
+            env_vars["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
-        if comp_env != 'local':  # SLURM cluster environment
-            if is_cuda_enabled and torch.cuda.device_count() > 1:
-                print("Multi-GPU setup detected.")
-                env_vars.update({
-                    'MASTER_PORT': '29501',  # Consider using a free port instead.
-                    'WORLD_SIZE': os.environ.get('SLURM_NTASKS', '1'),
-                    'LOCAL_RANK': os.environ.get('SLURM_LOCALID', '0'),
-                    'RANK': os.environ.get('SLURM_PROCID', '0'),
-                    'MASTER_ADDR': subprocess.getoutput(f"scontrol show hostname {os.environ.get('SLURM_NODELIST')} | head -n1")
-                })
-            else:
-                env_vars.update({
-                    'MASTER_PORT': '29501',
-                    'WORLD_SIZE': os.environ.get('SLURM_NNODES', '1'),
-                    'LOCAL_RANK': os.environ.get('SLURM_LOCALID', '0'),
-                    'RANK': os.environ.get('SLURM_NODEID', '0'),
-                    'MASTER_ADDR': subprocess.getoutput(f"scontrol show hostname {os.environ.get('SLURM_NODELIST')} | head -n1")
-                })
-            rank = int(env_vars['RANK'])
-            world_size = int(env_vars['WORLD_SIZE'])
-        else:  # Local environment
-            env_vars.update({
-                'MASTER_ADDR': master_addr or "localhost",
-                'MASTER_PORT': master_port or find_free_port()
-            })
-            if sys.platform == 'darwin':
-                env_vars["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-
-        os.environ.update(env_vars)
-        dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
-    else:
-        print("Process group already initialized. Skipped initialization.")
+    # Update environment variables
+    os.environ.update(env_vars)
+    # Compute unique identifier based on rank and global rank considering I have 2 nodes and 4 GPUs per node
+    dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+    print(f"Rank {rank}/{world_size - 1} initialized process group with backend: {backend}.")
 
 def send_shape(shape: list, dst: int, device=None):
     if device is None:
@@ -80,7 +72,6 @@ def send_shape(shape: list, dst: int, device=None):
         dist.send(tensor=torch.tensor(
             s, dtype=torch.int32).to(device), dst=dst)
     dist.send(tensor=torch.tensor(-1, dtype=torch.int32).to(device), dst=dst)
-
 
 def receive_shape(src: int, device=None):
     if device is None:
