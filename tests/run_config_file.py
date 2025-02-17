@@ -1,3 +1,4 @@
+import time
 import argparse
 import os
 import torch
@@ -64,14 +65,19 @@ def parse_cmd_args(APTS=True):
 def main(rank, master_addr, master_port, world_size, args):
     if not dist.is_initialized():
         prepare_distributed_environment(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size, is_cuda_enabled=torch.cuda.is_available())
+    else:
+        print("[main] Process group already initialized. Skipping initialization...")
     use_wandb = WANDB_AVAILABLE
-    print(f"Rank {rank}/{world_size - 1} ready. Using wandb: {use_wandb}. Number of GPUs: {torch.cuda.device_count()}. Number of GPUs I can see {os.environ['CUDA_VISIBLE_DEVICES']}.")
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    local_rank = int(os.environ['LOCAL_RANK'])
+    
+    # Print rank, local rank, and current cuda device
+    print(f"[main] Rank {rank}, local rank {local_rank}, cuda device {torch.cuda.current_device()}")
     
     wandb_config = {}
     if use_wandb and rank == 0:
         wandb.init(entity=args["entity"], project=args["project"])
         wandb_config = dict(wandb.config)
-    dist.barrier()
     wandb_config = broadcast_dict(wandb_config, src=0) if use_wandb else {}
     trial_args = {**args, **wandb_config}
     
@@ -134,19 +140,32 @@ def run_local(args, sweep_config):
 def run_cluster(args, sweep_config):
     prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None, is_cuda_enabled=torch.cuda.is_available())
     rank = dist.get_rank()
+    local_rank = int(os.environ['LOCAL_RANK'])
     world_size = dist.get_world_size()
+    
+    # if torch.cuda.device_count() > 1, assign the GPU to the process.
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+    
+    print(f"[run_cluster] WANDB_AVAILABLE: {WANDB_AVAILABLE}")
+    print(f"[run_cluster] Rank {rank}/{world_size - 1} initialized process group with backend: {dist.get_backend()}.")
+    print(f"[run_cluster] Local rank: {local_rank}, world size: {world_size}, cuda device {torch.cuda.current_device()}")
+    
     if args["use_pmw"]:
         assert world_size == (args["num_subdomains"] *
                             args["num_replicas_per_subdomain"] *
                             args["num_stages"]), "World size does not match the number of subdomains, replicas, and stages specified."
     if WANDB_AVAILABLE and rank == 0:
         sweep_id = wandb.sweep(sweep=sweep_config, project=args["project"])
+        print(f"[run_cluster] Rank 0 calling wandb.agent...")
         wandb.agent(sweep_id,
                     function=lambda: main(rank, None, None, world_size, args),
                     count=None)
+        print(f"[run_cluster] Rank {rank} Exiting...")
     else:
-        wandb_config = broadcast_dict({}, src=0) if WANDB_AVAILABLE else {}
-        main(rank, None, None, world_size, {**args, **wandb_config})
+        print(f"[run_cluster] Rank {rank} running main function...")
+        main(rank, None, None, world_size, args)
+        print(f"[run_cluster] Rank {rank} Exiting...")
 
 if __name__ == "__main__":
     args = vars(parse_cmd_args())
