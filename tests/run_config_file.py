@@ -155,7 +155,7 @@ def run_cluster(args, sweep_config):
     if args["use_pmw"]:
         assert world_size == (args["num_subdomains"] *
                             args["num_replicas_per_subdomain"] *
-                            args["num_stages"]), "World size does not match the number of subdomains, replicas, and stages specified."
+                            args["num_stages"]), f"World size {world_size} does not match the number of subdomains {args['num_subdomains']}, replicas {args['num_replicas_per_subdomain']}, and stages {args['num_stages']} specified."
     if WANDB_AVAILABLE and rank == 0:
         sweep_id = wandb.sweep(sweep=sweep_config, project=args["project"])
         print(f"[run_cluster] Rank 0 calling wandb.agent...")
