@@ -1,6 +1,6 @@
 import copy
 
-import pandas as pd
+import pprint
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -204,6 +204,11 @@ def get_config_model_and_trainer(args, wandb_config):
         model_dict = model_instance.as_model_dict()
         model_handler = ModelHandler(model_dict, all_config.model.num_subdomains,
                                      all_config.model.num_replicas_per_subdomain)
+        
+        # dprint(model_handler.nn_structure)
+        if dist.get_rank() == 0:
+            pprint.pprint(model_handler.nn_structure)
+        
         all_config.trainer.model_handler = model_handler
 
         sample_input = train_dataset.get_sample_input(all_config.trainer)
