@@ -1,5 +1,7 @@
 from typing import Optional
 
+import os
+local_rank = int(os.environ.get("LOCAL_RANK", 0))
 import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader, Dataset
@@ -172,7 +174,7 @@ class Power_DL():
                  dataset, 
                  batch_size=1, 
                  shuffle=False, 
-                 device=torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'), 
+                 device=torch.device(f'cuda:{local_rank}') if torch.cuda.is_available() else torch.device('cpu'), 
                  precision=torch.get_default_dtype(), 
                  overlapping_samples=0, 
                  SHARED_OVERLAP=False, # if True: overlap samples are shared between minibatches

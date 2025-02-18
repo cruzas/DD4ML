@@ -1,4 +1,5 @@
 import os
+local_rank = os.environ.get('SLURM_LOCALID', '0')
 import pickle
 import socket
 import subprocess
@@ -50,7 +51,14 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
         env_vars['WORLD_SIZE'] = os.environ.get('SLURM_NTASKS', '1') if multi_gpu else os.environ.get('SLURM_NNODES', '1')
         env_vars['RANK'] = os.environ.get('SLURM_PROCID', '0') if multi_gpu else os.environ.get('SLURM_NODEID', '0')
         env_vars['LOCAL_RANK'] = os.environ.get('SLURM_LOCALID', '0')
-        if multi_gpu: print("Multi-GPU setup detected.")
+        
+        if is_cuda_enabled:
+            env_vars['CUDA_VISIBLE_DEVICES'] = os.environ.get('SLURM_LOCALID', '0')
+            torch.cuda.set_device(int(os.environ['SLURM_LOCALID']))
+            
+        if multi_gpu:
+            print("Multi-GPU setup detected.")
+        
         rank = int(env_vars['RANK'])
         world_size = int(env_vars['WORLD_SIZE'])
     else:  # Local environment
@@ -67,7 +75,7 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
 
 def send_shape(shape: list, dst: int, device=None):
     if device is None:
-        device = torch.device('cuda') if dist.get_backend() == 'nccl' else torch.device('cpu')
+        device = torch.device(f'cuda:{local_rank}') if dist.get_backend() == 'nccl' else torch.device('cpu')
     for s in shape:
         dist.send(tensor=torch.tensor(
             s, dtype=torch.int32).to(device), dst=dst)
@@ -75,7 +83,7 @@ def send_shape(shape: list, dst: int, device=None):
 
 def receive_shape(src: int, device=None):
     if device is None:
-        device = torch.device('cuda') if dist.get_backend() == 'nccl' else torch.device('cpu')
+        device = torch.device(f'cuda:{local_rank}') if dist.get_backend() == 'nccl' else torch.device('cpu')
     shape = []
     temp = 0
     while True:

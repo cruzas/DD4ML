@@ -1,5 +1,4 @@
-from abc import abstractmethod
-
+import os
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -13,11 +12,12 @@ class BasePMWModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.rank = dist.get_rank()
+        self.local_rank = os.environ.get('LOCAL_RANK', 0)
         self.world_size = dist.get_world_size()
         self.backend = dist.get_backend()
-        self.tensor_device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        self.tensor_device = torch.device(f'cuda:{self.local_rank}') if torch.cuda.is_available() else torch.device('cpu')
         # Default device to store scalars
-        self.default_device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        self.default_device = torch.device(f'cuda:{self.local_rank}') if torch.cuda.is_available() else torch.device('cpu')
         
         # TODO: Study the following. Would be nice, but there's a lot of CPU-GPU movement when using pmw and it makes the code slow.
         # if self.tensor_device == 'cpu' and torch.backends.mps.is_available() and torch.backends.mps.is_built() and ((dist.is_initialized() and dist.get_world_size() == 1) or not dist.is_initialized()):
@@ -29,7 +29,7 @@ class BasePMWModel(nn.Module):
     def backend_device(self, tensor=torch.tensor([0])):
         backend_device = torch.device('cpu')
         if torch.cuda.is_available() and dist.get_backend() == 'nccl':
-            backend_device = tensor.device if 'cuda' in str(tensor.device) else torch.device('cuda')
+            backend_device = tensor.device if 'cuda' in str(tensor.device) else torch.device(f'cuda:{self.local_rank}')
         return backend_device
 
     def distributed_model_rank_structure(self, subdomains, replicas_per_subdomain, stages_amount, gpus_per_sharded_layer, node_rank_dict):

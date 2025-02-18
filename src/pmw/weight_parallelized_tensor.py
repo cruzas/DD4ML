@@ -51,7 +51,9 @@ class WeightParallelizedTensor(BasePMWModel):
             g2 = torch.cat([p.flatten() for p in a.tensor],
                            dim=0)  # Flatten the gradients
             g3 = g1 @ g2
-            g3 = g3.to(f'cpu' if self.backend == 'gloo' else f'cuda:0')
+            
+            device = f'cuda:{torch.cuda.current_device()}' if self.backend != 'gloo' else 'cpu'
+            g3 = g3.to(device)
             # Sum the gradients on the master rank
             dist.all_reduce(tensor=g3, group=self.master_group,
                             op=dist.ReduceOp.SUM)
