@@ -1,6 +1,5 @@
-import time
-import argparse
 import os
+import argparse
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -8,7 +7,7 @@ import yaml
 
 from src.utils import (broadcast_dict, detect_environment, dprint,
                        find_free_port, generic_run,
-                       prepare_distributed_environment)
+                       prepare_distributed_environment, detect_environment)
 
 try:
     import wandb
@@ -63,16 +62,22 @@ def parse_cmd_args(APTS=True):
 
 
 def main(rank, master_addr, master_port, world_size, args):
+    use_wandb = WANDB_AVAILABLE
+    local_rank = int(os.environ.get("SLURM_LOCALID", 0))
+    comp_env = detect_environment()
+    print(f"[main] Rank {rank}: SLURM_LOCALID={os.environ.get('SLURM_LOCALID')}, LOCAL_RANK={os.environ.get('LOCAL_RANK')}, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}")
+    if comp_env != "local" and torch.cuda.is_available() and not dist.is_initialized():
+        torch.cuda.set_device(local_rank)
+        
     if not dist.is_initialized():
         prepare_distributed_environment(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size, is_cuda_enabled=torch.cuda.is_available())
     else:
         print("[main] Process group already initialized. Skipping initialization...")
-    use_wandb = WANDB_AVAILABLE
-    rank = dist.get_rank() if dist.is_initialized() else 0
-    local_rank = int(os.environ['LOCAL_RANK'])
+    rank = dist.get_rank() if dist.is_initialized() else 0    
     
     # Print rank, local rank, and current cuda device
     print(f"[main] Rank {rank}, local rank {local_rank}, cuda device {torch.cuda.current_device()}")
+    print(f"[main] Local rank {local_rank}, number of visible devices: {torch.cuda.device_count()}, seeing {os.environ['CUDA_VISIBLE_DEVICES']}")
     
     wandb_config = {}
     if use_wandb and rank == 0:
@@ -138,18 +143,14 @@ def run_local(args, sweep_config):
         spawn_training()
 
 def run_cluster(args, sweep_config):
-    prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None, is_cuda_enabled=torch.cuda.is_available())
-    rank = dist.get_rank()
-    local_rank = int(os.environ['LOCAL_RANK'])
-    world_size = dist.get_world_size()
-    
-    # if torch.cuda.device_count() > 1, assign the GPU to the process.
-    if torch.cuda.is_available():
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    comp_env = detect_environment()
+    if comp_env != "local" and torch.cuda.is_available() and not dist.is_initialized():
         torch.cuda.set_device(local_rank)
     
-    print(f"[run_cluster] WANDB_AVAILABLE: {WANDB_AVAILABLE}")
-    print(f"[run_cluster] Rank {rank}/{world_size - 1} initialized process group with backend: {dist.get_backend()}.")
-    print(f"[run_cluster] Local rank: {local_rank}, world size: {world_size}, cuda device {torch.cuda.current_device()}")
+    prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None, is_cuda_enabled=torch.cuda.is_available())
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
     
     if args["use_pmw"]:
         assert world_size == (args["num_subdomains"] *
