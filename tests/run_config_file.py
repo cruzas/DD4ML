@@ -1,13 +1,14 @@
-import os
 import argparse
+import os
+
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import yaml
 
-from src.utils import (broadcast_dict, detect_environment, dprint,
-                       find_free_port, generic_run,
-                       prepare_distributed_environment, detect_environment)
+from dd4ml.utils import (broadcast_dict, detect_environment, dprint,
+                         find_free_port, generic_run,
+                         prepare_distributed_environment)
 
 try:
     import wandb
@@ -49,7 +50,7 @@ def parse_cmd_args(APTS=True):
     # Add PMW-related arguments only if use_pmw is True.
     if args.use_pmw:
         parser.add_argument("--num_stages", type=int, default=(2 if APTS else 1), help="Number of stages")
-        parser.add_argument("--num_subdomains", type=int, default=2, help="Number of subdomains")
+        parser.add_argument("--num_subdomains", type=int, default=1, help="Number of subdomains")
         parser.add_argument("--num_replicas_per_subdomain", type=int, default=1, help="Number of replicas per subdomain")
 
     # Add APTS-related arguments only if "apts" is in the sweep_config string.
@@ -76,8 +77,9 @@ def main(rank, master_addr, master_port, world_size, args):
     rank = dist.get_rank() if dist.is_initialized() else 0    
     
     # Print rank, local rank, and current cuda device
-    print(f"[main] Rank {rank}, local rank {local_rank}, cuda device {torch.cuda.current_device()}")
-    print(f"[main] Local rank {local_rank}, number of visible devices: {torch.cuda.device_count()}, seeing {os.environ['CUDA_VISIBLE_DEVICES']}")
+    if torch.cuda.is_available():
+        print(f"[main] Rank {rank}, local rank {local_rank}, cuda device {torch.cuda.current_device()}")
+        print(f"[main] Local rank {local_rank}, number of visible devices: {torch.cuda.device_count()}, seeing {os.environ['CUDA_VISIBLE_DEVICES']}")
     
     wandb_config = {}
     if use_wandb and rank == 0:
