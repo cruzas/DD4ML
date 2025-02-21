@@ -33,7 +33,7 @@ def parse_cmd_args(APTS=True):
     parser.add_argument("--project", type=str,
                         default=("apts_tests" if APTS else "sgd_hyperparameter_sweep"),
                         help="Wandb project")
-    parser.add_argument("--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper")
+    parser.add_argument("--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper")
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument("--num_workers", type=int, default=1, help="Number of workers to use")
     parser.add_argument("--dataset_name", type=str, default="mnist", help="Dataset name")
@@ -47,17 +47,17 @@ def parse_cmd_args(APTS=True):
     # Preliminary parse to check conditions.
     args, _ = parser.parse_known_args()
 
-    # Add PMW-related arguments only if use_pmw is True.
-    if args.use_pmw:
-        parser.add_argument("--num_stages", type=int, default=(2 if APTS else 1), help="Number of stages")
-        parser.add_argument("--num_subdomains", type=int, default=1, help="Number of subdomains")
-        parser.add_argument("--num_replicas_per_subdomain", type=int, default=1, help="Number of replicas per subdomain")
-
     # Add APTS-related arguments only if "apts" is in the sweep_config string.
     if "apts" in args.sweep_config.lower():
         parser.add_argument("--subdomain_optimizer", type=str, default="sgd", help="Subdomain optimizer")
         parser.add_argument("--global_optimizer", type=str, default="trust_region", help="Global optimizer")
         parser.add_argument("--max_subdomain_iters", type=int, default=3, help="Max iterations for subdomain optimizer")
+    
+    # Add PMW-related arguments only if use_pmw is True.
+    if args.use_pmw:
+        parser.add_argument("--num_stages", type=int, default=(1 if APTS else 1), help="Number of stages")
+        parser.add_argument("--num_subdomains", type=int, default=2, help="Number of subdomains")
+        parser.add_argument("--num_replicas_per_subdomain", type=int, default=1, help="Number of replicas per subdomain")
 
     return parser.parse_args()
 
@@ -121,14 +121,12 @@ def main(rank, master_addr, master_port, world_size, args):
         if trainer.iter_num % 10 == 0:
             dprint(f"iter_dt {trainer.iter_dt:.2f}s; iter {trainer.iter_num}: train loss {trainer.loss:.5f}")
     
-    generic_run(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size,
-                args=trial_args, wandb_config=wandb_config if use_wandb else None,
-                epoch_end_callback=epoch_end_callback, batch_end_callback=batch_end_callback)
+    generic_run(rank=rank, args=trial_args, wandb_config=wandb_config if use_wandb else None, epoch_end_callback=epoch_end_callback, batch_end_callback=batch_end_callback)
 
 def run_local(args, sweep_config):
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 1
+    world_size = 2
     if args["use_pmw"]:
         world_size = (args["num_subdomains"] *
                     args["num_replicas_per_subdomain"] *

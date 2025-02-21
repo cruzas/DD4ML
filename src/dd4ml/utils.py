@@ -6,8 +6,9 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.optim as optim
-import wandb
+from torch.nn.parallel import DistributedDataParallel as DDP
 
+import wandb
 from dd4ml.utility.dist_utils import *
 from dd4ml.utility.mingpt_utils import *
 from dd4ml.utility.ml_utils import *
@@ -89,15 +90,21 @@ def remove_keys(config, keys_to_remove):
         for k in keys_to_remove:
             if k in config.__dict__:
                 del config.__dict__[k]
-        for k, v in list(config.__dict__.items()):
-            config.__dict__[k] = remove_keys(v, keys_to_remove)
+        for k in list(config.__dict__.keys()):
+            value = getattr(config, k)
+            updated_value = remove_keys(value, keys_to_remove)
+            if hasattr(config, k):  # Check if the attribute still exists
+                setattr(config, k, updated_value)
     return config
+
 
 # Standardize configuration by removing unnecessary keys.
 def make_std_config(config):
     use_pmw = getattr(config.trainer, "use_pmw", False)
     if not use_pmw:
-        keys_to_remove = ["num_stages", "num_subdomains", "num_replicas_per_subdomain", "model_handler"]
+        keys_to_remove = ["num_stages", "num_replicas_per_subdomain", "model_handler"]
+        if "apts_d" not in config.optimizer.lower():
+             keys_to_remove.append("num_subdomains")
         config = remove_keys(config, keys_to_remove)
     if config.optimizer != "apts":
         keys_to_remove = ["subdomain_optimizer", "subdomain_optimizer_args", "global_optimizer", "global_optimizer_args"]
@@ -223,6 +230,25 @@ def get_config_model_and_trainer(args, wandb_config):
             APTS_in_data_sync_strategy='average', 
             step_strategy='mean'
         )
+    elif optimizer_name == "apts_d":
+        from dd4ml.optimizers.apts_d import APTS_D
+        all_config.trainer = APTS_D.setup_APTS_args(all_config.trainer)
+        all_config.trainer.apts_d = True
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        device = f'cuda:{torch.cuda.current_device()}' if dist.get_backend() != 'gloo' else 'cpu'
+        model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None)
+        optimizer_obj = APTS_D(params=model.parameters(),
+                                 model=model,
+                                 criterion=criterion,
+                                 device=device,
+                                 max_iter=all_config.trainer.max_subdomain_iters,
+                                 nr_models=all_config.model.num_subdomains,
+                                 global_opt=all_config.trainer.global_optimizer,
+                                 global_opt_params=all_config.trainer.global_optimizer_args,
+                                 local_opt=all_config.trainer.subdomain_optimizer,
+                                 local_opt_params=all_config.trainer.subdomain_optimizer_args,
+                                 global_pass=True,
+                                 foc=True)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -236,8 +262,7 @@ def get_config_model_and_trainer(args, wandb_config):
     return all_config, model, trainer
 
 # Entry point for running the experiment.
-def generic_run(rank=None, master_addr=None, master_port=None, world_size=None,
-                args=None, wandb_config=None, epoch_end_callback=None, batch_end_callback=None):
+def generic_run(rank=None, args=None, wandb_config=None, epoch_end_callback=None, batch_end_callback=None):
     
     use_wandb = wandb_config is not None
     if use_wandb:
@@ -251,8 +276,12 @@ def generic_run(rank=None, master_addr=None, master_port=None, world_size=None,
         wandb_config = broadcast_dict(wandb_config, src=0)
     else:
         wandb_config = {}
+    
+    if "apts_d" in wandb_config['optimizer'].lower():
+        args["use_pmw"] = False
+        args["num_subdomains"] = dist.get_world_size() if dist.is_initialized() else 1
 
-    config, model, trainer = get_config_model_and_trainer(args, wandb_config)
+    config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)
 
     if epoch_end_callback and trainer.config.run_by_epoch:

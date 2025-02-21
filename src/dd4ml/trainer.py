@@ -14,11 +14,12 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from dd4ml.pmw.dataloaders import GeneralizedDistributedDataLoader
-from dd4ml.pmw.model_handler import ModelHandler
 from dd4ml.utils import CfgNode as CN
 from dd4ml.utils import closure, dprint
 
@@ -96,17 +97,21 @@ class Trainer():
         _, config = self.model, self.config
         
         if config.use_pmw:
-            self.train_loader = GeneralizedDistributedDataLoader(model_handler=config.model_handler, 
-                                                            dataset=self.train_dataset, 
-                                                            batch_size=config.batch_size, 
-                                                            shuffle=False, 
-                                                            num_workers=config.num_workers, 
-                                                            pin_memory=True)
-            self.test_loader = DataLoader(self.test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, pin_memory=True)
+            train_loader = GeneralizedDistributedDataLoader(model_handler=config.model_handler, dataset=self.train_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, pin_memory=True)
+            test_loader = DataLoader(self.test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, pin_memory=True)
         else:
-            # TODO: Make sure this also works in a standard PyTorch distributed setting 
-            self.train_loader = DataLoader(self.train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, pin_memory=True)
-            self.test_loader = DataLoader(self.test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, pin_memory=True)
+            if not config.apts_d:
+                train_loader = DataLoader(self.train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, pin_memory=True)
+                test_loader = DataLoader(self.test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, pin_memory=True)
+            else:
+                train_sampler = DistributedSampler(self.train_dataset)
+                test_sampler = DistributedSampler(self.test_dataset)
+                
+                train_loader = DataLoader(self.train_dataset, batch_size=config.batch_size, sampler=train_sampler, num_workers=config.num_workers, pin_memory=True)
+                test_loader = DataLoader(self.test_dataset, batch_size=config.batch_size, sampler=test_sampler, num_workers=config.num_workers, pin_memory=True)
+
+        self.train_loader = train_loader
+        self.test_loader = test_loader 
 
         if config.run_by_epoch:
             self.run_by_epoch()
@@ -158,7 +163,6 @@ class Trainer():
         model.eval()
         correct = 0
         total = 0
-        accuracy = 0
         
         cond_std = not hasattr(model, 'model_handler')
         cond_d_a = hasattr(model, 'model_handler') and model.model_handler.is_last_stage() 
