@@ -125,6 +125,7 @@ class Trainer():
         criterion = self.criterion
         self.loss = 0.0 # epoch loss
         total_batches = len(self.train_loader)
+        self.iter_num = 0
         for batch_idx, (x, y) in enumerate(self.train_loader):
             batch_time_start = time.time()   
             x, y = x.to(self.device), y.to(self.device)
@@ -153,7 +154,10 @@ class Trainer():
             # Print progress within the epoch
             self.epoch_progress = 100.0 * (batch_idx + 1) / total_batches
             self.batch_dt = time.time() - batch_time_start
+            self.iter_dt = self.batch_dt
+            self.running_time = time.time() - self.total_start_time
             self.trigger_callbacks('on_batch_end')
+            self.iter_num += 1
         
         self.loss = self.loss / total_batches
         tnow = time.time()

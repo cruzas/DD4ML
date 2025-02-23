@@ -1,4 +1,5 @@
 import copy
+from collections import OrderedDict
 
 import torch
 import torch.distributed as dist  # For distributed initialization if needed
@@ -62,9 +63,9 @@ class APTS_D(Optimizer):
 
         self.model = model  # This model is assumed to be wrapped in DDP
         if hasattr(model, 'module'):
-            self.local_model = copy.deepcopy(model.module)
+            self.local_model = copy.deepcopy(self.model.module)
         else:
-            self.local_model = copy.deepcopy(model)
+            self.local_model = copy.deepcopy(self.model)
         self.max_iter = max_iter
         self.nr_models = nr_models
         self.device = device if device is not None else (f'cuda:{torch.cuda.current_device()}' if self.backend != 'gloo' else 'cpu')
@@ -105,11 +106,11 @@ class APTS_D(Optimizer):
             local_loss = local_loss + (self.residual @ s)
         return local_loss
 
-    def global_closure(self):
+    def global_closure(self, compute_grad=False):
         self.zero_grad()
         outputs = self.model(self.inputs)
         global_loss = self.criterion(outputs, self.labels)
-        if torch.is_grad_enabled():
+        if torch.is_grad_enabled() or compute_grad:
             global_loss.backward()
         return global_loss
 
@@ -140,7 +141,7 @@ class APTS_D(Optimizer):
                     break
 
         with torch.no_grad():
-            local_reduction = initial_local_loss - torch.tensor(local_loss, device=self.device)
+            local_reduction = initial_local_loss - local_loss.clone().detach().to(self.device)
             a = 0
             for param in self.model.parameters():
                 b = param.numel()
@@ -150,8 +151,8 @@ class APTS_D(Optimizer):
             trial_loss = self.global_closure()
             acceptance_ratio = (initial_global_loss - trial_loss) / local_reduction
 
-            if acceptance_ratio < self.global_optimizer.reduction_ratio:
-                self.lr = max(self.lr * self.global_optimizer.decrease_factor,
+            if acceptance_ratio < self.global_optimizer.nu_1:
+                self.lr = max(self.lr * self.global_optimizer.dec_factor,
                                   self.global_optimizer.min_lr)
                 a = 0
                 for param in self.model.parameters():
@@ -159,8 +160,8 @@ class APTS_D(Optimizer):
                     param.data.copy_(torch.reshape(initial_params[a:a+b], param.shape))
                     a += b
                 new_loss = initial_global_loss
-            elif acceptance_ratio > self.global_optimizer.acceptance_ratio:
-                self.lr = min(self.lr * self.global_optimizer.increase_factor,
+            elif acceptance_ratio > self.global_optimizer.nu_2:
+                self.lr = min(self.lr * self.global_optimizer.inc_factor,
                                   self.global_optimizer.max_lr)
                 new_loss = trial_loss
             else:
@@ -175,6 +176,12 @@ class APTS_D(Optimizer):
         with torch.no_grad():
             self.lr = self.global_optimizer.lr
             self.local_optimizer.lr = self.lr / self.nr_models
-            self.local_model.load_state_dict(self.model.state_dict())
+            try:
+                if hasattr(self.model, 'module'):
+                    self.local_model.load_state_dict(self.model.module.state_dict())
+                else:
+                    self.local_model.load_state_dict(self.model.state_dict())
+            except:
+                print('Local model and global model have different state_dict keys.')
 
         return new_loss
