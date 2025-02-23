@@ -43,7 +43,11 @@ class TrustRegion(torch.optim.Optimizer):
         # Compute the loss of the model
         old_loss = closure(compute_grad=True)
         # Retrieve the gradient of the model  TODO: check if this is a copy by reference or not (if not we could use param.data -= param.grad ..... below)
-        grad = self.model.grad()
+        # Check if grad is a function of model
+        if not hasattr(self.model, 'grad'):
+            grad = torch.cat([p.grad.view(-1) for p in self.model.parameters() if p.grad is not None])
+        else:
+            grad = self.model.grad()
         # Compute the norm of the gradient
         grad_norm2 = grad.norm(p=2)
         grad_norm = grad.norm(p=self.norm_type) if self.norm_type != 2 else grad_norm2 
@@ -60,7 +64,11 @@ class TrustRegion(torch.optim.Optimizer):
         while old_loss - new_loss < 0 and c < self.max_iter:
             stop = True if abs(self.lr - self.min_lr)/self.min_lr < 1e-6 else False # TODO: Adaptive reduction factor -> if large difference in losses maybe divide by 4
             for i,param in enumerate(self.model.parameters()):
-                param.data -= grad.tensor[i].data
+                # Check if grad has attribute tensor
+                if hasattr(grad, 'tensor'):
+                    param.data -= grad.tensor[i].data
+                else:
+                    param.data -= grad[i].data
             new_loss = closure(compute_grad=False)
             old_lr = self.lr
             

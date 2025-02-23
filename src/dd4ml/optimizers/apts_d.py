@@ -87,16 +87,17 @@ class APTS_D(Optimizer):
 
         self.lr = self.global_optimizer.lr
 
-    def non_foc_local_closure(self):
+    def non_foc_local_closure(self, compute_grad=False):
         self.local_optimizer.zero_grad()
         outputs = self.local_model(self.inputs)
         loss = self.criterion(outputs, self.labels)
-        if torch.is_grad_enabled():
+        if torch.is_grad_enabled() or compute_grad:
             loss.backward()
         return loss
 
-    def foc_local_closure(self):
-        local_loss = self.non_foc_local_closure()
+    def foc_local_closure(self, compute_grad=False):
+        self.local_optimizer.zero_grad()
+        local_loss = self.non_foc_local_closure(compute_grad)
         global_params = torch.cat([p.view(-1) for p in self.model.parameters()])
         local_params = torch.cat([p.view(-1) for p in self.local_model.parameters()])
         s = local_params - global_params
@@ -131,7 +132,7 @@ class APTS_D(Optimizer):
         self.residual = global_gradient - initial_local_gradient
 
         for _ in range(self.max_iter):
-            local_loss, _, _ = self.local_optimizer.step(local_closure)
+            local_loss = self.local_optimizer.step(local_closure)
             self.grad_evals_counter += 1.0 / self.nr_models
             with torch.no_grad():
                 step = torch.cat([p.view(-1) for p in self.local_model.parameters()]) - initial_params
@@ -168,7 +169,7 @@ class APTS_D(Optimizer):
             self.global_optimizer.lr = self.lr
 
         if self.global_pass:
-            new_loss, _, _ = self.global_optimizer.step(self.global_closure)
+            new_loss = self.global_optimizer.step(self.global_closure)
             self.grad_evals_counter += 1
 
         with torch.no_grad():
