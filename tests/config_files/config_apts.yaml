@@ -4,13 +4,14 @@ metric:
   goal: minimize
 parameters:
   batch_size:
-    values: [64]
+    values: [200]
   epochs: 
     value: 2
   max_iters:
     values: [10]
   optimizer: 
-    values: ["apts"]
+    values: ["apts_d"] # legacy APTS in data
+    # values: ["apts"] # pmw compatible 
   learning_rate: 
     values: [0.01]
   dataset_name: 
