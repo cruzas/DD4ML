@@ -61,7 +61,7 @@ class Trainer():
 
         # determine the device we'll train on
         if config.device == 'auto':
-            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'   
+            self.device = f'cuda:{torch.cuda.current_device()}' if dist.get_backend() != 'gloo' else 'cpu'
         else:
             self.device = config.device
         

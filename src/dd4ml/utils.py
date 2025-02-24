@@ -236,6 +236,7 @@ def get_config_model_and_trainer(args, wandb_config):
         all_config.trainer.apts_d = True
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         device = f'cuda:{torch.cuda.current_device()}' if dist.get_backend() != 'gloo' else 'cpu'
+        model.to(device)
         model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None)
         optimizer_obj = APTS_D(params=model.parameters(),
                                  model=model,
@@ -284,9 +285,9 @@ def generic_run(rank=None, args=None, wandb_config=None, epoch_end_callback=None
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)
 
-    # if epoch_end_callback and trainer.config.run_by_epoch:
-    trainer.set_callback("on_epoch_end", epoch_end_callback)
-    # if batch_end_callback and not trainer.config.run_by_epoch:
-    trainer.set_callback("on_batch_end", batch_end_callback)
+    if epoch_end_callback and trainer.config.run_by_epoch:
+        trainer.set_callback("on_epoch_end", epoch_end_callback)
+    if batch_end_callback and not trainer.config.run_by_epoch:
+        trainer.set_callback("on_batch_end", batch_end_callback)
 
     trainer.run()
