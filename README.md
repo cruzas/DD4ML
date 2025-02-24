@@ -27,6 +27,14 @@ The code uses minGPT and builds from it: https://github.com/karpathy/minGPT/tree
 See ``pyproject.toml`` file. 
 
 ## Installation
+This project is still in development. To install it in editable mode, you can run:
+```bash
+git clone https://github.com/cruzas/DD4ML.git
+cd DD4ML
+python3 -m pip install -e .
+```
+
+If you are satisfied with the current version and plan no further changes, you can run:
 ```bash
 git clone https://github.com/cruzas/DD4ML.git
 cd DD4ML
