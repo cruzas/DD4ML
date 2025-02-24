@@ -11,7 +11,8 @@ venv/
 *.pt
 
 # Results and logs
-results/
+tests/wandb_sweep/wandb/
+tests/wandb_sweep/sweep_id.txt
 *.csv
 
 # IDE files
@@ -26,3 +27,12 @@ dist/
 # OS files
 .DS_Store
 Thumbs.db
+*.gz
+/tests/rawdata/cifar-10-batches-py
+/src/rawdata
+/tests/rawdata
+/tests/wandb/wandb
+/tests/wandb
+/wandb
+tests/log_files/
+/rawdata

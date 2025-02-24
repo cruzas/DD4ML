@@ -1,0 +1,56 @@
+#!/bin/bash
+#SBATCH --job-name=${JOB_NAME}
+#SBATCH --output=./log_files/${JOB_NAME}.out
+#SBATCH --error=./log_files/${JOB_NAME}.err
+#SBATCH --nodes=1
+#SBATCH --time=00:30:00
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks-per-core=1
+
+# NOTE: these two should match
+#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:4
+
+#SBATCH --hint=nomultithread
+#SBATCH --constraint=gpu
+#SBATCH --partition=debug
+#SBATCH --exclusive
+source ~/.slurm_env
+#SBATCH --account=$SLURM_ACCOUNT
+
+# Source common environment files
+source ~/.tests_runpath
+cd "$TESTS_RUNPATH" || exit
+
+# Set environment variables
+if [ -z "$SLURM_CPUS_PER_TASK" ]; then
+    export OMP_NUM_THREADS=1
+else
+    export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+fi
+export NCCL_DEBUG=INFO
+export NCCL_IB_HCA=ipogif0
+export NCCL_IB_CUDA_SUPPORT=1
+
+# Load required modules
+source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
+module load cray/23.12
+source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
+module load cray-python/3.11.5
+source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
+
+# Optionally source WandB environment
+if [ "${USE_WANDB}" = "1" ]; then
+    source ~/.wandb_env
+    export WANDB_MODE=online
+fi
+
+# Execute the Python script
+echo "Test started $(date)"
+export CUDA_VISIBLE_DEVICES=$(echo $SLURM_LOCALID)
+export NCCL_P2P_DISABLE=1
+export NCCL_SHM_DISABLE=1
+export NCCL_IB_DISABLE=1
+# srun /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}"
+srun --gpu-bind=map_gpu:${SLURM_LOCALID} /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}"
+echo "Test done $(date)"

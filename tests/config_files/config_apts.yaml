@@ -1,0 +1,25 @@
+method: grid
+metric:
+  name: train_loss
+  goal: minimize
+parameters:
+  batch_size:
+    values: [200]
+  epochs: 
+    value: 2
+  max_iters:
+    values: [10]
+  optimizer: 
+    values: ["apts_d"] # legacy APTS in data
+    # values: ["apts"] # pmw compatible 
+  learning_rate: 
+    values: [0.01]
+  dataset_name: 
+    values: ["mnist"] 
+    # values: ["tinyshakespeare"]
+  model_name: 
+    values: ["simple_cnn"] 
+    # values: ["mingpt"]
+  criterion:
+    values: ["cross_entropy"] # ["cross_entropy_transformers"]
+    # values: ["cross_entropy_transformers"]

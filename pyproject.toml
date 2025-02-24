@@ -17,15 +17,19 @@ authors = [
 ]
 license = { file = "LICENSE" }
 dependencies = [
-    "torch",
+    "torch", # Default CPU version
     "torchvision",
     "torchaudio",
     "matplotlib",
     "numpy",
     "pandas",
     "scipy",
-    "requests"
+    "requests",
+    "wandb",
+    "pyyaml"
+
 ]
 
-[tool.setuptools]
-packages = ["src"]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]

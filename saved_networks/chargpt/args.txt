@@ -1,1 +1,1 @@
-chargpt.py
+/Users/cruzalegriasamueladolfo/Documents/GitHub/DD4ML/tests/mnist/parsgd.py

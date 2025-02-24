@@ -1,0 +1,59 @@
+{
+    "system": {
+        "seed": 3407,
+        "trial": 0,
+        "work_dir": "../../saved_networks/tinyshakespeare/apts_pmw/"
+    },
+    "data": {
+        "percentage": 100.0,
+        "block_size": 128
+    },
+    "model": {
+        "model_type": "gpt-mini",
+        "n_layer": "null",
+        "n_head": "null",
+        "n_embd": "null",
+        "vocab_size": 0,
+        "block_size": 128,
+        "embd_pdrop": 0.1,
+        "resid_pdrop": 0.1,
+        "attn_pdrop": 0.1,
+        "num_stages": 2,
+        "num_subdomains": 1,
+        "num_replicas_per_subdomain": 1
+    },
+    "trainer": {
+        "device": "auto",
+        "num_workers": 0,
+        "max_iters": 10000,
+        "batch_size": 64,
+        "learning_rate": 0.001,
+        "betas": [
+            0.9,
+            0.95
+        ],
+        "weight_decay": 0.1,
+        "grad_norm_clip": 1.0,
+        "subdomain_optimizer": "torch.optim.sgd.SGD",
+        "subdomain_optimizer_args": {
+            "lr": 0.0003,
+            "momentum": 0.9
+        },
+        "max_subdomain_iters": 3,
+        "global_optimizer": "src.optimizers.trust_region.TrustRegion",
+        "global_optimizer_args": {
+            "lr": 0.0003,
+            "max_lr": 1.0,
+            "min_lr": 0.0001,
+            "nu": 0.5,
+            "inc_factor": 2.0,
+            "dec_factor": 0.5,
+            "nu_1": 0.25,
+            "nu_2": 0.75,
+            "max_iter": 3,
+            "norm_type": 2
+        },
+        "data_chunks_amount": 1
+    },
+    "num_shards": 1
+}
