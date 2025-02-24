@@ -4,7 +4,7 @@ metric:
   goal: minimize
 parameters:
   batch_size:
-    values: [128]
+    values: [200]
   epochs: 
     value: 2
   max_iters:

@@ -241,7 +241,7 @@ def get_config_model_and_trainer(args, wandb_config):
                                  model=model,
                                  criterion=criterion,
                                  device=device,
-                                 max_iter=all_config.trainer.max_subdomain_iters,
+                                 max_iter=3,
                                  nr_models=all_config.model.num_subdomains,
                                  global_opt=all_config.trainer.global_optimizer,
                                  global_opt_params=all_config.trainer.global_optimizer_args,
@@ -284,9 +284,9 @@ def generic_run(rank=None, args=None, wandb_config=None, epoch_end_callback=None
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)
 
-    if epoch_end_callback and trainer.config.run_by_epoch:
-        trainer.set_callback("on_epoch_end", epoch_end_callback)
-    if batch_end_callback and not trainer.config.run_by_epoch:
-        trainer.set_callback("on_batch_end", batch_end_callback)
+    # if epoch_end_callback and trainer.config.run_by_epoch:
+    trainer.set_callback("on_epoch_end", epoch_end_callback)
+    # if batch_end_callback and not trainer.config.run_by_epoch:
+    trainer.set_callback("on_batch_end", batch_end_callback)
 
     trainer.run()

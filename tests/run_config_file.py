@@ -118,8 +118,8 @@ def main(rank, master_addr, master_port, world_size, args):
                 "loss": trainer.loss,
                 "running_time": trainer.running_time
             })
-        if trainer.iter_num % 10 == 0:
-            dprint(f"iter_dt {trainer.iter_dt:.2f}s; iter {trainer.iter_num}: train loss {trainer.loss:.5f}")
+        # if trainer.iter_num % 10 == 0:
+        dprint(f"iter_dt {trainer.iter_dt:.2f}s; iter {trainer.iter_num}: train loss {trainer.loss:.5f}")
     
     generic_run(rank=rank, args=trial_args, wandb_config=wandb_config if use_wandb else None, epoch_end_callback=epoch_end_callback, batch_end_callback=batch_end_callback)
 
