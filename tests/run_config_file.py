@@ -58,7 +58,7 @@ def parse_cmd_args(APTS=True):
         help="Wandb project",
     )
     parser.add_argument(
-        "--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper"
+        "--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper"
     )
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument(
@@ -111,7 +111,7 @@ def parse_cmd_args(APTS=True):
         parser.add_argument(
             "--num_stages",
             type=int,
-            default=(1 if APTS else 1),
+            default=(2 if APTS else 1),
             help="Number of stages",
         )
         parser.add_argument(
@@ -267,18 +267,25 @@ def run_cluster(args, sweep_config):
         ), f"World size {world_size} does not match the number of subdomains {args['num_subdomains']}, replicas {args['num_replicas_per_subdomain']}, and stages {args['num_stages']} specified."
     if WANDB_AVAILABLE and rank == 0:
         sweep_id = wandb.sweep(sweep=sweep_config, project=args["project"])
-        print(f"[run_cluster] Rank 0 calling wandb.agent...")
+        print(f"[run_cluster] Rank {rank} calling wandb.agent...")
         wandb.agent(
             sweep_id,
             function=lambda: main(rank, None, None, world_size, args),
             count=None,
         )
+        print(f"[run_cluster] Rank {rank} waiting at barrier...")
+        dist.barrier()  # Synchronize before exit
         print(f"[run_cluster] Rank {rank} Exiting...")
+        dist.destroy_process_group()
+        exit(0)
     else:
         print(f"[run_cluster] Rank {rank} running main function...")
         main(rank, None, None, world_size, args)
+        print(f"[run_cluster] Rank {rank} waiting at barrier...")
+        dist.barrier()  # Synchronize before exit
         print(f"[run_cluster] Rank {rank} Exiting...")
-
+        dist.destroy_process_group()
+        exit(0)
 
 if __name__ == "__main__":
     args = vars(parse_cmd_args())
