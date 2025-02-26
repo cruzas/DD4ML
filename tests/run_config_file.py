@@ -58,7 +58,7 @@ def parse_cmd_args(APTS=False):
         help="Wandb project",
     )
     parser.add_argument(
-        "--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper"
+        "--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper"
     )
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument(
