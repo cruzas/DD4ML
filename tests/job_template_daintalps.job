@@ -29,7 +29,7 @@ else
     export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 fi
 export NCCL_DEBUG=INFO
-export NCCL_IB_HCA=ipogif0
+export NCCL_IB_HCA=ipogif0 # TODO: not sure if this needs to be changed
 export NCCL_IB_CUDA_SUPPORT=1
 
 # Load required modules

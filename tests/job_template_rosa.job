@@ -19,15 +19,29 @@
 source ~/.tests_runpath
 cd "$TESTS_RUNPATH" || exit
 
+module purge
+module load rdma-core/49.0-gcc-8.5.0-6mbijq2
+module load ucx/1.15.0-gcc-8.5.0-cnozz5i
+module load hwloc/2.9.1-gcc-8.5.0-adhoagt
+module load python/3.11.7-gcc-8.5.0-xhbe4xp
+
 # Set environment variables
 if [ -z "$SLURM_CPUS_PER_TASK" ]; then
     export OMP_NUM_THREADS=1
 else
     export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 fi
-export NCCL_DEBUG=INFO
-export NCCL_IB_HCA=ipogif0
-export NCCL_IB_CUDA_SUPPORT=1
+
+export NCCL_IB_IFNAME=ib0              # Use the active InfiniBand interface
+export NCCL_SOCKET_IFNAME=ib0          # Use the active InfiniBand interface
+export NCCL_IB_HCA=qib0                # Detected HCA ID
+export NCCL_IB_GID_INDEX=0             # Default GID index (InfiniBand, not RoCE)
+export NCCL_DEBUG=INFO                 # Enable NCCL debugging info
+export NCCL_IB_TIMEOUT=22              # Increase timeout if communication stalls
+export NCCL_NET_GDR_LEVEL=2            # Force GPU Direct RDMA usage
+export NCCL_P2P_DISABLE=0              # Enable peer-to-peer communication
+export NCCL_SHM_DISABLE=1              # Disable shared memory if issues occur
+export NCCL_IB_DISABLE=0               # Enable InfiniBand communication
 
 # Optionally source WandB environment
 if [ "${USE_WANDB}" = "1" ]; then
@@ -38,9 +52,6 @@ fi
 # Execute the Python script
 echo "Test started $(date)"
 export CUDA_VISIBLE_DEVICES=$(echo $SLURM_LOCALID)
-export NCCL_P2P_DISABLE=0
-export NCCL_SHM_DISABLE=0ls 
-export NCCL_IB_DISABLE=0
 
 echo "Activating virtual environment ../myvenv"
 source ../myvenv/bin/activate

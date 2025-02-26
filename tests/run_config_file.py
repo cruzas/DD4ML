@@ -23,7 +23,7 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 
-def parse_cmd_args(APTS=False):
+def parse_cmd_args(APTS=True):
     parser = argparse.ArgumentParser("Running configuration file...")
 
     # Check if WANDB_MODE is set to 'online'
