@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 import torch
 import torch.distributed as dist
@@ -274,18 +275,26 @@ def run_cluster(args, sweep_config):
             count=None,
         )
         print(f"[run_cluster] Rank {rank} waiting at barrier...")
-        dist.barrier()  # Synchronize before exit
-        print(f"[run_cluster] Rank {rank} Exiting...")
-        dist.destroy_process_group()
-        exit(0)
+        try:
+            dist.barrier()
+            print(f"[run_cluster] Rank {rank} Exiting successfully...")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Barrier timeout: {e}. Aborting process group...")
+            dist.destroy_process_group()
+            sys.exit(1)
     else:
         print(f"[run_cluster] Rank {rank} running main function...")
         main(rank, None, None, world_size, args)
         print(f"[run_cluster] Rank {rank} waiting at barrier...")
-        dist.barrier()  # Synchronize before exit
-        print(f"[run_cluster] Rank {rank} Exiting...")
-        dist.destroy_process_group()
-        exit(0)
+        try:
+            dist.barrier()
+            print(f"[run_cluster] Rank {rank} Exiting successfully...")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Barrier timeout: {e}. Aborting process group...")
+            dist.destroy_process_group()
+            sys.exit(1)
 
 
 if __name__ == "__main__":

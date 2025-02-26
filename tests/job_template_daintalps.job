@@ -3,7 +3,7 @@
 #SBATCH --output=./log_files/${JOB_NAME}.out
 #SBATCH --error=./log_files/${JOB_NAME}.err
 #SBATCH --nodes=1
-#SBATCH --time=00:30:00
+#SBATCH --time=00:10:00
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
 
@@ -29,15 +29,19 @@ else
     export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 fi
 export NCCL_DEBUG=INFO
-export NCCL_IB_HCA=ipogif0 # TODO: not sure if this needs to be changed
+export NCCL_IB_HCA=ipogif0
 export NCCL_IB_CUDA_SUPPORT=1
+export NCCL_P2P_DISABLE=0
+export NCCL_SHM_DISABLE=0
+export NCCL_IB_DISABLE=0
 
 # Load required modules
-source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
 module load cray/23.12
-source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
+module load craype-network-ofi
 module load cray-python/3.11.5
-source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
+module load cray-mpich-abi/8.1.28
+module load craype-network-ucx
+# source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
 
 # Optionally source WandB environment
 if [ "${USE_WANDB}" = "1" ]; then
@@ -48,9 +52,6 @@ fi
 # Execute the Python script
 echo "Test started $(date)"
 export CUDA_VISIBLE_DEVICES=$(echo $SLURM_LOCALID)
-export NCCL_P2P_DISABLE=1
-export NCCL_SHM_DISABLE=1
-export NCCL_IB_DISABLE=1
-# srun /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}"
-srun --gpu-bind=map_gpu:${SLURM_LOCALID} /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}"
+
+srun --kill-on-bad-exit --gpu-bind=map_gpu:${SLURM_LOCALID} /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" --sweep_config=./config_files/config_apts.yaml
 echo "Test done $(date)"

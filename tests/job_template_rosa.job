@@ -56,5 +56,5 @@ export CUDA_VISIBLE_DEVICES=$(echo $SLURM_LOCALID)
 echo "Activating virtual environment ../myvenv"
 source ../myvenv/bin/activate
 
-srun --gpu-bind=map_gpu:${SLURM_LOCALID} python3 -u "${SCRIPT}" --sweep_config=./config_files/config_apts.yaml
+srun --kill-on-bad-exit --gpu-bind=map_gpu:${SLURM_LOCALID} python3 -u "${SCRIPT}" --sweep_config=./config_files/config_apts.yaml
 echo "Test done $(date)"
