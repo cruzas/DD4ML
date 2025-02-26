@@ -12,7 +12,7 @@ parameters:
   max_iters:
     value: 10 # used for LLMs
   optimizer: 
-    values: ["sgd"]
+    values: ["trust_region"]
   dataset_name: 
     values: ["mnist"]
     # values: ["tinyshakespeare"] 

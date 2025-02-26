@@ -1,4 +1,5 @@
 import os
+import datetime
 local_rank = os.environ.get('SLURM_LOCALID', '0')
 import pickle
 import socket
@@ -70,7 +71,7 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
     # Update environment variables
     os.environ.update(env_vars)
     # Compute unique identifier based on rank and global rank considering I have 2 nodes and 4 GPUs per node
-    dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+    dist.init_process_group(backend=backend, rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=10))
     print(f"Rank {rank}/{world_size - 1} initialized process group with backend: {backend}.")
 
 def send_shape(shape: list, dst: int, device=None):

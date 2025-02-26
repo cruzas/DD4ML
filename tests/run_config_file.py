@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 import torch
 import torch.distributed as dist
@@ -111,11 +112,11 @@ def parse_cmd_args(APTS=True):
         parser.add_argument(
             "--num_stages",
             type=int,
-            default=(1 if APTS else 1),
+            default=(2 if APTS else 1),
             help="Number of stages",
         )
         parser.add_argument(
-            "--num_subdomains", type=int, default=2, help="Number of subdomains"
+            "--num_subdomains", type=int, default=1, help="Number of subdomains"
         )
         parser.add_argument(
             "--num_replicas_per_subdomain",
@@ -170,7 +171,7 @@ def main(rank, master_addr, master_port, world_size, args):
     def epoch_end_callback(trainer, save_model=False, save_frequency=5):
         dprint(
             f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, "
-            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt:.2f}s"
+            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt*1000:.2f}ms"
         )
         if rank == 0 and use_wandb:
             log_fn(
@@ -205,7 +206,7 @@ def main(rank, master_addr, master_port, world_size, args):
             )
         # if trainer.iter_num % 10 == 0:
         dprint(
-            f"iter_dt {trainer.iter_dt:.2f}s; iter {trainer.iter_num}: train loss {trainer.loss:.5f}"
+            f"iter_dt {trainer.iter_dt*1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss:.5f}"
         )
 
     generic_run(
@@ -267,17 +268,33 @@ def run_cluster(args, sweep_config):
         ), f"World size {world_size} does not match the number of subdomains {args['num_subdomains']}, replicas {args['num_replicas_per_subdomain']}, and stages {args['num_stages']} specified."
     if WANDB_AVAILABLE and rank == 0:
         sweep_id = wandb.sweep(sweep=sweep_config, project=args["project"])
-        print(f"[run_cluster] Rank 0 calling wandb.agent...")
+        print(f"[run_cluster] Rank {rank} calling wandb.agent...")
         wandb.agent(
             sweep_id,
             function=lambda: main(rank, None, None, world_size, args),
             count=None,
         )
-        print(f"[run_cluster] Rank {rank} Exiting...")
+        print(f"[run_cluster] Rank {rank} waiting at barrier...")
+        try:
+            dist.barrier()
+            print(f"[run_cluster] Rank {rank} Exiting successfully...")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Barrier timeout: {e}. Aborting process group...")
+            dist.destroy_process_group()
+            sys.exit(1)
     else:
         print(f"[run_cluster] Rank {rank} running main function...")
         main(rank, None, None, world_size, args)
-        print(f"[run_cluster] Rank {rank} Exiting...")
+        print(f"[run_cluster] Rank {rank} waiting at barrier...")
+        try:
+            dist.barrier()
+            print(f"[run_cluster] Rank {rank} Exiting successfully...")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Barrier timeout: {e}. Aborting process group...")
+            dist.destroy_process_group()
+            sys.exit(1)
 
 
 if __name__ == "__main__":
