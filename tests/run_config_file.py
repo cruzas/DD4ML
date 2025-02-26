@@ -58,7 +58,7 @@ def parse_cmd_args(APTS=True):
         help="Wandb project",
     )
     parser.add_argument(
-        "--use_pmw", type=bool, default=True, help="Use Parallel Model Wrapper"
+        "--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper"
     )
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument(
@@ -170,7 +170,7 @@ def main(rank, master_addr, master_port, world_size, args):
     def epoch_end_callback(trainer, save_model=False, save_frequency=5):
         dprint(
             f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, "
-            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt:.2f}s"
+            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt*1000:.2f}ms"
         )
         if rank == 0 and use_wandb:
             log_fn(
@@ -205,7 +205,7 @@ def main(rank, master_addr, master_port, world_size, args):
             )
         # if trainer.iter_num % 10 == 0:
         dprint(
-            f"iter_dt {trainer.iter_dt:.2f}s; iter {trainer.iter_num}: train loss {trainer.loss:.5f}"
+            f"iter_dt {trainer.iter_dt*1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss:.5f}"
         )
 
     generic_run(
@@ -286,6 +286,7 @@ def run_cluster(args, sweep_config):
         print(f"[run_cluster] Rank {rank} Exiting...")
         dist.destroy_process_group()
         exit(0)
+
 
 if __name__ == "__main__":
     args = vars(parse_cmd_args())
