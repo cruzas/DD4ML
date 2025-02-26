@@ -13,9 +13,6 @@ from collections import defaultdict
 
 import torch
 import torch.distributed as dist
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.distributed import DistributedSampler

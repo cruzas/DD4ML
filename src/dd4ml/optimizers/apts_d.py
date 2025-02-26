@@ -151,7 +151,11 @@ class APTS_D(Optimizer):
         outputs = self.model(self.inputs)
         loss = self.criterion(outputs, self.labels)
         if torch.is_grad_enabled() or compute_grad:
-            loss.backward()
+            loss.backward() # DDP takes care of averaging gradients
+        if self.nr_models > 1:
+            # Global loss
+            dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+            loss /= self.nr_models
         return loss
 
     def step(self, inputs, labels):
@@ -180,10 +184,13 @@ class APTS_D(Optimizer):
         )
         self.residual = global_grad - local_grad
 
+        # Compute local corrections 
         step_vec = None
+        total_local_grad_evals_counter = torch.tensor(0.0, device=self.device)
         for _ in range(self.max_iter):
             local_loss = self.local_optimizer.step(local_closure)
-            self.grad_evals_counter += 1.0 / self.nr_models
+            total_local_grad_evals_counter += 1
+            
             with torch.no_grad():
                 # Reuse the preallocated buffer to compute the current flattened parameters.
                 current_flat = flatten_params(
@@ -192,11 +199,22 @@ class APTS_D(Optimizer):
                 step_vec = current_flat - initial_flat
                 if torch.norm(step_vec, p=2) >= self.local_optimizer.max_lr:
                     break
-
+        
+        if self.nr_models > 1:
+            dist.all_reduce(total_local_grad_evals_counter, op=dist.ReduceOp.SUM)
+            total_local_grad_evals_counter /= self.nr_models
+        
+        # Compute local reduction
         with torch.no_grad():
             local_reduction = initial_local_loss - local_loss.detach().to(self.device)
+            
+            # Global step is sum of local steps
+            if self.nr_models > 1:
+                dist.all_reduce(step_vec, op=dist.ReduceOp.SUM)
+                dist.all_reduce(local_reduction, op=dist.ReduceOp.SUM)
+            
             restore_params(self.model, initial_flat + step_vec)
-            trial_loss = self.global_closure()
+            trial_loss = self.global_closure()            
             acceptance_ratio = (initial_global_loss - trial_loss) / local_reduction
 
             if acceptance_ratio < self.global_optimizer.nu_1:
@@ -225,6 +243,7 @@ class APTS_D(Optimizer):
             self.lr = self.global_optimizer.lr
             self.local_optimizer.lr = self.lr / self.nr_models
             try:
+                # TODO: perhaps just use consume_prefix_in_state_dict_if_present
                 state = (
                     self.model.module.state_dict()
                     if hasattr(self.model, "module")
