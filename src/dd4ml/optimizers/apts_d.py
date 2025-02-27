@@ -5,6 +5,7 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
+from dd4ml.optimizers.utils import get_trust_region_params, get_state_dict
 from dd4ml.optimizers.trust_region import TrustRegion  # Explicit import
 
 
@@ -25,12 +26,11 @@ def restore_params(model, flat_params):
 
 
 def clone_model(model):
-    # Avoid deep copying the config; assume it is immutable.
     base_model = model.module if hasattr(model, "module") else model
     config_copy = copy.deepcopy(base_model.config)
     config_copy.model_type = None
     new_model = type(base_model)(config_copy)
-    new_model.load_state_dict(base_model.state_dict())
+    new_model.load_state_dict(get_state_dict(base_model))
     return new_model.to(model.device)
 
 
@@ -38,35 +38,15 @@ class APTS_D(Optimizer):
     @staticmethod
     def setup_APTS_args(config):
         config.max_subdomain_iters = 3
-        # Global optimizer args.
+        # Use the helper for the global optimizer arguments.
         config.global_optimizer = TrustRegion
-        config.global_optimizer_args = {
-            "lr": config.learning_rate,
-            "max_lr": 10.0,
-            "min_lr": 1e-4,
-            "nu": 0.5,
-            "inc_factor": 2.0,
-            "dec_factor": 0.5,
-            "nu_1": 0.25,
-            "nu_2": 0.75,
-            "max_iter": 3,
-            "norm_type": 2,
-        }
-        # Subdomain optimizer args.
+        config.global_optimizer_args = get_trust_region_params(config, lr_scale=1.0, max_iter=3)
+        
+        # For the subdomain optimizer, adjust the learning rate by world size.
         world_size = dist.get_world_size() if dist.is_initialized() else 1
         config.subdomain_optimizer = TrustRegion
-        config.subdomain_optimizer_args = {
-            "lr": config.learning_rate / world_size,
-            "max_lr": 10.0,
-            "min_lr": 1e-4,
-            "nu": 0.5,
-            "inc_factor": 2.0,
-            "dec_factor": 0.5,
-            "nu_1": 0.25,
-            "nu_2": 0.75,
-            "max_iter": 3,
-            "norm_type": 2,
-        }
+        config.subdomain_optimizer_args = get_trust_region_params(config, lr_scale=1.0/world_size, max_iter=3)
+        
         return config
 
     def __init__(
@@ -216,10 +196,6 @@ class APTS_D(Optimizer):
         with torch.no_grad():
             self.lr = self.global_optimizer.lr
             self.local_optimizer.lr = self.lr / self.nr_models
-            try:
-                state = self.model.module.state_dict() if hasattr(self.model, "module") else self.model.state_dict()
-                self.local_model.load_state_dict(state)
-            except RuntimeError:
-                print("Local and global models have mismatched state_dict keys.")
+            self.local_model.load_state_dict(get_state_dict(self.model))
 
         return new_loss
