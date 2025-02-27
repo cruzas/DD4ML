@@ -24,7 +24,7 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 
-def parse_cmd_args(APTS=True):
+def parse_cmd_args(APTS=False):
     parser = argparse.ArgumentParser("Running configuration file...")
 
     # Check if WANDB_MODE is set to 'online'
@@ -112,7 +112,7 @@ def parse_cmd_args(APTS=True):
         parser.add_argument(
             "--num_stages",
             type=int,
-            default=(2 if APTS else 1),
+            default=(2 if APTS else 2),
             help="Number of stages",
         )
         parser.add_argument(
@@ -121,7 +121,7 @@ def parse_cmd_args(APTS=True):
         parser.add_argument(
             "--num_replicas_per_subdomain",
             type=int,
-            default=1,
+            default=2,
             help="Number of replicas per subdomain",
         )
 
