@@ -360,9 +360,9 @@ def generic_run(
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)
 
-    if epoch_end_callback and trainer.config.run_by_epoch:
-        trainer.set_callback("on_epoch_end", epoch_end_callback)
-    if batch_end_callback and not trainer.config.run_by_epoch:
-        trainer.set_callback("on_batch_end", batch_end_callback)
+    # if epoch_end_callback and trainer.config.run_by_epoch:
+    trainer.set_callback("on_epoch_end", epoch_end_callback)
+    # if batch_end_callback and not trainer.config.run_by_epoch:
+    trainer.set_callback("on_batch_end", batch_end_callback)
 
     trainer.run()

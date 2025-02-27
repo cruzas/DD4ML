@@ -66,20 +66,22 @@ class TrustRegion(torch.optim.Optimizer):
                     else:
                         p.data.sub_(grad[i] * scale)
 
-    def step(self, closure):
-        old_loss = closure(compute_grad=True)
+    def step(self, closure, old_loss=None, grad=None):
+        if old_loss is None:
+            old_loss = closure(compute_grad=True)
 
-        # Retrieve the gradient vector.
-        if not hasattr(self.model, "grad"):
-            grad = torch.cat(
-                [
-                    p.grad.detach().view(-1)
-                    for p in self.param_list
-                    if p.grad is not None
-                ]
-            )
-        else:
-            grad = self.model.grad()
+        if grad is None:
+            # Retrieve the gradient vector.
+            if not hasattr(self.model, "grad"):
+                grad = torch.cat(
+                    [
+                        p.grad.detach().view(-1)
+                        for p in self.param_list
+                        if p.grad is not None
+                    ]
+                )
+            else:
+                grad = self.model.grad()
 
         # Compute the global gradient norm.
         if self.norm_type == 2:
