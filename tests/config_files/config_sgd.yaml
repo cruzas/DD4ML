@@ -3,22 +3,22 @@ metric:
   name: train_loss
   goal: minimize
 parameters:
-  learning_rate:
-    values: [0.01]
   batch_size:
     values: [200]
   epochs: 
     value: 2 # used for any other model other than LLMs
   max_iters:
-    value: 10 # used for LLMs
+    values: [10000]
   optimizer: 
-    values: ["sgd"]
+    values: ["sgd"] # pmw compatible
+  learning_rate:
+    values: [0.01]
   dataset_name: 
-    values: ["mnist"]
-    # values: ["tinyshakespeare"] 
+    # values: ["mnist"]
+    values: ["tinyshakespeare"] 
   model_name: 
-    values: ["simple_cnn"]
-    # values: ["mingpt"] 
+    # values: ["simple_cnn"]
+    values: ["mingpt"] 
   criterion:
-    values: ["cross_entropy"] 
-    # values: ["cross_entropy_transformers"] 
+    # values: ["cross_entropy"] 
+    values: ["cross_entropy_transformers"] 
