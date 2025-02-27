@@ -163,7 +163,13 @@ class APTS_D(Optimizer):
         self.grad_evals_counter += total_local_grad_evals_counter
 
         with torch.no_grad():
-            local_reduction = initial_local_loss - local_loss.detach().to(self.device)
+            # If local loss is not a torch.Tensor, it is a scalar.
+            if not torch.is_tensor(local_loss):
+                local_loss = torch.tensor(local_loss, device=self.device)
+            else:
+                local_loss = local_loss.to(self.device)
+                
+            local_reduction = initial_local_loss - local_loss.detach()
             if self.nr_models > 1:
                 dist.all_reduce(step_vec, op=dist.ReduceOp.SUM)
                 dist.all_reduce(local_reduction, op=dist.ReduceOp.SUM)
