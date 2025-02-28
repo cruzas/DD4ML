@@ -90,7 +90,6 @@ def parse_cmd_args(APTS=False):
         "--use_seed", type=bool, default=False, help="Use a seed for reproducibility. You probably don't want to do this for hyperparameter tuning."
     )
 
-
     # Preliminary parse to check conditions.
     args, _ = parser.parse_known_args()
 

@@ -5,16 +5,19 @@ from dd4ml.models.cnn.base_cnn import BaseCNN
 
 
 # Define callable classes
-class ConvBlock(nn.Module):
+class ConvBNBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, padding, pool_size, stride):
-        super(ConvBlock, self).__init__()
+        super(ConvBNBlock, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, 
                               padding=padding, stride=stride)
-        self.pool = nn.MaxPool2d(kernel_size=pool_size)
+        self.bn = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU()
+        self.pool = nn.MaxPool2d(kernel_size=pool_size)
         
     def forward(self, x):
-        x = self.relu(self.conv(x))
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
         return self.pool(x)
 
 class FlattenBlock(nn.Module):
@@ -81,13 +84,12 @@ class SimpleCNN(BaseCNN):
         x = self.dropout(x)
         x = self.fc2(x)
         return x
-
+    
     def as_model_dict(self):
-        # Build the model dictionary with a flatten stage inserted.
         model_dict = {
             'start': {
                 'callable': {
-                    'object': ConvBlock,
+                    'object': ConvBNBlock,
                     'settings': {
                         'in_channels': self.config.input_channels,
                         'out_channels': 32,
@@ -104,7 +106,7 @@ class SimpleCNN(BaseCNN):
             },
             'conv2': {
                 'callable': {
-                    'object': ConvBlock,
+                    'object': ConvBNBlock,
                     'settings': {
                         'in_channels': 32,
                         'out_channels': 64,
@@ -121,7 +123,7 @@ class SimpleCNN(BaseCNN):
             },
             'conv3': {
                 'callable': {
-                    'object': ConvBlock,
+                    'object': ConvBNBlock,
                     'settings': {
                         'in_channels': 64,
                         'out_channels': 128,
