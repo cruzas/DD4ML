@@ -358,7 +358,7 @@ def generic_run(
         args["num_subdomains"] = dist.get_world_size() if dist.is_initialized() else 1
 
     set_seed(wandb_config.get("seed", 3407))
-    
+
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)
 

@@ -112,7 +112,7 @@ def parse_cmd_args(APTS=False):
         parser.add_argument(
             "--num_stages",
             type=int,
-            default=(2 if APTS else 2),
+            default=2,
             help="Number of stages",
         )
         parser.add_argument(

@@ -36,3 +36,4 @@ Thumbs.db
 /wandb
 tests/log_files/
 /rawdata
+/myvenv
