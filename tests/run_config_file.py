@@ -86,6 +86,10 @@ def parse_cmd_args(APTS=False):
         default="loss",
         help="Metric to determine best learning rate",
     )
+    parser.add_argument(
+        "--use_seed", type=bool, default=False, help="Use a seed for reproducibility. You probably don't want to do this for hyperparameter tuning."
+    )
+
 
     # Preliminary parse to check conditions.
     args, _ = parser.parse_known_args()
@@ -166,7 +170,9 @@ def main(rank, master_addr, master_port, world_size, args):
         wandb_config = dict(wandb.config)
     wandb_config = broadcast_dict(wandb_config, src=0) if use_wandb else {}
     
-    set_seed(wandb_config.get("seed", 3407))
+    # NOTE: Remove this for hyperparameter tuning
+    if args["use_seed"]:
+        set_seed(wandb_config.get("seed", 3407))
     
     trial_args = {**args, **wandb_config}
 
