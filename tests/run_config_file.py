@@ -14,6 +14,7 @@ from dd4ml.utils import (
     find_free_port,
     generic_run,
     prepare_distributed_environment,
+    set_seed,
 )
 
 try:
@@ -164,6 +165,9 @@ def main(rank, master_addr, master_port, world_size, args):
         wandb.init(entity=args["entity"], project=args["project"])
         wandb_config = dict(wandb.config)
     wandb_config = broadcast_dict(wandb_config, src=0) if use_wandb else {}
+    
+    set_seed(wandb_config.get("seed", 3407))
+    
     trial_args = {**args, **wandb_config}
 
     log_fn = dprint if not use_wandb else (lambda x: wandb.log(x))
