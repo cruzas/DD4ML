@@ -22,6 +22,10 @@ source ~/.slurm_env
 source ~/.tests_runpath
 cd "$TESTS_RUNPATH" || exit
 
+# Load required modules
+module load cray/23.12
+module load cray-python/3.11.5
+
 # Set environment variables
 if [ -z "$SLURM_CPUS_PER_TASK" ]; then
     export OMP_NUM_THREADS=1
@@ -29,19 +33,8 @@ else
     export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 fi
 export NCCL_DEBUG=ERROR # Set to INFO for debugging
-export NCCL_IB_HCA=ipogif0
-export NCCL_IB_CUDA_SUPPORT=1
 export NCCL_P2P_DISABLE=0
 export NCCL_SHM_DISABLE=0
-export NCCL_IB_DISABLE=0
-
-# Load required modules
-module load cray/23.12
-module load craype-network-ofi
-module load cray-python/3.11.5
-module load cray-mpich-abi/8.1.28
-module load craype-network-ucx
-# source /opt/cray/pe/cpe/23.12/restore_lmod_system_defaults.sh
 
 # Optionally source WandB environment
 if [ "${USE_WANDB}" = "1" ]; then
