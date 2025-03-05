@@ -2,6 +2,7 @@ import copy
 import importlib
 import pprint
 
+import os
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -95,8 +96,8 @@ def remove_keys(config, keys_to_remove):
     if isinstance(config, dict):
         for k in keys_to_remove:
             config.pop(k, None)
-        for key, value in config.items():
-            config[key] = remove_keys(value, keys_to_remove)
+        for k, value in config.items():
+            config[k] = remove_keys(value, keys_to_remove)
     elif hasattr(config, "__dict__"):
         for k in keys_to_remove:
             if k in config.__dict__:
