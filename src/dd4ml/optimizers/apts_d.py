@@ -1,91 +1,93 @@
 import copy
-from collections import OrderedDict
 
 import torch
-import torch.distributed as dist  # For distributed initialization if needed
+import torch.distributed as dist
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
-from dd4ml.optimizers.trust_region import *
+from dd4ml.optimizers.utils import get_trust_region_params, get_state_dict
+from dd4ml.optimizers.trust_region import TrustRegion  # Explicit import
+
+
+def flatten_params(model, out=None):
+    if out is None:
+        return parameters_to_vector(model.parameters())
+    # Write flattened parameters into a preallocated tensor.
+    offset = 0
+    for param in model.parameters():
+        numel = param.numel()
+        out[offset : offset + numel].copy_(param.data.view(-1))
+        offset += numel
+    return out
+
+
+def restore_params(model, flat_params):
+    vector_to_parameters(flat_params, model.parameters())
+
+
+def clone_model(model):
+    base_model = model.module if hasattr(model, "module") else model
+    config_copy = copy.deepcopy(base_model.config)
+    config_copy.model_type = None
+    new_model = type(base_model)(config_copy)
+    new_model.load_state_dict(get_state_dict(base_model))
+    return new_model.to(model.device)
 
 
 class APTS_D(Optimizer):
+    @staticmethod
     def setup_APTS_args(config):
-        # TODO: streamline the specification of the sub/global domain optimizer and their parameters.
-        from dd4ml.optimizers.trust_region import TrustRegion
         config.max_subdomain_iters = 3
-        # global optimizer
+        # Use the helper for the global optimizer arguments.
         config.global_optimizer = TrustRegion
-        config.global_optimizer_args = {
-            'lr': config.learning_rate,
-            'max_lr': 10.0,
-            'min_lr': 1e-4,
-            'nu': 0.5,
-            'inc_factor': 2.0,
-            'dec_factor': 0.5,
-            'nu_1': 0.25,
-            'nu_2': 0.75,
-            'max_iter': 3, # To decrease gradient directly within the trust region method
-            'norm_type': 2
-        }
+        config.global_optimizer_args = get_trust_region_params(config, lr_scale=1.0, max_iter=3)
         
-        config.subdomain_optimizer = TrustRegion
+        # For the subdomain optimizer, adjust the learning rate by world size.
         world_size = dist.get_world_size() if dist.is_initialized() else 1
-        config.subdomain_optimizer_args = {
-            'lr': config.learning_rate/world_size,
-            'max_lr': 10.0,
-            'min_lr': 1e-4,
-            'nu': 0.5,
-            'inc_factor': 2.0,
-            'dec_factor': 0.5,
-            'nu_1': 0.25,
-            'nu_2': 0.75,
-            'max_iter': 3, # To decrease gradient directly within the trust region method
-            'norm_type': 2
-        }
+        config.subdomain_optimizer = TrustRegion
+        config.subdomain_optimizer_args = get_trust_region_params(config, lr_scale=1.0/world_size, max_iter=3)
         
         return config
-    
-    def __init__(self,
-                 params,
-                 model=None,
-                 criterion=None,
-                 device=None,
-                 max_iter=3, 
-                 nr_models=None,
-                 global_opt=None,
-                 global_opt_params=None,
-                 local_opt=None,
-                 local_opt_params=None,
-                 global_pass=True,
-                 foc=True):
 
-        super(APTS_D, self).__init__(params, {})
-
-        self.model = model  # This model is assumed to be wrapped in DDP
-        if hasattr(model, 'module'):
-            self.local_model = copy.deepcopy(self.model.module)
-        else:
-            self.local_model = copy.deepcopy(self.model)
+    def __init__(
+        self,
+        params,
+        model=None,
+        criterion=None,
+        device=None,
+        max_iter=3,
+        nr_models=None,
+        global_opt=None,
+        global_opt_params=None,
+        local_opt=None,
+        local_opt_params=None,
+        global_pass=True,
+        foc=True,
+    ):
+        super().__init__(params, {})
+        self.model = model
+        self.local_model = clone_model(model)
         self.max_iter = max_iter
         self.nr_models = nr_models
-        self.device = device if device is not None else (f'cuda:{torch.cuda.current_device()}' if self.backend != 'gloo' else 'cpu')
+        self.device = device if device is not None else (
+            f"cuda:{torch.cuda.current_device()}" if getattr(self, "backend", "cuda") != "gloo" else "cpu"
+        )
         self.criterion = criterion
         self.global_pass = bool(global_pass)
         self.foc = bool(foc)
+        self.grad_evals_counter = torch.zeros(1, device=self.device)
 
-        # Closure inputs
-        self.inputs = None
-        self.labels = None
-        self.residual = None
-        self.grad_evals_counter = torch.tensor(0.0, device=self.device)
+        # Preallocate two buffers for flattening: one for global and one for local.
+        sample_flat = parameters_to_vector(model.parameters())
+        self._flat_params_buffer = torch.empty_like(sample_flat)
+        self._local_flat_buffer = torch.empty_like(sample_flat)
 
-        if 'TrustRegion' in str(global_opt):
+        if "TrustRegion" in str(global_opt):
             self.global_optimizer = global_opt(self.model, **global_opt_params)
             self.local_optimizer = local_opt(self.local_model, **local_opt_params)
         else:
             self.global_optimizer = global_opt(self.model.parameters(), **global_opt_params)
             self.local_optimizer = local_opt(self.local_model.parameters(), **local_opt_params)
-
         self.lr = self.global_optimizer.lr
 
     def non_foc_local_closure(self, compute_grad=False):
@@ -99,89 +101,107 @@ class APTS_D(Optimizer):
     def foc_local_closure(self, compute_grad=False):
         self.local_optimizer.zero_grad()
         local_loss = self.non_foc_local_closure(compute_grad)
-        global_params = torch.cat([p.view(-1) for p in self.model.parameters()])
-        local_params = torch.cat([p.view(-1) for p in self.local_model.parameters()])
-        s = local_params - global_params
-        if not torch.all(torch.abs(s) < 1e-8):
-            local_loss = local_loss + (self.residual @ s)
+        # Compute global and local flattened parameters using separate buffers.
+        global_flat = flatten_params(self.model, self._flat_params_buffer)
+        local_flat = flatten_params(self.local_model, self._local_flat_buffer)
+        diff = local_flat - global_flat
+        if not torch.all(torch.abs(diff) < 1e-8):
+            if self.residual.dim() == 0 and self.residual.item() == 0:
+                self.residual = torch.zeros_like(diff)
+            local_loss = local_loss + (self.residual @ diff)
         return local_loss
 
     def global_closure(self, compute_grad=False):
         self.zero_grad()
         outputs = self.model(self.inputs)
-        global_loss = self.criterion(outputs, self.labels)
+        loss = self.criterion(outputs, self.labels)
         if torch.is_grad_enabled() or compute_grad:
-            global_loss.backward()
-        return global_loss
+            loss.backward()  # DDP handles gradient averaging
+        if self.nr_models > 1:
+            dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+            loss /= self.nr_models
+        return loss
 
     def step(self, inputs, labels):
-        self.grad_evals_counter = torch.tensor(0.0, device=self.device)
-        self.inputs = inputs
-        self.labels = labels
-        self.residual = torch.tensor(0.0, device=self.device)
+        self.grad_evals_counter.zero_()
+        self.inputs, self.labels = inputs, labels
         local_closure = self.foc_local_closure if self.foc else self.non_foc_local_closure
-        
+
         with torch.no_grad():
-            initial_params = torch.cat([p.view(-1) for p in self.model.parameters()])
-        
+            initial_flat = flatten_params(self.model, self._flat_params_buffer).clone()
+            
         initial_global_loss = self.global_closure()
         self.grad_evals_counter += 1
-        initial_local_loss = local_closure()
         
-        global_gradient = torch.cat([p.grad.flatten() for p in self.model.parameters()]).detach()
-        initial_local_gradient = torch.cat([p.grad.flatten() for p in self.local_model.parameters()]).detach().clone()
-        self.residual = global_gradient - initial_local_gradient
+        total_local_grad_evals_counter = torch.tensor(0.0, device=self.device)
+        initial_local_loss = local_closure()
+        total_local_grad_evals_counter += 1
 
-        for _ in range(self.max_iter):
-            local_loss = self.local_optimizer.step(local_closure)
-            self.grad_evals_counter += 1.0 / self.nr_models
+        global_grad = parameters_to_vector([p.grad for p in self.model.parameters()]).detach()
+        local_grad = parameters_to_vector([p.grad for p in self.local_model.parameters()]).detach().clone()
+        self.residual = global_grad - local_grad
+
+        # Local steps
+        step_vec = None
+        for local_iter in range(self.max_iter):
+            loss_arg = initial_local_loss if local_iter == 0 else None
+            grad_arg = local_grad if local_iter == 0 else None
+            local_loss = self.local_optimizer.step(closure=local_closure, old_loss=loss_arg, grad=grad_arg)
+            if local_iter > 0: 
+                total_local_grad_evals_counter += 1
+                
             with torch.no_grad():
-                step = torch.cat([p.view(-1) for p in self.local_model.parameters()]) - initial_params
-                if torch.norm(step, p=2) >= self.local_optimizer.max_lr:
+                current_flat = flatten_params(self.local_model, self._local_flat_buffer)
+                step_vec = current_flat - initial_flat
+                if torch.norm(step_vec, p=2) >= self.local_optimizer.max_lr:
                     break
 
-        with torch.no_grad():
-            local_reduction = initial_local_loss - local_loss.clone().detach().to(self.device)
-            a = 0
-            for param in self.model.parameters():
-                b = param.numel()
-                param.data.copy_(torch.reshape(initial_params[a:a+b] + step[a:a+b], param.shape))
-                a += b
+        if self.nr_models > 1:
+            dist.all_reduce(total_local_grad_evals_counter, op=dist.ReduceOp.SUM)
+            total_local_grad_evals_counter /= self.nr_models
+        
+        self.grad_evals_counter += total_local_grad_evals_counter
 
-            trial_loss = self.global_closure()
+        with torch.no_grad():
+            # If local loss is not a torch.Tensor, it is a scalar.
+            if not torch.is_tensor(local_loss):
+                local_loss = torch.tensor(local_loss, device=self.device)
+            else:
+                local_loss = local_loss.to(self.device)
+                
+            local_reduction = initial_local_loss - local_loss.detach()
+            if self.nr_models > 1:
+                dist.all_reduce(step_vec, op=dist.ReduceOp.SUM)
+                dist.all_reduce(local_reduction, op=dist.ReduceOp.SUM)
+            restore_params(self.model, initial_flat + step_vec)
+            
+        trial_loss = self.global_closure()
+        
+        with torch.no_grad():
             acceptance_ratio = (initial_global_loss - trial_loss) / local_reduction
 
             if acceptance_ratio < self.global_optimizer.nu_1:
-                self.lr = max(self.lr * self.global_optimizer.dec_factor,
-                                  self.global_optimizer.min_lr)
-                a = 0
-                for param in self.model.parameters():
-                    b = param.numel()
-                    param.data.copy_(torch.reshape(initial_params[a:a+b], param.shape))
-                    a += b
+                self.lr = max(self.lr * self.global_optimizer.dec_factor, self.global_optimizer.min_lr)
+                restore_params(self.model, initial_flat)
                 new_loss = initial_global_loss
+                grad_arg = global_grad
             elif acceptance_ratio > self.global_optimizer.nu_2:
-                self.lr = min(self.lr * self.global_optimizer.inc_factor,
-                                  self.global_optimizer.max_lr)
+                self.lr = min(self.lr * self.global_optimizer.inc_factor, self.global_optimizer.max_lr)
                 new_loss = trial_loss
+                grad_arg = None
             else:
                 new_loss = trial_loss
+                grad_arg = None
 
             self.global_optimizer.lr = self.lr
 
         if self.global_pass:
-            new_loss = self.global_optimizer.step(self.global_closure)
+            new_loss = self.global_optimizer.step(closure=self.global_closure, old_loss=new_loss, grad=grad_arg)
             self.grad_evals_counter += 1
 
         with torch.no_grad():
             self.lr = self.global_optimizer.lr
             self.local_optimizer.lr = self.lr / self.nr_models
-            try:
-                if hasattr(self.model, 'module'):
-                    self.local_model.load_state_dict(self.model.module.state_dict())
-                else:
-                    self.local_model.load_state_dict(self.model.state_dict())
-            except:
-                print('Local model and global model have different state_dict keys.')
+            self.local_model.load_state_dict(get_state_dict(self.model))
 
         return new_loss

@@ -1,20 +1,23 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from dd4ml.models.cnn.base_cnn import BaseCNN
 
-
 # Define callable classes
-class ConvBlock(nn.Module):
+class ConvBNBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, padding, pool_size, stride):
-        super(ConvBlock, self).__init__()
+        super(ConvBNBlock, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, 
                               padding=padding, stride=stride)
-        self.pool = nn.MaxPool2d(kernel_size=pool_size)
+        self.bn = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU()
+        self.pool = nn.MaxPool2d(kernel_size=pool_size)
         
     def forward(self, x):
-        x = self.relu(self.conv(x))
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
         return self.pool(x)
 
 class FlattenBlock(nn.Module):
@@ -56,19 +59,31 @@ class SimpleCNN(BaseCNN):
     @staticmethod
     def get_default_config():
         C = BaseCNN.get_default_config()
+        # Default to MNIST settings; update these for CIFAR10 as needed.
+        C.input_channels = 1
+        C.input_height = 28
+        C.input_width = 28
         return C
     
     def __init__(self, config):
         super().__init__(config)
         
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(config.input_channels, 32, kernel_size=3, padding=1)
         self.batchnorm1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
         self.batchnorm2 = nn.BatchNorm2d(64)
         self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
         self.batchnorm3 = nn.BatchNorm2d(128)
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.fc1 = nn.Linear(128 * 3 * 3, 256)
+        
+        # Dynamically determine flattened feature size
+        dummy = torch.zeros(1, config.input_channels, config.input_height, config.input_width)
+        dummy = self.pool(F.relu(self.batchnorm1(self.conv1(dummy))))
+        dummy = self.pool(F.relu(self.batchnorm2(self.conv2(dummy))))
+        dummy = self.pool(F.relu(self.batchnorm3(self.conv3(dummy))))
+        self.flattened_size = dummy.view(1, -1).size(1)
+        
+        self.fc1 = nn.Linear(self.flattened_size, 256)
         self.dropout = nn.Dropout(0.5)
         self.fc2 = nn.Linear(256, 10)
     
@@ -76,18 +91,17 @@ class SimpleCNN(BaseCNN):
         x = self.pool(F.relu(self.batchnorm1(self.conv1(x))))
         x = self.pool(F.relu(self.batchnorm2(self.conv2(x))))
         x = self.pool(F.relu(self.batchnorm3(self.conv3(x))))
-        x = x.view(-1, 128 * 3 * 3)
+        x = x.view(x.size(0), -1)
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
         x = self.fc2(x)
         return x
-
+    
     def as_model_dict(self):
-        # Build the model dictionary with a flatten stage inserted.
         model_dict = {
             'start': {
                 'callable': {
-                    'object': ConvBlock,
+                    'object': ConvBNBlock,
                     'settings': {
                         'in_channels': self.config.input_channels,
                         'out_channels': 32,
@@ -104,7 +118,7 @@ class SimpleCNN(BaseCNN):
             },
             'conv2': {
                 'callable': {
-                    'object': ConvBlock,
+                    'object': ConvBNBlock,
                     'settings': {
                         'in_channels': 32,
                         'out_channels': 64,
@@ -121,7 +135,7 @@ class SimpleCNN(BaseCNN):
             },
             'conv3': {
                 'callable': {
-                    'object': ConvBlock,
+                    'object': ConvBNBlock,
                     'settings': {
                         'in_channels': 64,
                         'out_channels': 128,
@@ -150,7 +164,7 @@ class SimpleCNN(BaseCNN):
                 'callable': {
                     'object': FCBlock,
                     'settings': {
-                        'in_features': 128 * 3 * 3,
+                        'in_features': self.flattened_size,
                         'out_features': 256,
                         'activation': 'relu',
                     },
