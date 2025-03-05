@@ -37,3 +37,5 @@ Thumbs.db
 tests/log_files/
 /rawdata
 /myvenv
+/data
+/tests/data
