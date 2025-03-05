@@ -1,7 +1,6 @@
 import argparse
 import os
 import sys
-
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -63,8 +62,10 @@ def parse_cmd_args(APTS=False):
         "--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper"
     )
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
+    
+    num_cpus = int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
     parser.add_argument(
-        "--num_workers", type=int, default=1, help="Number of workers to use"
+        "--num_workers", type=int, default=num_cpus, help="Number of workers to use"
     )
     parser.add_argument(
         "--dataset_name", type=str, default="mnist", help="Dataset name"
