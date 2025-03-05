@@ -7,6 +7,7 @@ This code runs with our dictionary-defined model, which is instantiated as a Par
 Model handler takes care of the parallelized model logic. This is why this is slightly different from the trainer in mingpt.
 """
 
+import os
 import inspect
 import time
 from collections import defaultdict
@@ -31,7 +32,7 @@ class Trainer:
         # device to train on
         C.device = "auto"
         # dataloder parameters
-        C.num_workers = 1
+        C.num_workers = int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
         # optimizer parameters
         C.max_iters = 1000
         C.batch_size = 128

@@ -18,7 +18,7 @@ class APTS(torch.optim.Optimizer):
         elif config.subdomain_optimizer == torch.optim.SGD:
             config.subdomain_optimizer_args['momentum'] = 0.9
         
-        config.max_subdomain_iters = 2
+        config.max_subdomain_iters = 3
         
         # Global optimizer
         config.global_optimizer = TrustRegion

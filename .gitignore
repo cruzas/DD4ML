@@ -5,6 +5,7 @@ __pycache__/
 # Virtual environment
 .env/
 venv/
+dd4ml-venv/
 
 # PyTorch checkpoint files
 *.pth
