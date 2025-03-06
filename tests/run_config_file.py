@@ -14,6 +14,7 @@ from dd4ml.utility import (
     find_free_port,
     generic_run,
     prepare_distributed_environment,
+    set_seed
 )
 
 try:
@@ -124,7 +125,7 @@ def parse_cmd_args(APTS=True):
             help="Number of stages",
         )
         parser.add_argument(
-            "--num_subdomains", type=int, default=1, help="Number of subdomains"
+            "--num_subdomains", type=int, default=2, help="Number of subdomains"
         )
         parser.add_argument(
             "--num_replicas_per_subdomain",
