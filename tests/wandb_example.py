@@ -8,7 +8,7 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from dd4ml.utils import detect_environment, prepare_distributed_environment
+from dd4ml.utility.utils import detect_environment, prepare_distributed_environment
 
 print(f"Cuda available: {torch.cuda.is_available()}")
 print(f"Torch version: {torch.__version__}")

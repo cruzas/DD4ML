@@ -5,8 +5,8 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
-from dd4ml.optimizers.utils import get_trust_region_params, get_state_dict
-from dd4ml.optimizers.trust_region import TrustRegion  # Explicit import
+from .utils import get_trust_region_params, get_state_dict
+from .trust_region import TrustRegion  # Explicit import
 
 
 def flatten_params(model, out=None):

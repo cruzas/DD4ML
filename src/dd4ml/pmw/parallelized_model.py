@@ -4,14 +4,13 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 
-from dd4ml.pmw.base_pmw_model import BasePMWModel
-from dd4ml.pmw.data_and_weight_parallelized_subdomain import \
-    DataAndWeightParallelizedSubdomain
+from .base_pmw_model import BasePMWModel
+from .data_and_weight_parallelized_subdomain import DataAndWeightParallelizedSubdomain
 
 
 class ParallelizedModel(BasePMWModel):
     def __init__(self, model_handler, sample):
-        '''
+        """
         Ranks that will be used are [0, ..., world_size - 1]
 
         This is the outermost shell in a multi-shell parallel strategy.
@@ -28,7 +27,7 @@ class ParallelizedModel(BasePMWModel):
                 [Layer0, (Rank0)    [Layer0, (Rank3)   [Layer0, (Rank6)            [Layer0, (Rank9)    [Layer0, (Rank12)   [Layer0, (Rank15)
                  Layer1, (Rank1)     Layer1, (Rank4)    Layer1, (Rank7)             Layer1, (Rank10)    Layer1, (Rank13)    Layer1, (Rank16)
                  Layer2] (Rank2)     Layer2] (Rank5)    Layer2] (Rank8)             Layer2] (Rank11)    Layer2] (Rank14)    Layer2] (Rank17)
-        '''
+        """
         super().__init__()
 
         self.model_handler = model_handler
@@ -39,7 +38,8 @@ class ParallelizedModel(BasePMWModel):
 
         if self.rank in self.model_handler.available_ranks:
             self.subdomain = DataAndWeightParallelizedSubdomain(
-                self.model_handler, sample)
+                self.model_handler, sample
+            )
             self.sync_params()
 
     def save_state_dict(self, path):
@@ -50,18 +50,17 @@ class ParallelizedModel(BasePMWModel):
 
     def load_state_dict(self, path):
         params_dict = torch.load(path)
-        local_layers = self.model_handler.stage_data()['layers']
+        local_layers = self.model_handler.stage_data()["layers"]
         local_dict = {}
         for layer in local_layers:
             for key in params_dict.keys():
                 if layer in key:
                     if layer not in local_dict:
                         local_dict[layer] = {}
-                    key2 = '.'.join(key.split('.')[1:])
-                    key2 = 'layer.' + key2
+                    key2 = ".".join(key.split(".")[1:])
+                    key2 = "layer." + key2
                     local_dict[layer][key2] = params_dict[key]
-        self.subdomain.weight_parallelized_model.subdomain.load_state_dict(
-            local_dict)
+        self.subdomain.weight_parallelized_model.subdomain.load_state_dict(local_dict)
 
     def state_dict(self, dst_rank=0):
         def merger(gathered_state_dicts, replica_ranks):
@@ -74,15 +73,23 @@ class ParallelizedModel(BasePMWModel):
         sd, rep, _, _ = self.model_handler.rank_to_position()
         if sd == 0 and rep == 0:
             replica_ranks = self.model_handler.replica_ranks()
-            subdomain_state_dict = self.subdomain.weight_parallelized_model.subdomain.state_dict()
+            subdomain_state_dict = (
+                self.subdomain.weight_parallelized_model.subdomain.state_dict()
+            )
             if self.rank == replica_ranks[0]:
-                gathered_state_dicts = [
-                    None for _ in range(len(replica_ranks))]
-                dist.gather_object(subdomain_state_dict, gathered_state_dicts,
-                                   dst=replica_ranks[0], group=self.model_handler.get_replica_group())
+                gathered_state_dicts = [None for _ in range(len(replica_ranks))]
+                dist.gather_object(
+                    subdomain_state_dict,
+                    gathered_state_dicts,
+                    dst=replica_ranks[0],
+                    group=self.model_handler.get_replica_group(),
+                )
             else:
                 dist.gather_object(
-                    subdomain_state_dict, dst=replica_ranks[0], group=self.model_handler.get_replica_group())
+                    subdomain_state_dict,
+                    dst=replica_ranks[0],
+                    group=self.model_handler.get_replica_group(),
+                )
 
             if self.rank == replica_ranks[0]:
                 merged_state_dict = merger(gathered_state_dicts, replica_ranks)
@@ -98,7 +105,9 @@ class ParallelizedModel(BasePMWModel):
         return self.subdomain.weight_parallelized_model.subdomain.parameters()
 
     def configure_params(self, train_config):
-        return self.subdomain.weight_parallelized_model.subdomain.configure_params(train_config)
+        return self.subdomain.weight_parallelized_model.subdomain.configure_params(
+            train_config
+        )
 
     def subdomain_forward(self):
         return self.subdomain.weight_parallelized_model.subdomain.forward()
@@ -133,27 +142,38 @@ class ParallelizedModel(BasePMWModel):
         return self.subdomain.weight_parallelized_model.grad_norm(p=p)
 
     def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):
-        return self.subdomain.forward(x, chunks_amount=chunks_amount, reset_grad=reset_grad, compute_grad=compute_grad)
+        return self.subdomain.forward(
+            x,
+            chunks_amount=chunks_amount,
+            reset_grad=reset_grad,
+            compute_grad=compute_grad,
+        )
 
     def backward(self, losses):
         self.subdomain.backward(losses=losses, sync=False)
         self.sync_grads()
 
-    def sync_params(self, method='average'):
+    def sync_params(self, method="average"):
         if self.num_subdomains > 1:
-            if method not in ['average', 'sum']:
+            if method not in ["average", "sum"]:
                 raise ValueError(f"Method {method} is not supported.")
             for param in self.subdomain_params():
-                dist.all_reduce(tensor=param.data, group=self.model_handler.get_layers_copy_group(
-                    mode='global'), op=dist.ReduceOp.SUM)
-                if method == 'average':
+                dist.all_reduce(
+                    tensor=param.data,
+                    group=self.model_handler.get_layers_copy_group(mode="global"),
+                    op=dist.ReduceOp.SUM,
+                )
+                if method == "average":
                     param.data /= self.tot_replicas
 
     def sync_grads(self):
         if self.num_subdomains > 1:
             for param in self.subdomain_params():
-                dist.all_reduce(tensor=param.grad, group=self.model_handler.get_layers_copy_group(
-                    mode='global'), op=dist.ReduceOp.SUM)
+                dist.all_reduce(
+                    tensor=param.grad,
+                    group=self.model_handler.get_layers_copy_group(mode="global"),
+                    op=dist.ReduceOp.SUM,
+                )
                 param.grad /= self.tot_replicas
 
     def normalize_grads(self, p=torch.inf):
@@ -165,25 +185,40 @@ class ParallelizedModel(BasePMWModel):
     def subdomain_named_params(self):
         # Required for proper parameter initialization for transformer networks
         return self.subdomain.weight_parallelized_model.subdomain.named_parameters()
-    
-    def generate(self, idx, max_new_tokens, temperature=1.0, do_sample=False, top_k=None, closure=None):
+
+    def generate(
+        self,
+        idx,
+        max_new_tokens,
+        temperature=1.0,
+        do_sample=False,
+        top_k=None,
+        closure=None,
+    ):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
-        last_stage_ranks = self.model_handler.get_stage_ranks(stage_name='last', mode='local')
+        last_stage_ranks = self.model_handler.get_stage_ranks(
+            stage_name="last", mode="local"
+        )
         for _ in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at block_size
-            idx_cond = idx if idx.size(
-                1) <= self.block_size else idx[:, -self.block_size:]
+            idx_cond = (
+                idx if idx.size(1) <= self.block_size else idx[:, -self.block_size :]
+            )
 
             # forward the model to get the logits for the index in the sequence
-            logits = self.forward(idx_cond, chunks_amount=1, reset_grad=False, compute_grad=False)[0]
+            logits = self.forward(
+                idx_cond, chunks_amount=1, reset_grad=False, compute_grad=False
+            )[0]
 
             if not self.model_handler.is_last_stage():
                 # increase second dimension of idx by one to receive it in the broadcast
-                idx = torch.cat((idx, torch.zeros((idx.size(0), 1), dtype=torch.long)), dim=1)
+                idx = torch.cat(
+                    (idx, torch.zeros((idx.size(0), 1), dtype=torch.long)), dim=1
+                )
 
             if self.model_handler.is_last_stage():
                 # pluck the logits at the final step and scale by desired temperature
@@ -191,7 +226,7 @@ class ParallelizedModel(BasePMWModel):
                 # optionally crop the logits to only the top k options
                 if top_k is not None:
                     v, _ = torch.topk(logits, top_k)
-                    logits[logits < v[:, [-1]]] = -float('Inf')
+                    logits[logits < v[:, [-1]]] = -float("Inf")
                 # apply softmax to convert logits to (normalized) probabilities
                 probs = F.softmax(logits, dim=-1)
                 # either sample from the distribution or take the most likely element
@@ -201,8 +236,13 @@ class ParallelizedModel(BasePMWModel):
                     _, idx_next = torch.topk(probs, k=1, dim=-1)
                 # append sampled index to the running sequence and continue
                 idx = torch.cat((idx, idx_next), dim=1)
-            
+
             # broadcast the idx to all replicas in the last stage
-            idx_broadcast = dist.broadcast(idx, src=last_stage_ranks[0], group=self.model_handler.get_replica_group(), async_op=True)
+            idx_broadcast = dist.broadcast(
+                idx,
+                src=last_stage_ranks[0],
+                group=self.model_handler.get_replica_group(),
+                async_op=True,
+            )
             idx_broadcast.wait()
-        return idx  
+        return idx

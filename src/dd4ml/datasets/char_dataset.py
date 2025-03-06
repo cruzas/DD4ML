@@ -1,6 +1,6 @@
 import torch
 
-from dd4ml.datasets.base_dataset import *
+from .base_dataset import *
 
 
 class CharDataset(BaseDataset):
@@ -19,7 +19,7 @@ class CharDataset(BaseDataset):
 
         chars = sorted(list(set(data)))
         data_size, vocab_size = len(data), len(chars)
-        dprint(f'data has {data_size} characters, {vocab_size} unique.')
+        dprint(f"data has {data_size} characters, {vocab_size} unique.")
 
         self.stoi = {ch: i for i, ch in enumerate(chars)}
         self.itos = {i: ch for i, ch in enumerate(chars)}
@@ -36,11 +36,10 @@ class CharDataset(BaseDataset):
 
     def __getitem__(self, idx):
         # grab a chunk of (block_size + 1) characters from the data
-        chunk = self.data[idx:idx + self.config.block_size + 1]
+        chunk = self.data[idx : idx + self.config.block_size + 1]
         # encode every character to an integer
         dix = [self.stoi[s] for s in chunk]
         # return as tensors
         x = torch.tensor(dix[:-1], dtype=torch.long)
         y = torch.tensor(dix[1:], dtype=torch.long)
         return x, y
-

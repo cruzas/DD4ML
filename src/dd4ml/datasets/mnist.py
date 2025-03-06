@@ -1,6 +1,6 @@
 from torchvision import datasets, transforms
 
-from dd4ml.datasets.base_dataset import *
+from .base_dataset import *
 
 
 class MNISTDataset(BaseDataset):
@@ -21,25 +21,26 @@ class MNISTDataset(BaseDataset):
 
     def __init__(self, config, data=None, transform=None):
         super().__init__(config, data, transform)
-        
+
         if transform is None:
             # Define transformations
-            self.transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize((0.5,), (0.5,))
-            ])
-        
+            self.transform = transforms.Compose(
+                [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]
+            )
+
         if data is None:
             # Load MNIST dataset
             self.data = datasets.MNIST(
-                root=self.config.root, 
-                train=self.config.train, 
-                download=self.config.download, 
-                transform=self.transform
+                root=self.config.root,
+                train=self.config.train,
+                download=self.config.download,
+                transform=self.transform,
             )
-        
+
         self.classes = self.data.classes
-        dprint(f'MNIST dataset loaded with {len(self.data)} images, {len(self.classes)} classes.')
+        dprint(
+            f"MNIST dataset loaded with {len(self.data)} images, {len(self.classes)} classes."
+        )
 
     def get_input_channels(self):
         return 1  # black-and-white images
