@@ -3,10 +3,16 @@ import math
 import torch
 from torch.optim import Optimizer
 
-from dd4ml.optimizers.utils import get_trust_region_params
+from .utils import get_trust_region_params
 
 
 class TrustRegion(Optimizer):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        return func(*args, **kwargs)
+
     @staticmethod
     def setup_TR_args(config):
         params = get_trust_region_params(config, lr_scale=1.0, max_iter=3)
@@ -50,9 +56,7 @@ class TrustRegion(Optimizer):
         self.nu_1 = nu_1  # Acceptance threshold (lower)
         self.nu_2 = nu_2  # Acceptance threshold (upper for expansion)
         self.nu = min(nu, nu_1)
-        self.max_iter = (
-            max_iter  # Used here as the maximum memory size for curvature pairs
-        )
+        self.max_iter = max_iter  # Maximum memory size for curvature pairs
         self.norm_type = norm_type
         self.model_has_grad = hasattr(self.model, "grad")
         # Additional state for LSR1 Hessian approximation:
@@ -85,7 +89,7 @@ class TrustRegion(Optimizer):
 
     def _solve_tr_subproblem(self, g, delta):
         # Solve: minimize 0.5 * s^T B s + g^T s  s.t. ||s|| <= delta.
-        # Here, B is the Hessian approximation (via LSR1) and delta is the current trust-region radius (self.lr).
+        # Here, B is the Hessian approximation (via LSR1) and delta is the current trust-region radius.
         device = g.device
         n = g.numel()
         s = torch.zeros_like(g)

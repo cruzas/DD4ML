@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from dd4ml.utils import compute_best_lr_per_batch_size, parse_cmd_args
+from dd4ml.utility.utils import compute_best_lr_per_batch_size, parse_cmd_args
 
 
 def main():
