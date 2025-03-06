@@ -9,6 +9,9 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from .config import get_config, make_std_config
 from .factory import criterion_factory, dataset_factory, optimizer_factory
 
+# You can now add new components dynamically at runtime by calling, e.g.:
+# dataset_factory.register("new_dataset", "dd4ml.datasets.new_dataset", "NewDatasetClass")
+
 
 def get_config_model_and_trainer(args, wandb_config):
     """
