@@ -46,5 +46,5 @@ fi
 echo "Test started $(date)"
 export CUDA_VISIBLE_DEVICES=$(echo $SLURM_LOCALID)
 
-srun --kill-on-bad-exit --gpu-bind=map_gpu:${SLURM_LOCALID} /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" --sweep_config=./config_files/config_apts.yaml --use_pmw=true
+srun --kill-on-bad-exit --gpu-bind=map_gpu:${SLURM_LOCALID} /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" --sweep_config=./config_files/config_apts.yaml --use_pmw=true --use_seed=true
 echo "Test done $(date)"
