@@ -1,19 +1,19 @@
 import argparse
 import os
 import sys
+
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import yaml
 
-from dd4ml.utils import (
+from dd4ml.utility import (
     broadcast_dict,
     detect_environment,
     dprint,
     find_free_port,
     generic_run,
     prepare_distributed_environment,
-    set_seed,
 )
 
 try:
@@ -24,7 +24,7 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 
-def parse_cmd_args(APTS=False):
+def parse_cmd_args(APTS=True):
     parser = argparse.ArgumentParser("Running configuration file...")
 
     # Check if WANDB_MODE is set to 'online'
@@ -59,11 +59,11 @@ def parse_cmd_args(APTS=False):
         help="Wandb project",
     )
     parser.add_argument(
-        "--use_pmw", type=bool, default=False, help="Use Parallel Model Wrapper"
+        "--use_pmw", type=bool, default=APTS, help="Use Parallel Model Wrapper"
     )
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
-    
-    num_cpus = int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
+
+    num_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
     parser.add_argument(
         "--num_workers", type=int, default=num_cpus, help="Number of workers to use"
     )
@@ -88,7 +88,10 @@ def parse_cmd_args(APTS=False):
         help="Metric to determine best learning rate",
     )
     parser.add_argument(
-        "--use_seed", type=bool, default=False, help="Use a seed for reproducibility. You probably don't want to do this for hyperparameter tuning."
+        "--use_seed",
+        type=bool,
+        default=False,
+        help="Use a seed for reproducibility. You probably don't want to do this for hyperparameter tuning.",
     )
 
     # Preliminary parse to check conditions.
@@ -126,7 +129,7 @@ def parse_cmd_args(APTS=False):
         parser.add_argument(
             "--num_replicas_per_subdomain",
             type=int,
-            default=2,
+            default=1,
             help="Number of replicas per subdomain",
         )
 
@@ -169,11 +172,11 @@ def main(rank, master_addr, master_port, world_size, args):
         wandb.init(entity=args["entity"], project=args["project"])
         wandb_config = dict(wandb.config)
     wandb_config = broadcast_dict(wandb_config, src=0) if use_wandb else {}
-    
+
     # NOTE: Remove this for hyperparameter tuning
     if args["use_seed"]:
         set_seed(wandb_config.get("seed", 3407))
-    
+
     trial_args = {**args, **wandb_config}
 
     log_fn = dprint if not use_wandb else (lambda x: wandb.log(x))

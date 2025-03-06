@@ -4,13 +4,13 @@ from collections import deque
 
 import torch.nn as nn
 
-from dd4ml.utils import CfgNode as CN
-from dd4ml.utils import is_function_module
+from dd4ml.utility import CfgNode as CN
+from dd4ml.utility import is_function_module
 
 
 class BaseModel(nn.Module, ABC):
     n_layer = None
-    
+
     @staticmethod
     def get_default_config():
         C = CN()
@@ -25,7 +25,6 @@ class BaseModel(nn.Module, ABC):
         self.config = config
         self.model_dict = None
 
-
     def set_stage(self):
         """
         Topologically sort modules, then assign them to pipeline stages.
@@ -37,7 +36,7 @@ class BaseModel(nn.Module, ABC):
         adjacency = {}
         in_degree = {}
         for key, info in self.model_dict.items():
-            adjacency[key] = info['dst']['to']
+            adjacency[key] = info["dst"]["to"]
             in_degree[key] = 0
 
         for src, children in adjacency.items():
@@ -67,9 +66,11 @@ class BaseModel(nn.Module, ABC):
             prev_node = topo_order[i - 1]
             curr_node = topo_order[i]
             # Check if both are function modules and curr is the sole child of prev.
-            if (is_function_module(self.model_dict[prev_node]) and
-                is_function_module(self.model_dict[curr_node]) and
-                adjacency[prev_node] == [curr_node]):
+            if (
+                is_function_module(self.model_dict[prev_node])
+                and is_function_module(self.model_dict[curr_node])
+                and adjacency[prev_node] == [curr_node]
+            ):
                 current_group.append(curr_node)
             else:
                 grouped.append(current_group)
@@ -83,17 +84,17 @@ class BaseModel(nn.Module, ABC):
         idx = 0
         stage_idx = 0
         while idx < num_groups:
-            chunk = grouped[idx: idx + chunk_size]
+            chunk = grouped[idx : idx + chunk_size]
             for group in chunk:
                 for node in group:
-                    self.model_dict[node]['stage'] = stage_idx
+                    self.model_dict[node]["stage"] = stage_idx
             idx += chunk_size
             stage_idx += 1
             # If we exceed self.config.num_stages, put all remaining groups on the last stage.
             if stage_idx >= self.config.num_stages:
                 while idx < num_groups:
                     for node in grouped[idx]:
-                        self.model_dict[node]['stage'] = self.config.num_stages - 1
+                        self.model_dict[node]["stage"] = self.config.num_stages - 1
                     idx += 1
 
         return self.model_dict

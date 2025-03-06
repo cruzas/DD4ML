@@ -3,19 +3,18 @@ from collections import Counter
 
 from torch.utils.data import DataLoader, Dataset
 
-from dd4ml.utils import *
+from dd4ml.utility import *
 
-CN = CfgNode
 
 class BaseDataset(Dataset, ABC):
 
     @staticmethod
     def get_default_config():
-        C = CN()
+        C = CfgNode()
         C.train = True
         C.download = True
         C.root = "../rawdata/"
-        C.percentage = 100.0 # percentage of the dataset to use
+        C.percentage = 100.0  # percentage of the dataset to use
         return C
 
     def __init__(self, config, data, transform=None):
@@ -26,11 +25,11 @@ class BaseDataset(Dataset, ABC):
     @abstractmethod
     def __len__(self):
         pass
-    
+
     @abstractmethod
     def __getitem__(self, idx):
         pass
-    
+
     def compute_class_weights(self):
         # Count the occurrences of each class in the dataset
         labels = [label for _, label in self]
@@ -38,17 +37,22 @@ class BaseDataset(Dataset, ABC):
         total_samples = sum(class_counts.values())
 
         # Compute class weights as the inverse of the frequency
-        class_weights = {cls: total_samples / count for cls, count in class_counts.items()}
+        class_weights = {
+            cls: total_samples / count for cls, count in class_counts.items()
+        }
 
         # Convert to tensor and normalize
-        weights = torch.tensor([class_weights[i] for i in range(len(class_counts))], dtype=torch.float)
+        weights = torch.tensor(
+            [class_weights[i] for i in range(len(class_counts))], dtype=torch.float
+        )
         return weights / weights.sum()
-    
+
     def get_sample_input(self, config):
         dummy_train_loader = DataLoader(
             self,
             sampler=torch.utils.data.RandomSampler(
-                self, replacement=True, num_samples=int(1e10)),
+                self, replacement=True, num_samples=int(1e10)
+            ),
             shuffle=False,
             pin_memory=True,
             batch_size=1,
@@ -57,8 +61,8 @@ class BaseDataset(Dataset, ABC):
 
         x_batch, _ = next(iter(dummy_train_loader))
         device = config.device
-        if device == 'auto':
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
 
         return x_batch.to(device)
 
@@ -66,7 +70,8 @@ class BaseDataset(Dataset, ABC):
         dummy_train_loader = DataLoader(
             self,
             sampler=torch.utils.data.RandomSampler(
-                self, replacement=True, num_samples=int(1e10)),
+                self, replacement=True, num_samples=int(1e10)
+            ),
             shuffle=False,
             pin_memory=True,
             batch_size=1,
@@ -75,7 +80,7 @@ class BaseDataset(Dataset, ABC):
 
         _, y_batch = next(iter(dummy_train_loader))
         device = config.device
-        if device == 'auto':
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
 
         return y_batch.to(device)

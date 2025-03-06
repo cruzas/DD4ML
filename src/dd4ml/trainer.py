@@ -7,8 +7,8 @@ This code runs with our dictionary-defined model, which is instantiated as a Par
 Model handler takes care of the parallelized model logic. This is why this is slightly different from the trainer in mingpt.
 """
 
-import os
 import inspect
+import os
 import time
 from collections import defaultdict
 
@@ -19,8 +19,8 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from dd4ml.pmw.dataloaders import GeneralizedDistributedDataLoader
-from dd4ml.utils import CfgNode as CN
-from dd4ml.utils import closure, dprint
+from dd4ml.utility import CfgNode as CN
+from dd4ml.utility import closure
 
 
 class Trainer:
@@ -32,7 +32,7 @@ class Trainer:
         # device to train on
         C.device = "auto"
         # dataloder parameters
-        C.num_workers = int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
+        C.num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
         # optimizer parameters
         C.max_iters = 1000
         C.batch_size = 128

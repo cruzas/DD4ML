@@ -3,8 +3,8 @@ import time
 import torch
 import torch.distributed as dist
 
-from dd4ml.optimizers.trust_region import TrustRegion
-from dd4ml.optimizers.utils import get_trust_region_params
+from .trust_region import TrustRegion
+from .utils import get_trust_region_params
 
 class APTS(torch.optim.Optimizer):
     @staticmethod

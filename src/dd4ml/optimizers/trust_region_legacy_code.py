@@ -1,5 +1,5 @@
 import torch
-from dd4ml.optimizers.utils import get_trust_region_params
+from .utils import get_trust_region_params
 
 class TrustRegion(torch.optim.Optimizer):
     @staticmethod
