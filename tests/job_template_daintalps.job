@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=${JOB_NAME}
+#SBATCH --job-name=${JOB_NAME} # JOB_NAME should be defined in submit_job.sh script
 #SBATCH --output=./log_files/${JOB_NAME}.out
 #SBATCH --error=./log_files/${JOB_NAME}.err
 #SBATCH --nodes=1
@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
 
-# NOTE: these two should match
+# NOTE: these two should match to assign one task per GPU
 #SBATCH --ntasks-per-node=4
 #SBATCH --gres=gpu:4
 
@@ -15,11 +15,11 @@
 #SBATCH --constraint=gpu
 #SBATCH --partition=debug
 #SBATCH --exclusive
-source ~/.slurm_env
+source ~/.slurm_env # You should define SLURM_ACCOUNT in this file
 #SBATCH --account=$SLURM_ACCOUNT
 
 # Source common environment files
-source ~/.tests_runpath
+source ~/.tests_runpath # You should define TESTS_RUNPATH in this file
 cd "$TESTS_RUNPATH" || exit
 
 # Load required modules
@@ -33,8 +33,8 @@ else
     export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 fi
 export NCCL_DEBUG=ERROR # Set to INFO for debugging
-export NCCL_P2P_DISABLE=0
-export NCCL_SHM_DISABLE=0
+export NCCL_P2P_DISABLE=0 # Enable peer-to-peer communication
+export NCCL_SHM_DISABLE=0 # Enable shared memory communication
 
 # Optionally source WandB environment
 if [ "${USE_WANDB}" = "1" ]; then
@@ -44,7 +44,7 @@ fi
 
 # Execute the Python script
 echo "Test started $(date)"
-export CUDA_VISIBLE_DEVICES=$(echo $SLURM_LOCALID)
+export CUDA_VISIBLE_DEVICES=$(echo $SLURM_LOCALID) # Assign one GPU per task
 
 srun --kill-on-bad-exit --gpu-bind=map_gpu:${SLURM_LOCALID} /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" --sweep_config=./config_files/config_apts.yaml --use_pmw --use_seed
 echo "Test done $(date)"

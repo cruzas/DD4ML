@@ -10,6 +10,7 @@ from dd4ml.utility import (
     broadcast_dict,
     detect_environment,
     dprint,
+    dprint,
     find_free_port,
     generic_run,
     prepare_distributed_environment,
@@ -25,7 +26,10 @@ except ImportError:
 
 def parse_cmd_args(APTS: bool = True) -> argparse.Namespace:
     """Parse command-line arguments for training configuration."""
-    parser = argparse.ArgumentParser("Running configuration file...")
+    parser = argparse.ArgumentParser(
+        usage="%(prog)s [options] --entity ENTITY --project PROJECT ...",
+        description="Parse command line arguments. For those that state store_true, a value of true is stored if the flag is present. E.g. simply adding --use_seed, without specifying a value for it.",
+    )
 
     # Set default wandb entity based on WANDB_MODE.
     wandb_entity_default = "cruzaslocal"
