@@ -36,7 +36,7 @@ export NCCL_IB_IFNAME=ib0              # Use the active InfiniBand interface
 export NCCL_SOCKET_IFNAME=ib0          # Use the active InfiniBand interface
 export NCCL_IB_HCA=qib0                # Detected HCA ID
 export NCCL_IB_GID_INDEX=0             # Default GID index (InfiniBand, not RoCE)
-export NCCL_DEBUG=ERROR                # Enable NCCL debugging info
+export NCCL_DEBUG=ERROR                 # Enable NCCL debugging info
 export NCCL_IB_TIMEOUT=22              # Increase timeout if communication stalls
 export NCCL_NET_GDR_LEVEL=2            # Force GPU Direct RDMA usage
 export NCCL_P2P_DISABLE=0              # Enable peer-to-peer communication
@@ -54,7 +54,10 @@ echo "Test started $(date)"
 export CUDA_VISIBLE_DEVICES=$(echo $SLURM_LOCALID)
 
 echo "Activating virtual environment ../myvenv"
-source ../myvenv/bin/activate
+source ../dd4ml-venv/bin/activate
 
-srun --kill-on-bad-exit --gpu-bind=map_gpu:${SLURM_LOCALID} python3 -u "${SCRIPT}" --sweep_config=./config_files/config_apts.yaml
+srun --kill-on-bad-exit --gpu-bind=map_gpu:${SLURM_LOCALID} /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" \
+  --sweep_config=./config_files/config_apts.yaml --use_pmw --use_seed \
+  --num_stages ${NUM_STAGES} --num_subd ${NUM_SUBD} --num_rep ${NUM_REP}
+  
 echo "Test done $(date)"

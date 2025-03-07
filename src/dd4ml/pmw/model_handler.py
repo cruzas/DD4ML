@@ -3,7 +3,7 @@ import copy
 import torch.distributed as dist
 import torch.nn as nn
 
-from dd4ml.utility import broadcast_dict
+from dd4ml.utility import broadcast_dict, dprint
 
 
 def max_path_length(model, layer, cache=None):
@@ -286,7 +286,7 @@ class ModelHandler:
                 f"Number of available ranks ({len(self.available_ranks)}) is less than required ({total_required})."
             )
         elif len(self.available_ranks) > total_required:
-            print("Warning: Some available ranks will remain idle.")
+            dprint("Warning: Some available ranks will remain idle.")
             self.available_ranks = self.available_ranks[:total_required]
 
         n = self.num_replicas_per_subdomain * self.num_ranks_per_model
