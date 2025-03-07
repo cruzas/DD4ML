@@ -2,7 +2,6 @@
 #SBATCH --job-name=${JOB_NAME} # JOB_NAME should be defined in submit_job.sh script
 #SBATCH --output=./log_files/${JOB_NAME}.out
 #SBATCH --error=./log_files/${JOB_NAME}.err
-#SBATCH --nodes=1
 #SBATCH --time=00:10:00
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
@@ -46,7 +45,11 @@ fi
 echo "Test started $(date)"
 export CUDA_VISIBLE_DEVICES=$(echo $SLURM_LOCALID) # Assign one GPU per task
 
-srun --kill-on-bad-exit --gpu-bind=map_gpu:${SLURM_LOCALID} /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" --sweep_config=./config_files/config_apts.yaml --use_pmw --use_seed
+source ../dd4ml-venv/bin/activate
 
+srun --kill-on-bad-exit --gpu-bind=map_gpu:${SLURM_LOCALID} /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" \
+  --sweep_config=./config_files/config_apts.yaml --use_pmw --use_seed \
+  --num_stages ${NUM_STAGES} --num_subd ${NUM_SUBD} --num_rep ${NUM_REP}
+  
 echo "Test done $(date)"
 rm core_nid*

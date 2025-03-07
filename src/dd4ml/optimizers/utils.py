@@ -4,7 +4,7 @@ def get_state_dict(model):
 def get_trust_region_params(config, lr_scale=1.0, max_iter=3):
     return {
         "lr": config.learning_rate * lr_scale,
-        "max_lr": 10.0,
+        "max_lr": 2.0,
         "min_lr": 1e-4,
         "nu": 0.5,
         "inc_factor": 2.0,
