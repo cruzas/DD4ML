@@ -1,35 +1,40 @@
 #!/bin/bash
-#SBATCH --job-name=${JOB_NAME}             # JOB_NAME provided by the submission script
+#SBATCH --job-name=${JOB_NAME} # JOB_NAME should be defined in submit_job.sh script
 #SBATCH --output=./log_files/${JOB_NAME}.out
 #SBATCH --error=./log_files/${JOB_NAME}.err
+#SBATCH --nodes=1
 #SBATCH --time=00:10:00
-#SBATCH --cpus-per-task=1                 # TODO: Modify for maximum performance
+#SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
-#SBATCH --gres=gpu:4                      # Reserve all GPUs on each node
+
+# NOTE: these two should match to assign one task per GPU
+#SBATCH --ntasks-per-node=${NTASKS_PER_NODE}   # Dynamically set tasks per node
+#SBATCH --gres=gpu:${NTASKS_PER_NODE}   # Dynamically set tasks per node
+
 #SBATCH --hint=nomultithread
 #SBATCH --constraint=gpu
 #SBATCH --partition=debug
 #SBATCH --exclusive
-source ~/.slurm_env                        # Defines SLURM_ACCOUNT
+source ~/.slurm_env # You should define SLURM_ACCOUNT in this file
 #SBATCH --account=$SLURM_ACCOUNT
 
 # Source common environment files
-source ~/.tests_runpath                     # Defines TESTS_RUNPATH
+source ~/.tests_runpath # You should define TESTS_RUNPATH in this file
 cd "$TESTS_RUNPATH" || exit
 
 # Load required modules
 module load cray/23.12
 module load cray-python/3.11.5
 
-# Set OMP_NUM_THREADS
+# Set environment variables
 if [ -z "$SLURM_CPUS_PER_TASK" ]; then
     export OMP_NUM_THREADS=1
 else
     export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 fi
-
-export NCCL_P2P_DISABLE=0
-export NCCL_SHM_DISABLE=0
+export NCCL_DEBUG=ERROR # Set to INFO for debugging
+export NCCL_P2P_DISABLE=0 # Enable peer-to-peer communication
+export NCCL_SHM_DISABLE=0 # Enable shared memory communication
 
 # Optionally source WandB environment
 if [ "${USE_WANDB}" = "1" ]; then
@@ -37,50 +42,9 @@ if [ "${USE_WANDB}" = "1" ]; then
     export WANDB_MODE=online
 fi
 
+# Execute the Python script
 echo "Test started $(date)"
-
-# Do not fix CUDA_VISIBLE_DEVICES at the job level;
-# it will be assigned per srun call.
-
-# WORLD_SIZE is expected to be exported from the submission script.
-if [ -z "$WORLD_SIZE" ]; then
-    echo "WORLD_SIZE not set. Exiting."
-    exit 1
-else
-    echo "WORLD_SIZE=${WORLD_SIZE}"
-fi
-
-# Ensure tasks_remaining is an integer and exported
-declare -i tasks_remaining=${WORLD_SIZE}
-
-# Determine allocated nodes.
-nodes=($(scontrol show hostname $SLURM_NODELIST))
-echo "Allocated nodes: ${nodes[@]}"
-master=${nodes[0]}
-export MASTER_ADDR=$master
-
-echo "Adaptive launch: Total WORLD_SIZE=${WORLD_SIZE}"
-echo "Total tasks to allocate: ${tasks_remaining}"
-
-# Adaptive srun: Launch tasks per node based on available GPUs.
-for node in "${nodes[@]}"; do
-    declare -i tasks_this_node
-    if [ ${tasks_remaining} -ge 4 ]; then
-        tasks_this_node=4
-    else
-        tasks_this_node=${tasks_remaining}
-    fi
-    echo "Launching ${tasks_this_node} task(s) on node ${node}..."
-    srun --nodes=1 --nodelist=${node} --ntasks=${tasks_this_node} \
-         --export=ALL,MASTER_ADDR,WORLD_SIZE \
-         /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" \
-         --sweep_config=./config_files/config_apts.yaml --use_pmw --use_seed \
-         --num_stages ${NUM_STAGES} --num_subd ${NUM_SUBD} --num_rep ${NUM_REP} &
-    
-    tasks_remaining=$((tasks_remaining - tasks_this_node))
-done
-
-wait
-
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+srun --kill-on-bad-exit /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" --sweep_config=./config_files/config_apts.yaml --use_pmw --use_seed --num_stages=${NUM_STAGES} --num_subdomains=${NUM_SUBD} --num_replicas_per_subdomain=${NUM_REP}
 echo "Test done $(date)"
 rm core_nid*

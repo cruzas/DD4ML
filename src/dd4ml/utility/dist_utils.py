@@ -1,10 +1,10 @@
 import os
 import datetime
 local_rank = os.environ.get('SLURM_LOCALID', '0')
+import sys
 import pickle
 import socket
 import subprocess
-import sys
 from contextlib import closing
 import torch
 import torch.distributed as dist
@@ -52,14 +52,11 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
         multi_gpu = is_cuda_enabled and torch.cuda.device_count() > 1
         env_vars['MASTER_PORT'] = get_shared_random_master_port(master_port, seed=12345) # TODO: Currently random so may not always be a free port. Whatever strategy you choose, make sure it is the same across all processes.
         env_vars['MASTER_ADDR'] = subprocess.getoutput(f"scontrol show hostname {os.environ.get('SLURM_NODELIST')} | head -n1")
-        env_vars['WORLD_SIZE'] = os.environ.get('SLURM_NTASKS', '1') if multi_gpu else os.environ.get('SLURM_NNODES', '1')
+        env_vars['WORLD_SIZE'] = os.environ.get('SLURM_NTASKS', '1')
         env_vars['RANK'] = os.environ.get('SLURM_PROCID', '0') if multi_gpu else os.environ.get('SLURM_NODEID', '0')
         env_vars['LOCAL_RANK'] = os.environ.get('SLURM_LOCALID', '0')
         
-        if is_cuda_enabled:
-            env_vars['CUDA_VISIBLE_DEVICES'] = os.environ.get('SLURM_LOCALID', '0')
-            torch.cuda.set_device(int(os.environ['SLURM_LOCALID']))
-            
+        if is_cuda_enabled: torch.cuda.set_device(int(os.environ['SLURM_LOCALID']))
         rank = int(env_vars['RANK'])
         world_size = int(env_vars['WORLD_SIZE'])
     else:  # Local environment
