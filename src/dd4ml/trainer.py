@@ -85,7 +85,6 @@ class Trainer:
             self.device = torch.device("mps")
 
         self.model = self.model.to(self.device)
-        print(f"Running on device {self.device}")
 
         # variables that will be assigned to trainer class later for logging and etc
         self.total_start_time = 0.0  # for computing the total running time

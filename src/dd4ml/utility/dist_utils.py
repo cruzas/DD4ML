@@ -10,6 +10,9 @@ import torch
 import torch.distributed as dist
 import random
 
+def is_main_process():
+    return int(os.environ.get("SLURM_PROCID", 0)) == 0
+
 def dprint(to_print):
     '''
     Print only if the rank is 0 or if the code is running in a single node.
@@ -39,12 +42,12 @@ def get_shared_random_master_port(master_port=None, seed=42):
 
 def prepare_distributed_environment(rank=None, master_addr=None, master_port=None, world_size=None, is_cuda_enabled=torch.cuda.is_available()):
     if dist.is_initialized():
-        print("Process group already initialized. Skipping initialization...")
         return
     
     backend = 'nccl' if is_cuda_enabled else 'gloo'
     comp_env = detect_environment()
     env_vars = {}
+    multi_gpu = False
     if comp_env != 'local':  # SLURM cluster environment
         multi_gpu = is_cuda_enabled and torch.cuda.device_count() > 1
         env_vars['MASTER_PORT'] = get_shared_random_master_port(master_port, seed=12345) # TODO: Currently random so may not always be a free port. Whatever strategy you choose, make sure it is the same across all processes.
@@ -57,9 +60,6 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
             env_vars['CUDA_VISIBLE_DEVICES'] = os.environ.get('SLURM_LOCALID', '0')
             torch.cuda.set_device(int(os.environ['SLURM_LOCALID']))
             
-        if multi_gpu:
-            print("Multi-GPU setup detected.")
-        
         rank = int(env_vars['RANK'])
         world_size = int(env_vars['WORLD_SIZE'])
     else:  # Local environment
@@ -72,7 +72,8 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
     os.environ.update(env_vars)
     # Compute unique identifier based on rank and global rank considering I have 2 nodes and 4 GPUs per node
     dist.init_process_group(backend=backend, rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=10))
-    print(f"Rank {rank}/{world_size - 1} initialized process group with backend: {backend}.")
+    
+    if multi_gpu: dprint("Multi-GPU environment detected.")
 
 def send_shape(shape: list, dst: int, device=None):
     if device is None:

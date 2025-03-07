@@ -1,6 +1,6 @@
 # Byte-compiled files
 *.pyc
-__pycache__/
+*__pycache__/
 
 # Virtual environment
 .env/
@@ -40,3 +40,7 @@ tests/log_files/
 /myvenv
 /data
 /tests/data
+/src/datasets
+/src/models
+/src/optimizers/
+/src/utility
