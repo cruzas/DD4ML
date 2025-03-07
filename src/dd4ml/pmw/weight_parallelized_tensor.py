@@ -1,8 +1,5 @@
-import math
-
 import torch
 import torch.distributed as dist
-
 from .base_pmw_model import BasePMWModel
 
 
@@ -16,29 +13,19 @@ class WeightParallelizedTensor(BasePMWModel):
         self.device = self.default_device
 
     def detach(self):
-        # Return a plain flattened tensor from the underlying list.
         return torch.cat([p.detach().view(-1) for p in self.tensor])
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        # Replace any WeightParallelizedTensor with its detached plain tensor.
+        kwargs = kwargs or {}
         new_args = tuple(x.detach() if isinstance(x, cls) else x for x in args)
-        new_kwargs = {
-            k: (v.detach() if isinstance(v, cls) else v) for k, v in kwargs.items()
-        }
+        new_kwargs = {k: (v.detach() if isinstance(v, cls) else v) for k, v in kwargs.items()}
         return func(*new_args, **new_kwargs)
 
     def norm(self, p=2):
-        if p == 2:
-            flat = self.detach()
-            return torch.norm(flat, p=2).item()
-        elif p == float("inf"):
-            flat = self.detach()
-            return torch.norm(flat, p=float("inf")).item()
-        else:
-            raise NotImplementedError("Only L2 and L-inf norms are implemented.")
+        if p in [2, float("inf")]:
+            return torch.norm(self.detach(), p=p).item()
+        raise NotImplementedError("Only L2 and L-inf norms are implemented.")
 
     def numel(self):
         return sum(p.numel() for p in self.tensor)
@@ -65,38 +52,25 @@ class WeightParallelizedTensor(BasePMWModel):
             rank=self.rank,
         )
 
-    def __matmul__(self, other):
-        return self.__mul__(other)
-
-    def __rmatmul__(self, other):
-        return self.__mul__(other)
-
-    def __rmul__(self, a):
-        return self.__mul__(a)
-
     def __mul__(self, other):
         if isinstance(other, WeightParallelizedTensor):
-            g1 = self.detach()
-            g2 = other.detach()
-            dot_product = torch.dot(g1, g2)
-            device = (
-                torch.device(f"cuda:{torch.cuda.current_device()}")
-                if self.backend != "gloo"
-                else torch.device("cpu")
-            )
-            dot_product = dot_product.to(device)
-            dist.all_reduce(dot_product, group=self.master_group, op=dist.ReduceOp.SUM)
-            return dot_product.item()
+            dp = torch.dot(self.detach(), other.detach())
+            device = torch.device(f"cuda:{torch.cuda.current_device()}") if self.backend != "gloo" else torch.device("cpu")
+            dp = dp.to(device)
+            dist.all_reduce(dp, group=self.master_group, op=dist.ReduceOp.SUM)
+            return dp.item()
         elif isinstance(other, (int, float, torch.Tensor)):
-            new_tensor = [p * other for p in self.tensor]
             return WeightParallelizedTensor(
-                new_tensor,
+                [p * other for p in self.tensor],
                 backend=self.backend,
                 master_group=self.master_group,
                 rank=self.rank,
             )
-        else:
-            return NotImplemented
+        return NotImplemented
+
+    __matmul__ = __mul__
+    __rmatmul__ = __mul__
+    __rmul__ = __mul__
 
     def __add__(self, other):
         if isinstance(other, WeightParallelizedTensor):
