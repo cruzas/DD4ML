@@ -38,9 +38,6 @@ class MNISTDataset(BaseDataset):
             )
 
         self.classes = self.data.classes
-        dprint(
-            f"MNIST dataset loaded with {len(self.data)} images, {len(self.classes)} classes."
-        )
 
     def get_input_channels(self):
         return 1  # black-and-white images

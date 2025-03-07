@@ -8,6 +8,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .config import get_config, make_std_config
 from .factory import criterion_factory, dataset_factory, optimizer_factory
+from .dist_utils import dprint
 
 # You can now add new components dynamically at runtime by calling, e.g.:
 # dataset_factory.register("new_dataset", "dd4ml.datasets.new_dataset", "NewDatasetClass")
@@ -53,7 +54,7 @@ def get_config_model_and_trainer(args, wandb_config):
     if getattr(all_config.trainer, "use_pmw", False) and hasattr(
         all_config.model.model_class, "as_model_dict"
     ):
-        print("Using Parallel Model Wrapper and Model Handler")
+        dprint("Using Parallel Model Wrapper and Model Handler")
         model_instance = all_config.model.model_class(all_config.model)
         model_dict = model_instance.as_model_dict()
         model_handler = ModelHandler(
@@ -61,8 +62,7 @@ def get_config_model_and_trainer(args, wandb_config):
             all_config.model.num_subdomains,
             all_config.model.num_replicas_per_subdomain,
         )
-        if dist.get_rank() == 0:
-            pprint.pprint(model_handler.nn_structure)
+        # if dist.get_rank() == 0: pprint.pprint(model_handler.nn_structure)
         all_config.trainer.model_handler = model_handler
 
         sample_input = dataset.get_sample_input(all_config.trainer)
@@ -73,8 +73,6 @@ def get_config_model_and_trainer(args, wandb_config):
         model = ParallelizedModel(model_handler, sample=sample_input)
     else:
         model = all_config.model.model_class(all_config.model)
-
-    print(model)
 
     # Criterion selection.
     criterion_key = (
@@ -210,7 +208,7 @@ def generic_run(
         args["num_subdomains"] = dist.get_world_size() if dist.is_initialized() else 1
 
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
-    print(config)
+    dprint(config)
 
     if epoch_end_callback and trainer.config.run_by_epoch:
         trainer.set_callback("on_epoch_end", epoch_end_callback)

@@ -15,6 +15,7 @@ from dd4ml.utility import (
     generic_run,
     prepare_distributed_environment,
     set_seed,
+    is_main_process,
 )
 
 try:
@@ -79,10 +80,8 @@ def parse_cmd_args(APTS: bool = True) -> argparse.Namespace:
 
 def wait_and_exit(rank: int) -> None:
     """Wait at the barrier and exit gracefully."""
-    print(f"[run_cluster] Rank {rank} waiting at barrier...")
     try:
         dist.barrier()
-        print(f"[run_cluster] Rank {rank} exiting successfully...")
         sys.exit(0)
     except Exception as e:
         print(f"Barrier timeout: {e}. Aborting process group...")
@@ -95,11 +94,6 @@ def main(rank: int, master_addr: str, master_port: str, world_size: int, args: d
     use_wandb = WANDB_AVAILABLE
     local_rank = int(os.environ.get("SLURM_LOCALID", 0))
     comp_env = detect_environment()
-    print(
-        f"[main] Rank {rank}: SLURM_LOCALID={os.environ.get('SLURM_LOCALID')}, "
-        f"LOCAL_RANK={os.environ.get('LOCAL_RANK')}, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}"
-    )
-
     if comp_env != "local" and torch.cuda.is_available() and not dist.is_initialized():
         torch.cuda.set_device(local_rank)
 
@@ -111,14 +105,8 @@ def main(rank: int, master_addr: str, master_port: str, world_size: int, args: d
             world_size=world_size,
             is_cuda_enabled=torch.cuda.is_available(),
         )
-    else:
-        print("[main] Process group already initialized. Skipping initialization...")
 
     rank = dist.get_rank() if dist.is_initialized() else 0
-
-    if torch.cuda.is_available():
-        print(f"[main] Rank {rank}, local rank {local_rank}, cuda device {torch.cuda.current_device()}")
-        print(f"[main] Local rank {local_rank}, number of visible devices: {torch.cuda.device_count()}, seeing {os.environ['CUDA_VISIBLE_DEVICES']}")
 
     wandb_config = {}
     if use_wandb and rank == 0:
@@ -220,10 +208,8 @@ def run_cluster(args: dict, sweep_config: dict) -> None:
 
     if WANDB_AVAILABLE and rank == 0:
         sweep_id = wandb.sweep(sweep=sweep_config, project=args["project"])
-        print(f"[run_cluster] Rank {rank} calling wandb.agent...")
         wandb.agent(sweep_id, function=lambda: main(rank, None, None, world_size, args), count=None)
     else:
-        print(f"[run_cluster] Rank {rank} running main function...")
         main(rank, None, None, world_size, args)
 
     wait_and_exit(rank)
@@ -236,10 +222,8 @@ if __name__ == "__main__":
 
     comp_env = detect_environment()
     for trial in range(args["trials"]):
-        print(f"Starting trial {trial + 1}/{args['trials']}...")
+        if is_main_process(): print(f"Starting trial {trial + 1}/{args['trials']}...")
         if comp_env == "local":
-            print("Executing locally...")
             run_local(args, sweep_config)
         else:
-            print("Executing on a cluster...")
             run_cluster(args, sweep_config)

@@ -45,9 +45,6 @@ class CIFAR10Dataset(BaseDataset):
             )
 
         self.classes = self.data.classes
-        dprint(
-            f"CIFAR-10 dataset loaded with {len(self.data)} images, {len(self.classes)} classes."
-        )
 
     def get_input_channels(self):
         return 3  # RGB images
