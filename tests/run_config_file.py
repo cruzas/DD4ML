@@ -71,8 +71,8 @@ def parse_cmd_args(APTS: bool = True) -> argparse.Namespace:
 
     # Add PMW-related arguments if use_pmw is True.
     if args.use_pmw:
-        parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
-        parser.add_argument("--num_subdomains", type=int, default=2, help="Number of subdomains")
+        parser.add_argument("--num_stages", type=int, default=6, help="Number of stages")
+        parser.add_argument("--num_subdomains", type=int, default=1, help="Number of subdomains")
         parser.add_argument("--num_replicas_per_subdomain", type=int, default=1, help="Number of replicas per subdomain")
 
     return parser.parse_args()

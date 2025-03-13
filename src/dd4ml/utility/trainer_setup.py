@@ -69,7 +69,7 @@ def get_config_model_and_trainer(args, wandb_config):
         if sample_input.shape[0] == 1:
             other_sample = dataset.get_sample_input(all_config.trainer)
             sample_input = torch.cat([sample_input, other_sample], dim=0)
-
+        
         model = ParallelizedModel(model_handler, sample=sample_input)
     else:
         model = all_config.model.model_class(all_config.model)

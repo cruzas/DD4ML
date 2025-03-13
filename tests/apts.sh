@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Define parameter arrays
-NUM_STAGES_ARR=(2)
-NUM_SUBD_ARR=(2)
+NUM_STAGES_ARR=(6)
+NUM_SUBD_ARR=(1)
 NUM_REP_ARR=(1)
 
 # Get current working directory
