@@ -5,10 +5,16 @@ metric:
 parameters:
   batch_size:
     values: [200]
+  num_stages:
+    value: 1
+  num_subdomains:
+    value: 1
+  num_replicas_per_subdomain:
+    value: 1
   epochs: 
     value: 2
   max_iters:
-    values: [20000]
+    values: [10]
   optimizer: 
     values: ["apts"] # pmw compatible 
   learning_rate: 
