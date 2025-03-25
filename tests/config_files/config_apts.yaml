@@ -8,7 +8,7 @@ parameters:
   epochs: 
     value: 2
   max_iters:
-    values: [10000]
+    values: [20000]
   optimizer: 
     values: ["apts"] # pmw compatible 
   learning_rate: 

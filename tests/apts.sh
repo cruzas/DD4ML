@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define parameter arrays
-NUM_STAGES_ARR=(6)
+NUM_STAGES_ARR=(2)
 NUM_SUBD_ARR=(1)
 NUM_REP_ARR=(1)
 
@@ -22,7 +22,7 @@ submit_job() {
         -e "s|\${NUM_SUBD}|${NUM_SUBD}|g" \
         -e "s|\${NUM_REP}|${NUM_REP}|g" \
         -e "s|\${NTASKS_PER_NODE}|${NTASKS_PER_NODE}|g" \
-        "${template}" > "${temp_job}"
+        "${template}" >"${temp_job}"
     sbatch --nodes=${nodes} "${temp_job}"
     rm "${temp_job}"
 }
@@ -30,8 +30,8 @@ submit_job() {
 # Determine homogeneous node allocation.
 calc_nodes() {
     for n in $(seq 1 $WORLD_SIZE); do
-        if [ $(( WORLD_SIZE % n )) -eq 0 ]; then
-            tasks_per_node=$(( WORLD_SIZE / n ))
+        if [ $((WORLD_SIZE % n)) -eq 0 ]; then
+            tasks_per_node=$((WORLD_SIZE / n))
             if [ $tasks_per_node -le $max_ngpu_per_node ]; then
                 echo "$n"
                 return
@@ -48,16 +48,16 @@ for NUM_STAGES in "${NUM_STAGES_ARR[@]}"; do
         for NUM_REP in "${NUM_REP_ARR[@]}"; do
             JOB_NAME="apts_nst_${NUM_STAGES}_nsd_${NUM_SUBD}_nrpsd_${NUM_REP}"
             WORLD_SIZE=$((NUM_STAGES * NUM_SUBD * NUM_REP))
-            
+
             echo "World size: ${WORLD_SIZE}"
             nodes=$(calc_nodes)
             echo "Requesting ${nodes} nodes for homogeneous task distribution."
             echo "Number of nodes to allocate: ${nodes}"
 
             # Compute tasks per node dynamically
-            NTASKS_PER_NODE=$(( WORLD_SIZE / nodes ))
+            NTASKS_PER_NODE=$((WORLD_SIZE / nodes))
             echo "Tasks per node: ${NTASKS_PER_NODE}"
-        
+
             export JOB_NAME SCRIPT="run_config_file.py" USE_WANDB=1 NCCL_DEBUG=WARN
             export NUM_STAGES NUM_SUBD NUM_REP WORLD_SIZE tasks_remaining=${WORLD_SIZE} NTASKS_PER_NODE
 

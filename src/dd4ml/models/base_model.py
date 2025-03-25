@@ -79,25 +79,18 @@ class BaseModel(nn.Module, ABC):
 
         # 4. Assign stages group-by-group
         num_groups = len(grouped)
-        chunk_size = math.ceil(num_groups / self.config.num_stages)
+        if num_groups < self.config.num_stages:
+            raise ValueError(
+                f"Number of groups ({num_groups}) is less than desired stages ({self.config.num_stages})."
+            )
 
-        idx = 0
-        stage_idx = 0
-        while idx < num_groups:
-            chunk = grouped[idx : idx + chunk_size]
-            for group in chunk:
-                for node in group:
-                    self.model_dict[node]["stage"] = stage_idx
-            idx += chunk_size
-            stage_idx += 1
-            # If we exceed self.config.num_stages, put all remaining groups on the last stage.
-            if stage_idx >= self.config.num_stages:
-                while idx < num_groups:
-                    for node in grouped[idx]:
-                        self.model_dict[node]["stage"] = self.config.num_stages - 1
-                    idx += 1
+        for i, group in enumerate(grouped):
+            stage_idx = int(i * self.config.num_stages / num_groups)
+            for node in group:
+                self.model_dict[node]["stage"] = stage_idx
 
         return self.model_dict
+
 
     # @abstractmethod
     # def as_model_dict(self):

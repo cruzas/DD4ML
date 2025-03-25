@@ -89,6 +89,16 @@ def wait_and_exit(rank: int) -> None:
         sys.exit(1)
 
 
+def save_model_if_needed(trainer, count, frequency, work_dir, project, use_pmw, filename_template):
+    if count % frequency == 0:
+        dprint("Saving model...")
+        model_path = os.path.join(work_dir, filename_template.format(project=project, count=count))
+        os.makedirs(work_dir, exist_ok=True)
+        if use_pmw:
+            trainer.model.save_state_dict(model_path)
+        else:
+            torch.save(trainer.model.state_dict(), model_path)
+
 def main(rank: int, master_addr: str, master_port: str, world_size: int, args: dict) -> None:
     """Main training routine executed by each process."""
     use_wandb = WANDB_AVAILABLE
@@ -115,7 +125,13 @@ def main(rank: int, master_addr: str, master_port: str, world_size: int, args: d
     wandb_config = broadcast_dict(wandb_config, src=0) if use_wandb else {}
 
     if args["use_seed"]:
-        set_seed(wandb_config.get("seed", 3407))
+        trial_num = args.get("trial_num", 0)
+        seed = wandb_config.get("seed", 3407) * trial_num
+        set_seed(seed)
+    
+    apts_id = "nst_" + str(args.get("num_stages")) + "_nsd_" + str(args.get("num_subdomains")) + "_nrpsd_" + str(args.get("num_replicas_per_subdomain"))
+    if args["use_seed"]:
+        apts_id += str(seed)
 
     trial_args = {**args, **wandb_config}
     log_fn = wandb.log if (use_wandb and rank == 0) else dprint
@@ -133,24 +149,40 @@ def main(rank: int, master_addr: str, master_port: str, world_size: int, args: d
                 "accuracy": trainer.accuracy,
                 "running_time": trainer.running_time,
             })
-        if save_model and trainer.epoch_num % save_frequency == 0:
-            dprint("Saving model...")
+        if save_model:
             proj = wandb_config.get("project", args["project"])
-            model_path = os.path.join(args["work_dir"], f"model_{proj}_{trainer.epoch_num}.pt")
-            os.makedirs(args["work_dir"], exist_ok=True)
-            if args["use_pmw"]:
-                trainer.model.save_state_dict(model_path)
-            else:
-                torch.save(trainer.model.state_dict(), model_path)
+            save_model_if_needed(
+                trainer,
+                count=trainer.epoch_num,
+                frequency=save_frequency,
+                work_dir=args["work_dir"],
+                project=proj,
+                use_pmw=args["use_pmw"],
+                filename_template="model_{project}_{count}.pt"
+            )
 
-    def batch_end_callback(trainer) -> None:
+    def batch_end_callback(trainer, save_model: bool = True, save_frequency: int = 500) -> None:
         if rank == 0 and use_wandb:
             log_fn({
                 "iter": trainer.iter_num,
                 "loss": trainer.loss,
                 "running_time": trainer.running_time,
             })
-        dprint(f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss:.5f}")
+            
+        if trainer.iter_num % 100 == 0:
+            dprint(f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss:.5f}")
+        if save_model:
+            proj = wandb_config.get("project", args["project"])
+            filename = f"{proj}_{apts_id}_iter_{{count}}.pt"
+            save_model_if_needed(
+                trainer,
+                count=trainer.iter_num,
+                frequency=save_frequency,
+                work_dir=args["work_dir"],
+                project=proj,
+                use_pmw=args["use_pmw"],
+                filename_template=filename
+            )
 
     generic_run(
         rank=rank,
@@ -223,6 +255,7 @@ if __name__ == "__main__":
     comp_env = detect_environment()
     for trial in range(args["trials"]):
         if is_main_process(): print(f"Starting trial {trial + 1}/{args['trials']}...")
+        args.update(trial_num=trial)
         if comp_env == "local":
             run_local(args, sweep_config)
         else:

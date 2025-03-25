@@ -67,8 +67,7 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
 
     # Update environment variables
     os.environ.update(env_vars)
-    # Compute unique identifier based on rank and global rank considering I have 2 nodes and 4 GPUs per node
-    dist.init_process_group(backend=backend, rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=10))
+    dist.init_process_group(backend=backend, rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=30))
     
     if multi_gpu: dprint("Multi-GPU environment detected.")
 
