@@ -39,6 +39,9 @@ def make_std_config(config):
             "global_optimizer_args",
         ]
         config = remove_keys(config, keys_to_remove)
+    if config.optimizer != "apts_d":
+        keys_to_remove = ["correct_step"]
+        config = remove_keys(config, keys_to_remove)
     return config
 
 

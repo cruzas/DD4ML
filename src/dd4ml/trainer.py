@@ -48,6 +48,7 @@ class Trainer:
         # For pipelining via pwm library
         C.data_chunks_amount = 1
         C.use_pmw = False
+        C.correct_step = False # for APTS_D
 
         return C
 
@@ -343,6 +344,8 @@ class Trainer:
                         closure=general_closure,
                         final_subdomain_closure=final_subdomain_closure,
                     )
+                elif "apts_d" in self.optimizer.__class__.__name__.lower():
+                    self.loss += self.optimizer.step(inputs=x, labels=y)
                 else:
                     self.loss = self.optimizer.step(closure=general_closure)
 

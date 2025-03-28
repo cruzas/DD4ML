@@ -5,9 +5,15 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
-from .utils import get_trust_region_params, get_state_dict
-from .trust_region import TrustRegion  # Explicit import
+from .utils import get_trust_region_params, get_state_dict, get_local_trust_region_params
+from .trust_region_legacy_code import TrustRegion  # Explicit import
 
+def fix_aggregated_local_steps(aggregated_step, global_grad):
+    dot_prod = torch.dot(aggregated_step, global_grad)
+    norm_global_sq = torch.norm(global_grad)**2
+    projection_factor = dot_prod / norm_global_sq if norm_global_sq > 0 else 0.0
+    corrected_step = projection_factor * global_grad
+    return corrected_step
 
 def flatten_params(model, out=None):
     if out is None:
@@ -40,12 +46,12 @@ class APTS_D(Optimizer):
         config.max_subdomain_iters = 3
         # Use the helper for the global optimizer arguments.
         config.global_optimizer = TrustRegion
-        config.global_optimizer_args = get_trust_region_params(config, lr_scale=1.0, max_iter=3)
+        config.global_optimizer_args = get_trust_region_params(config, lr_scale=1.0, max_iter=1)
         
         # For the subdomain optimizer, adjust the learning rate by world size.
         world_size = dist.get_world_size() if dist.is_initialized() else 1
         config.subdomain_optimizer = TrustRegion
-        config.subdomain_optimizer_args = get_trust_region_params(config, lr_scale=1.0/world_size, max_iter=3)
+        config.subdomain_optimizer_args = get_local_trust_region_params(config, lr_scale=1.0/world_size, max_iter=3)
         
         return config
 
@@ -55,7 +61,6 @@ class APTS_D(Optimizer):
         model=None,
         criterion=None,
         device=None,
-        max_iter=3,
         nr_models=None,
         global_opt=None,
         global_opt_params=None,
@@ -63,11 +68,11 @@ class APTS_D(Optimizer):
         local_opt_params=None,
         global_pass=True,
         foc=True,
+        correct_step=True,
     ):
         super().__init__(params, {})
         self.model = model
         self.local_model = clone_model(model)
-        self.max_iter = max_iter
         self.nr_models = nr_models
         self.device = device if device is not None else (
             f"cuda:{torch.cuda.current_device()}" if getattr(self, "backend", "cuda") != "gloo" else "cpu"
@@ -89,6 +94,7 @@ class APTS_D(Optimizer):
             self.global_optimizer = global_opt(self.model.parameters(), **global_opt_params)
             self.local_optimizer = local_opt(self.local_model.parameters(), **local_opt_params)
         self.lr = self.global_optimizer.lr
+        self.correct_step = correct_step
 
     def non_foc_local_closure(self, compute_grad=False):
         self.local_optimizer.zero_grad()
@@ -143,19 +149,23 @@ class APTS_D(Optimizer):
 
         # Local steps
         step_vec = None
-        for local_iter in range(self.max_iter):
+        for local_iter in range(self.local_optimizer.max_iter):
             loss_arg = initial_local_loss if local_iter == 0 else None
             grad_arg = local_grad if local_iter == 0 else None
             local_loss = self.local_optimizer.step(closure=local_closure, old_loss=loss_arg, grad=grad_arg)
-            if local_iter > 0: 
-                total_local_grad_evals_counter += 1
-                
+            
             with torch.no_grad():
+                if local_iter > 0: 
+                    total_local_grad_evals_counter += 1
+                    
+                if self.local_optimizer.local_iter >= self.local_optimizer.max_iter:
+                        break
+                    
                 current_flat = flatten_params(self.local_model, self._local_flat_buffer)
-                step_vec = current_flat - initial_flat
+                step_vec = current_flat - initial_flat # local step vector
                 if torch.norm(step_vec, p=2) >= self.local_optimizer.max_lr:
                     break
-
+                
         if self.nr_models > 1:
             dist.all_reduce(total_local_grad_evals_counter, op=dist.ReduceOp.SUM)
             total_local_grad_evals_counter /= self.nr_models
@@ -173,7 +183,12 @@ class APTS_D(Optimizer):
             if self.nr_models > 1:
                 dist.all_reduce(step_vec, op=dist.ReduceOp.SUM)
                 dist.all_reduce(local_reduction, op=dist.ReduceOp.SUM)
-            restore_params(self.model, initial_flat + step_vec)
+            
+            if self.correct_step:
+                corrected_step = fix_aggregated_local_steps(step_vec, global_grad)
+                restore_params(self.model, initial_flat + corrected_step)
+            else:
+                restore_params(self.model, initial_flat + step_vec)
             
         trial_loss = self.global_closure()
         
@@ -196,8 +211,10 @@ class APTS_D(Optimizer):
             self.global_optimizer.lr = self.lr
 
         if self.global_pass:
-            new_loss = self.global_optimizer.step(closure=self.global_closure, old_loss=new_loss, grad=grad_arg)
-            self.grad_evals_counter += 1
+            for _ in range(self.global_optimizer.max_iter):
+                new_loss = self.global_optimizer.step(closure=self.global_closure, old_loss=new_loss, grad=grad_arg)
+                grad_arg = None
+                self.grad_evals_counter += 1
 
         with torch.no_grad():
             self.lr = self.global_optimizer.lr

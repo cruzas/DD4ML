@@ -154,7 +154,6 @@ def get_config_model_and_trainer(args, wandb_config):
             model=model,
             criterion=criterion,
             device=device,
-            max_iter=3,
             nr_models=all_config.model.num_subdomains,
             global_opt=all_config.trainer.global_optimizer,
             global_opt_params=all_config.trainer.global_optimizer_args,
@@ -162,6 +161,7 @@ def get_config_model_and_trainer(args, wandb_config):
             local_opt_params=all_config.trainer.subdomain_optimizer_args,
             global_pass=True,
             foc=True,
+            correct_step=all_config.trainer.correct_step,
         )
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")

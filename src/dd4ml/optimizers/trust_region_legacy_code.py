@@ -1,4 +1,6 @@
 import torch
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
+
 from .utils import get_trust_region_params
 
 class TrustRegion(torch.optim.Optimizer):
@@ -44,7 +46,8 @@ class TrustRegion(torch.optim.Optimizer):
         self.nu = min(nu, nu_1)
         self.max_iter = max_iter
         self.norm_type = norm_type
-        self.model_has_grad = hasattr(self.model, "grad")  # Precompute flag.
+        self.local_iter = 0
+        # self.model_has_grad = hasattr(self.model, "grad")  # Precompute flag.
 
     def _apply_update(self, grad, scale):
         with torch.no_grad():
@@ -61,17 +64,29 @@ class TrustRegion(torch.optim.Optimizer):
                     update_val = grad.tensor[i] if use_tensor else grad[i]
                     p.data.sub_(update_val * scale)
 
+    def _apply_update_vectorized(self, grad, scale):
+        with torch.no_grad():
+            params_vector = parameters_to_vector(self.param_list)
+            updated_vector = params_vector - scale * grad
+            vector_to_parameters(updated_vector, self.param_list)
+
     def step(self, closure, old_loss=None, grad=None):
         if old_loss is None:
             old_loss = closure(compute_grad=True)
 
+        # if grad is None:
+        #     if not self.model_has_grad:
+        #         grad = torch.cat(
+        #             [p.grad.detach().view(-1) for p in self.param_list if p.grad is not None]
+        #         )
+        #     else:
+        #         grad = self.model.grad()
+        # Process the provided grad, if any
         if grad is None:
-            if not self.model_has_grad:
-                grad = torch.cat(
-                    [p.grad.detach().view(-1) for p in self.param_list if p.grad is not None]
-                )
-            else:
-                grad = self.model.grad()
+            grad = parameters_to_vector([p.grad.detach() for p in self.param_list if p.grad is not None])
+        elif hasattr(grad, "tensor"):
+            # Assumes grad.tensor is a list of gradients
+            grad = parameters_to_vector(grad.tensor)
 
         # Cache the gradient norm.
         grad_norm = grad.norm(p=self.norm_type)
@@ -80,12 +95,13 @@ class TrustRegion(torch.optim.Optimizer):
             return old_loss
 
         scale = self.lr / grad_norm
-        self._apply_update(grad, scale)
+        # self._apply_update(grad, scale)
+        self._apply_update_vectorized(grad, scale)
 
         new_loss = closure(compute_grad=False)
         pred_red = self.lr * grad_norm  # Constant value.
-        c = 0
-        while old_loss - new_loss < 0 and c < self.max_iter:
+        self.local_iter = 0
+        while old_loss - new_loss < 0 and self.local_iter < self.max_iter:
             stop = abs(self.lr - self.min_lr) / self.min_lr < 1e-6
             old_lr = self.lr
 
@@ -102,12 +118,13 @@ class TrustRegion(torch.optim.Optimizer):
                 break
 
             if red_ratio < self.nu:
-                scale = (-self.lr / old_lr * scale) if c == 0 else (self.lr / old_lr * scale)
+                scale = (-self.lr / old_lr * scale) if self.local_iter == 0 else (self.lr / old_lr * scale)
             else:
                 break
 
-            self._apply_update(grad, scale)
+            # self._apply_update(grad, scale)
+            self._apply_update_vectorized(grad, scale)
             new_loss = closure(compute_grad=False)
-            c += 1
+            self.local_iter += 1
 
         return new_loss
