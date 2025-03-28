@@ -5,7 +5,7 @@ def get_trust_region_params(config, lr_scale=1.0, max_iter=3):
     return {
         "lr": config.learning_rate * lr_scale,
         "max_lr": 2.0,
-        "min_lr": 1e-4,
+        "min_lr": config.learning_rate / 100.0,
         "nu": 0.5,
         "inc_factor": 2.0,
         "dec_factor": 0.5,
@@ -19,7 +19,7 @@ def get_local_trust_region_params(config, lr_scale=1.0, max_iter=3):
     return {
         "lr": config.learning_rate * lr_scale,
         "max_lr": 1.5,        # Lower maximum for local updates
-        "min_lr": 1e-4,
+        "min_lr": config.learning_rate / 100.0,
         "nu": 0.45,           # Adjusted to be more conservative locally
         "inc_factor": 1.5,    # Reduced increase factor
         "dec_factor": 0.6,    # Slightly more aggressive reduction

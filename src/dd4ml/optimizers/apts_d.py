@@ -158,12 +158,12 @@ class APTS_D(Optimizer):
                 if local_iter > 0: 
                     total_local_grad_evals_counter += 1
                     
-                if self.local_optimizer.local_iter >= self.local_optimizer.max_iter:
-                        break
-                    
                 current_flat = flatten_params(self.local_model, self._local_flat_buffer)
                 step_vec = current_flat - initial_flat # local step vector
-                if torch.norm(step_vec, p=2) >= self.local_optimizer.max_lr:
+                
+                max_lr_reached = torch.norm(step_vec, p=2) >= self.local_optimizer.max_lr
+                max_iter_reached = self.local_optimizer.local_iter >= self.local_optimizer.max_iter
+                if max_lr_reached or max_iter_reached:
                     break
                 
         if self.nr_models > 1:

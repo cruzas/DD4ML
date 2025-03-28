@@ -4,7 +4,7 @@ metric:
   goal: minimize
 parameters:
   batch_size:
-    values: [200]
+    value: 128
   num_stages:
     value: 1
   num_subdomains:
@@ -12,21 +12,18 @@ parameters:
   num_replicas_per_subdomain:
     value: 1
   epochs: 
-    value: 2
+    value: 10
   max_iters:
-    values: [10]
+    value: 100
   optimizer: 
-    values: ["apts"] # pmw compatible 
+    value: "apts" # pmw compatible 
   learning_rate: 
-    values: [0.01]
+    value: 0.001
   dataset_name: 
-    # values: ["mnist"] 
-    values: ["tinyshakespeare"]
+    value: "tinyshakespeare" # "mnist"
   model_name: 
-    # values: ["simple_cnn"] 
-    values: ["mingpt"]
+    value: "mingpt" # "simple_cnn"
   criterion:
-    # values: ["cross_entropy"] 
-    values: ["cross_entropy_transformers"]
+    value: "cross_entropy_transformers" # "cross_entropy"
   seed:
-    values: [42]
+    value: 42

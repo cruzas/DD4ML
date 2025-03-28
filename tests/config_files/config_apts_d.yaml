@@ -4,7 +4,7 @@ metric:
   goal: minimize
 parameters:
   batch_size:
-    values: [25000]
+    value: 50000
   num_stages:
     value: 1
   num_subdomains:
@@ -14,21 +14,18 @@ parameters:
   correct_step:
     value: True
   epochs: 
-    value: 10
+    value: 100
   max_iters:
-    values: [20]
+    value: 20
   optimizer: 
-    values: ["apts_d"] # pmw compatible 
+    value: "apts_d" # pmw compatible 
   learning_rate: 
-    values: [0.01]
+    value: 0.01
   dataset_name: 
-    values: ["cifar10"] 
-    # values: ["tinyshakespeare"]
+    value: "cifar10" 
   model_name: 
-    values: ["simple_cnn"] 
-    # values: ["mingpt"]
+    value: "simple_cnn"
   criterion:
-    values: ["cross_entropy"] 
-    # values: ["cross_entropy_transformers"]
+    value: "cross_entropy"
   seed:
     values: [42]

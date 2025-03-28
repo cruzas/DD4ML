@@ -130,7 +130,7 @@ def get_config_model_and_trainer(args, wandb_config):
             global_optimizer_defaults=all_config.trainer.global_optimizer_args,
             lr=all_config.trainer.learning_rate,
             max_subdomain_iter=all_config.trainer.max_subdomain_iters,
-            dogleg=True,
+            dogleg=False,
             APTS_in_data_sync_strategy="average",
             step_strategy="mean",
         )

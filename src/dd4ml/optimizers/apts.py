@@ -11,7 +11,7 @@ class APTS(torch.optim.Optimizer):
     def setup_APTS_args(config):    
         # Subdomain optimizer
         config.subdomain_optimizer = torch.optim.SGD
-        config.subdomain_optimizer_args = {'lr' : config.learning_rate}
+        config.subdomain_optimizer_args = {'lr' : config.learning_rate / 10.0}
         
         if config.subdomain_optimizer == torch.optim.Adam or config.subdomain_optimizer == torch.optim.AdamW:
             config.subdomain_optimizer_args['betas'] = config.betas
@@ -22,7 +22,7 @@ class APTS(torch.optim.Optimizer):
         
         # Global optimizer
         config.global_optimizer = TrustRegion
-        config.global_optimizer_args = get_trust_region_params(config, lr_scale=1.0, max_iter=3)
+        config.global_optimizer_args = get_trust_region_params(config, lr_scale=1.0, max_iter=1)
         
         return config
     
@@ -45,7 +45,7 @@ class APTS(torch.optim.Optimizer):
         if lr <= 0:
             raise ValueError('The learning rate "lr" must be bigger than 0.')
 
-        subdomain_optimizer_defaults.update({'lr': lr})
+        # subdomain_optimizer_defaults.update({'lr': lr})
         self.subdomain_optimizer = subdomain_optimizer(
             params=model.subdomain_params(), **subdomain_optimizer_defaults)
         if 'TrustRegion' in str(global_optimizer):
@@ -131,20 +131,19 @@ class APTS(torch.optim.Optimizer):
         self.subdomain_steps(final_subdomain_closure)
         self.timings['precond'] += time.time() - tic
 
-        with torch.no_grad():
+        step = self.model.parameters(clone=False) - initial_parameters
+        if self.dogleg:
             tic = time.time()
             new_loss = closure(compute_grad=False, zero_grad=True)
             self.timings['closure_2'] += time.time() - tic
             tic = time.time()
-            step = self.model.parameters(clone=False) - initial_parameters
             lr = self.lr
             w = 0
             c = 0
             self.timings['step_comp'] += time.time() - tic
 
-        if self.dogleg:
             tic = time.time()
-            while new_loss > initial_loss and c < 5:
+            while new_loss > initial_loss and c < 3:
                 with torch.no_grad():
                     c += 1
                     lr /= 2
@@ -155,12 +154,35 @@ class APTS(torch.optim.Optimizer):
                 new_loss = closure(compute_grad=False, zero_grad=True)
                 torch.cuda.empty_cache()
             self.timings['dogleg'] += time.time() - tic
-        else:
-            with torch.no_grad():
-                self._apply_model_update(initial_parameters, step)
+        else: # assume a trust-region strategy
+            step_norm = step.norm()
+            candidate_step = step if step_norm <= self.lr else (self.lr / step_norm) * step
 
+            # Apply the candidate step
+            self._apply_model_update(initial_parameters, candidate_step)
+            new_loss = closure(compute_grad=False, zero_grad=True)
+
+            actual_reduction = initial_loss - new_loss
+            predicted_reduction = torch.dot(initial_grads, step) - (0.5 * step_norm ** 2)
+            rho = actual_reduction / predicted_reduction
+            
+            if rho < 0.25:
+                # Too small step, reduce the step size
+                self.lr = max(self.lr * self.global_optimizer.dec_factor, self.global_optimizer.min_lr)
+                self._apply_model_update(initial_parameters, -candidate_step)
+                old_loss = initial_loss
+            elif rho > 0.75:
+                # Good step, increase the step size
+                self.lr = min(self.lr * self.global_optimizer.inc_factor, self.global_optimizer.max_lr) 
+                old_loss = new_loss   
+            else:
+                # Acceptable step, keep the step size
+                self.lr = self.lr
+                old_loss = new_loss 
+            
         tic = time.time()
-        self.global_optimizer.step(closure)
+        for _ in range(self.global_optimizer.max_iter):
+            old_loss = self.global_optimizer.step(closure=closure, old_loss=old_loss)
         self.timings['smoother'] += time.time() - tic
 
         if 'lr' in self.global_optimizer.param_groups[0]:
