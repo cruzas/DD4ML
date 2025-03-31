@@ -3,7 +3,7 @@
 #SBATCH --output=./log_files/${JOB_NAME}.out
 #SBATCH --error=./log_files/${JOB_NAME}.err
 #SBATCH --nodes=1
-#SBATCH --time=02:00:00
+#SBATCH --time=01:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
 
@@ -13,7 +13,7 @@
 
 #SBATCH --hint=nomultithread
 #SBATCH --constraint=gpu
-#SBATCH --partition=debug
+#SBATCH --partition=normal
 #SBATCH --exclusive
 source ~/.slurm_env # You should define SLURM_ACCOUNT in this file
 #SBATCH --account=$SLURM_ACCOUNT
@@ -45,6 +45,6 @@ fi
 # Execute the Python script
 echo "Test started $(date)"
 export CUDA_VISIBLE_DEVICES=0,1,2,3
-srun --kill-on-bad-exit /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" --sweep_config=./config_files/config_apts.yaml --use_pmw --use_seed --num_stages=${NUM_STAGES} --num_subdomains=${NUM_SUBD} --num_replicas_per_subdomain=${NUM_REP} --trials=1
+srun --kill-on-bad-exit /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" --sweep_config="${CONFIG_FILE}" --use_pmw --num_stages=${NUM_STAGES} --num_subdomains=${NUM_SUBD} --num_replicas_per_subdomain=${NUM_REP} --project=${OPTIMIZER}_tests --trials=3
 echo "Test done $(date)"
 rm core_nid*

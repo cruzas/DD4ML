@@ -1,9 +1,12 @@
 #!/bin/bash
 
 # Define parameter arrays
-NUM_STAGES_ARR=(2)
-NUM_SUBD_ARR=(1)
+NUM_STAGES_ARR=(1)
+NUM_SUBD_ARR=(2 4 8)
 NUM_REP_ARR=(1)
+BATCH_SIZE=50000
+OPTIMIZER="apts_d"
+DATASET="cifar10"
 
 # Get current working directory
 current_dir=$(pwd)
@@ -46,7 +49,7 @@ calc_nodes() {
 for NUM_STAGES in "${NUM_STAGES_ARR[@]}"; do
     for NUM_SUBD in "${NUM_SUBD_ARR[@]}"; do
         for NUM_REP in "${NUM_REP_ARR[@]}"; do
-            JOB_NAME="apts_nst_${NUM_STAGES}_nsd_${NUM_SUBD}_nrpsd_${NUM_REP}"
+            JOB_NAME="${OPTIMIZER}_${DATASET}_${BATCH_SIZE}_nst_${NUM_STAGES}_nsd_${NUM_SUBD}_nrpsd_${NUM_REP}"
             WORLD_SIZE=$((NUM_STAGES * NUM_SUBD * NUM_REP))
 
             echo "World size: ${WORLD_SIZE}"
@@ -58,8 +61,21 @@ for NUM_STAGES in "${NUM_STAGES_ARR[@]}"; do
             NTASKS_PER_NODE=$((WORLD_SIZE / nodes))
             echo "Tasks per node: ${NTASKS_PER_NODE}"
 
+            # Create filename
+            CONFIG_FILE="./config_files/config_${OPTIMIZER}_nst_${NUM_STAGES}_nsd_${NUM_SUBD}_nrpsd_${NUM_REP}.yaml"
+
+            # Copy the base config
+            cp ./config_files/config_${OPTIMIZER}.yaml "${CONFIG_FILE}"
+
+            # Update the values in the copied file
+            sed -i '/num_stages:/ {n; s/value: .*/value: '"${NUM_STAGES}"'/}' "${CONFIG_FILE}"
+            sed -i '/num_subdomains:/ {n; s/value: .*/value: '"${NUM_SUBD}"'/}' "${CONFIG_FILE}"
+            sed -i '/num_replicas_per_subdomain:/ {n; s/value: .*/value: '"${NUM_REP}"'/}' "${CONFIG_FILE}"
+            sed -i '/dataset:/ {n; s/value: .*/value: '"${DATASET}"'/}' "${CONFIG_FILE}"
+            sed -i '/batch_size:/ {n; s/value: .*/value: '"${BATCH_SIZE}"'/}' "${CONFIG_FILE}"
+
             export JOB_NAME SCRIPT="run_config_file.py" USE_WANDB=1 NCCL_DEBUG=WARN
-            export NUM_STAGES NUM_SUBD NUM_REP WORLD_SIZE tasks_remaining=${WORLD_SIZE} NTASKS_PER_NODE
+            export NUM_STAGES NUM_SUBD NUM_REP WORLD_SIZE tasks_remaining=${WORLD_SIZE} NTASKS_PER_NODE CONFIG_FILE OPTIMIZER
 
             if [[ "$current_dir" == *"home"* ]]; then
                 echo "Submitting job ${JOB_NAME} to USI Rosa with ${nodes} nodes..."
