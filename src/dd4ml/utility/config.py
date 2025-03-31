@@ -42,7 +42,7 @@ def make_std_config(config):
         ]
         config = remove_keys(config, keys_to_remove)
     if config.optimizer != "apts_d":
-        keys_to_remove = ["correct_step", "norm_type"]
+        keys_to_remove = ["correct_step", "norm_type", "ema"]
         config = remove_keys(config, keys_to_remove)
     return config
 

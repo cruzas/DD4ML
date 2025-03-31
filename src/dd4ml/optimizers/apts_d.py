@@ -6,6 +6,7 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
+from .trust_region_ema import TrustRegionEMA
 from .trust_region_legacy_code import TrustRegion  # Explicit import
 from .utils import (
     get_local_trust_region_params,
@@ -148,10 +149,12 @@ def clone_model(model):
 class APTS_D(Optimizer):
     @staticmethod
     def setup_APTS_args(config):
-        config.global_optimizer = TrustRegion
+        optimizer_class = TrustRegion if not config.ema else TrustRegionEMA
+
+        config.global_optimizer = optimizer_class
         config.global_optimizer_args = get_trust_region_params(config)
 
-        config.subdomain_optimizer = TrustRegion
+        config.subdomain_optimizer = optimizer_class
         config.subdomain_optimizer_args = get_local_trust_region_params(config)
 
         return config
