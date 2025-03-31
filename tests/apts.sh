@@ -2,7 +2,7 @@
 
 # Define parameter arrays
 NUM_STAGES_ARR=(1)
-NUM_SUBD_ARR=(2 4 8)
+NUM_SUBD_ARR=(1)
 NUM_REP_ARR=(1)
 BATCH_SIZE=50000
 OPTIMIZER="apts_d"
@@ -11,7 +11,11 @@ DATASET="cifar10"
 # Get current working directory
 current_dir=$(pwd)
 # System maximum GPUs per node (used as an upper bound)
-max_ngpu_per_node=4
+if [[ "$current_dir" == *"home"* ]]; then
+    max_ngpu_per_node=2
+else
+    max_ngpu_per_node=4
+fi
 
 # Helper function for job submission
 submit_job() {

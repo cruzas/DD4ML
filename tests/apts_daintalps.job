@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=${JOB_NAME} # JOB_NAME should be defined in submit_job.sh script
+#SBATCH --job-name=${JOB_NAME} # JOB_NAME should be defined in [submit_job].sh script
 #SBATCH --output=./log_files/${JOB_NAME}.out
 #SBATCH --error=./log_files/${JOB_NAME}.err
 #SBATCH --nodes=1

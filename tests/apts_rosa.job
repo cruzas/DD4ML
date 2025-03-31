@@ -1,15 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=${JOB_NAME}
+#SBATCH --job-name=${JOB_NAME} # JOB_NAME should be defined in [submit_job].sh script
 #SBATCH --output=./log_files/${JOB_NAME}.out
 #SBATCH --error=./log_files/${JOB_NAME}.err
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --time=00:10:00
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
 
 # NOTE: these two should match
-#SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
+#SBATCH --ntasks-per-node=${NTASKS_PER_NODE}   # Dynamically set tasks per node
+#SBATCH --gres=gpu:${NTASKS_PER_NODE}   # Dynamically set tasks per node
 
 #SBATCH --hint=nomultithread
 #SBATCH --partition=gpu
@@ -32,16 +32,16 @@ else
     export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 fi
 
-export NCCL_IB_IFNAME=ib0              # Use the active InfiniBand interface
-export NCCL_SOCKET_IFNAME=ib0          # Use the active InfiniBand interface
-export NCCL_IB_HCA=qib0                # Detected HCA ID
-export NCCL_IB_GID_INDEX=0             # Default GID index (InfiniBand, not RoCE)
-export NCCL_DEBUG=ERROR                 # Enable NCCL debugging info
-export NCCL_IB_TIMEOUT=22              # Increase timeout if communication stalls
-export NCCL_NET_GDR_LEVEL=2            # Force GPU Direct RDMA usage
-export NCCL_P2P_DISABLE=0              # Enable peer-to-peer communication
-export NCCL_SHM_DISABLE=1              # Disable shared memory if issues occur
-export NCCL_IB_DISABLE=0               # Enable InfiniBand communication
+export NCCL_IB_IFNAME=ib0     # Use the active InfiniBand interface
+export NCCL_SOCKET_IFNAME=ib0 # Use the active InfiniBand interface
+export NCCL_IB_HCA=qib0       # Detected HCA ID
+export NCCL_IB_GID_INDEX=0    # Default GID index (InfiniBand, not RoCE)
+export NCCL_DEBUG=ERROR       # Enable NCCL debugging info
+export NCCL_IB_TIMEOUT=22     # Increase timeout if communication stalls
+export NCCL_NET_GDR_LEVEL=2   # Force GPU Direct RDMA usage
+export NCCL_P2P_DISABLE=0     # Enable peer-to-peer communication
+export NCCL_SHM_DISABLE=1     # Disable shared memory if issues occur
+export NCCL_IB_DISABLE=0      # Enable InfiniBand communication
 
 # Optionally source WandB environment
 if [ "${USE_WANDB}" = "1" ]; then
@@ -52,12 +52,6 @@ fi
 # Execute the Python script
 echo "Test started $(date)"
 export CUDA_VISIBLE_DEVICES=$(echo $SLURM_LOCALID)
-
-echo "Activating virtual environment ../myvenv"
-source ../dd4ml-venv/bin/activate
-
-srun --kill-on-bad-exit --gpu-bind=map_gpu:${SLURM_LOCALID} /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" \
-  --sweep_config=./config_files/config_apts.yaml --use_pmw --use_seed \
-  --num_stages ${NUM_STAGES} --num_subd ${NUM_SUBD} --num_rep ${NUM_REP}
-  
+srun --kill-on-bad-exit python -u "${SCRIPT}" --sweep_config="${CONFIG_FILE}" --use_pmw --num_stages=${NUM_STAGES} --num_subdomains=${NUM_SUBD} --num_replicas_per_subdomain=${NUM_REP} --project=${OPTIMIZER}_tests --trials=1
 echo "Test done $(date)"
+rm core_nid*
