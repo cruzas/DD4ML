@@ -10,7 +10,6 @@ class APTS(torch.optim.Optimizer):
     @staticmethod
     def setup_APTS_args(config):    
         # Subdomain optimizer
-        config.subdomain_optimizer = torch.optim.SGD
         config.subdomain_optimizer_args = {'lr' : config.learning_rate / 10.0}
         
         if config.subdomain_optimizer == torch.optim.Adam or config.subdomain_optimizer == torch.optim.AdamW:

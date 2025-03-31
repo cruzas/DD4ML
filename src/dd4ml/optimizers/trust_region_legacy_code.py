@@ -7,7 +7,7 @@ from .utils import get_trust_region_params
 class TrustRegion(torch.optim.Optimizer):
     @staticmethod
     def setup_TR_args(config):
-        params = get_trust_region_params(config, lr_scale=1.0, max_iter=3)
+        params = get_trust_region_params(config)
         config.max_iter = params["max_iter"]
         config.lr = params["lr"]
         config.max_lr = params["max_lr"]
@@ -39,8 +39,8 @@ class TrustRegion(torch.optim.Optimizer):
             {"lr": lr, "max_lr": max_lr, "min_lr": min_lr, "max_iter": max_iter},
         )
         self.model = model
-        self.param_list = list(model.parameters())  # Cache parameters.
-        self.lr = lr
+        self.param_list = list(model.parameters())
+        self.lr = min(lr, max_lr)
         self.max_lr = max_lr
         self.min_lr = min_lr
         self.inc_factor = inc_factor
@@ -51,22 +51,6 @@ class TrustRegion(torch.optim.Optimizer):
         self.max_iter = max_iter
         self.norm_type = norm_type
         self.local_iter = 0
-        # self.model_has_grad = hasattr(self.model, "grad")  # Precompute flag.
-
-    def _apply_update(self, grad, scale):
-        with torch.no_grad():
-            if not self.model_has_grad:
-                offset = 0
-                for p in self.param_list:
-                    if p.grad is not None:
-                        numel = p.numel()
-                        p.data.sub_(grad[offset : offset + numel].view_as(p) * scale)
-                        offset += numel
-            else:
-                use_tensor = hasattr(grad, "tensor")
-                for i, p in enumerate(self.param_list):
-                    update_val = grad.tensor[i] if use_tensor else grad[i]
-                    p.data.sub_(update_val * scale)
 
     def _apply_update_vectorized(self, grad, scale):
         with torch.no_grad():
@@ -78,63 +62,50 @@ class TrustRegion(torch.optim.Optimizer):
         if old_loss is None:
             old_loss = closure(compute_grad=True)
 
-        # if grad is None:
-        #     if not self.model_has_grad:
-        #         grad = torch.cat(
-        #             [p.grad.detach().view(-1) for p in self.param_list if p.grad is not None]
-        #         )
-        #     else:
-        #         grad = self.model.grad()
-        # Process the provided grad, if any
+        # Cache current parameters to allow rollback.
+        old_params = parameters_to_vector(self.param_list).clone()
+
         if grad is None:
             grad = parameters_to_vector(
                 [p.grad.detach() for p in self.param_list if p.grad is not None]
             )
         elif hasattr(grad, "tensor"):
-            # Assumes grad.tensor is a list of gradients
             grad = parameters_to_vector(grad.tensor)
 
-        # Cache the gradient norm.
         grad_norm = grad.norm(p=self.norm_type)
         if grad_norm <= torch.finfo(torch.float32).eps:
             print(f"Stopping TrustRegion algorithm due to ||g|| = {grad_norm}.")
             return old_loss
 
-        scale = self.lr / grad_norm
-        # self._apply_update(grad, scale)
-        self._apply_update_vectorized(grad, scale)
-
-        new_loss = closure(compute_grad=False)
-        pred_red = self.lr * grad_norm  # Constant value.
-        self.local_iter = 0
-        while old_loss - new_loss < 0 and self.local_iter < self.max_iter:
-            stop = abs(self.lr - self.min_lr) / self.min_lr < 1e-6
-            old_lr = self.lr
-
-            act_red = old_loss - new_loss
-            red_ratio = act_red / pred_red
-
-            if red_ratio < self.nu_1:
-                self.lr = max(self.min_lr, self.dec_factor * self.lr)
-            elif red_ratio > self.nu_2:
-                self.lr = min(self.max_lr, self.inc_factor * self.lr)
-                break
-
-            if stop:
-                break
-
-            if red_ratio < self.nu:
-                scale = (
-                    (-self.lr / old_lr * scale)
-                    if self.local_iter == 0
-                    else (self.lr / old_lr * scale)
-                )
-            else:
-                break
-
-            # self._apply_update(grad, scale)
+        candidate_lr = self.lr
+        for self.local_iter in range(self.max_iter + 1):
+            # Revert to the saved parameters.
+            vector_to_parameters(old_params, self.param_list)
+            scale = candidate_lr / grad_norm
             self._apply_update_vectorized(grad, scale)
-            new_loss = closure(compute_grad=False)
-            self.local_iter += 1
+            candidate_loss = closure(compute_grad=False)
 
-        return new_loss
+            if candidate_loss <= old_loss:
+                # Accept update only if the loss decreases.
+                self.lr = min(candidate_lr, self.max_lr)
+                return candidate_loss
+            else:
+                # Adjust learning rate based on reduction ratio.
+                pred_red = candidate_lr * grad_norm
+                act_red = old_loss - candidate_loss
+                red_ratio = act_red / pred_red
+
+                if red_ratio < self.nu_1:
+                    candidate_lr = max(self.min_lr, self.dec_factor * candidate_lr)
+                elif red_ratio > self.nu_2:
+                    candidate_lr = min(self.max_lr, self.inc_factor * candidate_lr)
+
+                candidate_lr = min(candidate_lr, self.max_lr)
+
+                # Terminate if lr is effectively at the minimum.
+                if abs(candidate_lr - self.min_lr) / self.min_lr < 1e-6 or abs(candidate_lr - self.max_lr) / self.max_lr < 1e-6:
+                    break
+                
+        # No candidate produced a decrease; revert and return original loss.
+        vector_to_parameters(old_params, self.param_list)
+        return old_loss

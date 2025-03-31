@@ -151,6 +151,8 @@ class APTS_D(Optimizer):
     def setup_APTS_args(config):
         optimizer_class = TrustRegion if not config.ema else TrustRegionEMA
 
+        print(f"Using optimizer: {optimizer_class.__name__} for APTS_D")
+
         config.global_optimizer = optimizer_class
         config.global_optimizer_args = get_trust_region_params(config)
 
@@ -272,37 +274,17 @@ class APTS_D(Optimizer):
         self.residual = global_grad - local_grad
 
         # Local steps
-        step_vec = None
-        for local_iter in range(self.local_optimizer.max_iter):
-            loss_arg = initial_local_loss if local_iter == 0 else None
-            grad_arg = local_grad if local_iter == 0 else None
-            local_loss = self.local_optimizer.step(
-                closure=local_closure, old_loss=loss_arg, grad=grad_arg
-            )
-
-            with torch.no_grad():
-                if local_iter > 0:
-                    total_local_grad_evals_counter += 1
-
-                current_flat = flatten_params(self.local_model, self._local_flat_buffer)
-                step_vec = current_flat - initial_flat  # local step vector
-
-                max_lr_reached = (
-                    torch.norm(step_vec, p=self.norm_type)
-                    >= self.local_optimizer.max_lr
-                )
-                max_iter_reached = (
-                    self.local_optimizer.local_iter >= self.local_optimizer.max_iter
-                )
-                if max_lr_reached or max_iter_reached:
-                    break
-
+        local_loss = self.local_optimizer.step(
+            closure=local_closure, old_loss=initial_local_loss, grad=local_grad
+        )
+        total_local_grad_evals_counter += self.local_optimizer.local_iter
         if self.nr_models > 1:
             dist.all_reduce(total_local_grad_evals_counter, op=dist.ReduceOp.SUM)
             total_local_grad_evals_counter /= self.nr_models
-
         self.grad_evals_counter += total_local_grad_evals_counter
 
+        current_flat = flatten_params(self.local_model, self._local_flat_buffer)
+        step_vec = current_flat - initial_flat
         with torch.no_grad():
             # If local loss is not a torch.Tensor, it is a scalar.
             if not torch.is_tensor(local_loss):
@@ -327,7 +309,6 @@ class APTS_D(Optimizer):
                 restore_params(self.model, initial_flat + step_vec)
 
         trial_loss = self.global_closure()
-
         with torch.no_grad():
             acceptance_ratio = (initial_global_loss - trial_loss) / local_reduction
 
@@ -353,16 +334,16 @@ class APTS_D(Optimizer):
             self.global_optimizer.lr = self.lr
 
         if self.global_pass:
-            for _ in range(self.global_optimizer.max_iter):
-                new_loss = self.global_optimizer.step(
-                    closure=self.global_closure, old_loss=new_loss, grad=grad_arg
-                )
-                grad_arg = None
-                self.grad_evals_counter += 1
+            new_loss = self.global_optimizer.step(
+                closure=self.global_closure, old_loss=new_loss, grad=grad_arg
+            )
+            self.grad_evals_counter += 1
 
         with torch.no_grad():
             self.lr = self.global_optimizer.lr
-            self.local_optimizer.lr = self.lr / self.nr_models
+            self.local_optimizer.lr = self.global_optimizer.lr
+            if self.norm_type != math.inf:
+                self.local_optimizer.lr /= self.nr_models
             self.local_model.load_state_dict(get_state_dict(self.model))
 
         return new_loss

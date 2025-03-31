@@ -13,6 +13,8 @@ parameters:
     value: 1
   correct_step:
     value: False
+  ema:
+    value: True
   norm_type:
     value: "inf"
   epochs: 
