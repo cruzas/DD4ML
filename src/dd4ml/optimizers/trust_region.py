@@ -15,7 +15,7 @@ class TrustRegion(Optimizer):
 
     @staticmethod
     def setup_TR_args(config):
-        params = get_trust_region_params(config, lr_scale=1.0, max_iter=3)
+        params = get_trust_region_params(config)
         config.max_iter = params["max_iter"]
         config.lr = params["lr"]
         config.max_lr = params["max_lr"]

@@ -26,7 +26,21 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 
-def parse_cmd_args(APTS: bool = True) -> argparse.Namespace:
+def parse_cmd_args(optimizer: str = "apts_d") -> argparse.Namespace:
+    # Set some defaults
+    config_file = "./config_files/config_sgd.yaml"  # default to SGD
+    use_pmw = False  # Parallel Model Wrapper
+    if optimizer == "apts_d":
+        config_file = "./config_files/config_apts_d.yaml"
+    elif optimizer == "apts":
+        config_file = "./config_files/config_apts.yaml"
+        use_pmw = True
+    else:
+        optimizer = "sgd"
+
+    # Wandb project name
+    project = optimizer + "_tests"
+
     """Parse command-line arguments for training configuration."""
     parser = argparse.ArgumentParser(
         usage="%(prog)s [options] --entity ENTITY --project PROJECT ...",
@@ -51,23 +65,19 @@ def parse_cmd_args(APTS: bool = True) -> argparse.Namespace:
     parser.add_argument(
         "--sweep_config",
         type=str,
-        default=(
-            "./config_files/config_apts.yaml"
-            if APTS
-            else "./config_files/config_sgd.yaml"
-        ),
+        default=config_file,
         help="Sweep configuration file",
     )
     parser.add_argument(
         "--project",
         type=str,
-        default="apts_tests" if APTS else "sgd_hyperparameter_sweep",
+        default=project,
         help="Wandb project",
     )
     parser.add_argument(
         "--use_pmw",
         action="store_true",
-        default=APTS,
+        default=use_pmw,
         help="Use Parallel Model Wrapper",
     )
     parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")

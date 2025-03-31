@@ -44,3 +44,4 @@ tests/log_files/
 /src/models
 /src/optimizers/
 /src/utility
+/tests/pinns

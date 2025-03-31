@@ -31,16 +31,18 @@ def make_std_config(config):
         if "apts_d" not in config.optimizer.lower():
             keys_to_remove.append("num_subdomains")
         config = remove_keys(config, keys_to_remove)
-    if config.optimizer != "apts":
+    if "apts" not in config.optimizer.lower():
         keys_to_remove = [
             "subdomain_optimizer",
             "subdomain_optimizer_args",
             "global_optimizer",
             "global_optimizer_args",
+            "max_subdomain_iters",
+            "max_global_iters",
         ]
         config = remove_keys(config, keys_to_remove)
     if config.optimizer != "apts_d":
-        keys_to_remove = ["correct_step"]
+        keys_to_remove = ["correct_step", "norm_type"]
         config = remove_keys(config, keys_to_remove)
     return config
 

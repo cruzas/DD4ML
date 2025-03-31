@@ -3,6 +3,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
 from .utils import get_trust_region_params
 
+
 class TrustRegion(torch.optim.Optimizer):
     @staticmethod
     def setup_TR_args(config):
@@ -33,7 +34,10 @@ class TrustRegion(torch.optim.Optimizer):
         max_iter=5,
         norm_type=2,
     ):
-        super().__init__(model.parameters(), {"lr": lr, "max_lr": max_lr, "min_lr": min_lr, "max_iter": max_iter})
+        super().__init__(
+            model.parameters(),
+            {"lr": lr, "max_lr": max_lr, "min_lr": min_lr, "max_iter": max_iter},
+        )
         self.model = model
         self.param_list = list(model.parameters())  # Cache parameters.
         self.lr = lr
@@ -83,7 +87,9 @@ class TrustRegion(torch.optim.Optimizer):
         #         grad = self.model.grad()
         # Process the provided grad, if any
         if grad is None:
-            grad = parameters_to_vector([p.grad.detach() for p in self.param_list if p.grad is not None])
+            grad = parameters_to_vector(
+                [p.grad.detach() for p in self.param_list if p.grad is not None]
+            )
         elif hasattr(grad, "tensor"):
             # Assumes grad.tensor is a list of gradients
             grad = parameters_to_vector(grad.tensor)
@@ -118,7 +124,11 @@ class TrustRegion(torch.optim.Optimizer):
                 break
 
             if red_ratio < self.nu:
-                scale = (-self.lr / old_lr * scale) if self.local_iter == 0 else (self.lr / old_lr * scale)
+                scale = (
+                    (-self.lr / old_lr * scale)
+                    if self.local_iter == 0
+                    else (self.lr / old_lr * scale)
+                )
             else:
                 break
 

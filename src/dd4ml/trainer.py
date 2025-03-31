@@ -48,7 +48,10 @@ class Trainer:
         # For pipelining via pwm library
         C.data_chunks_amount = 1
         C.use_pmw = False
-        C.correct_step = False # for APTS_D
+        C.correct_step = False  # for APTS_D
+        C.max_global_iters = 1  # for APTS*
+        C.max_subdomain_iters = 3  # for APTS*
+        C.norm_type = 2  # for APTS_D (and possibly APTS)
 
         return C
 

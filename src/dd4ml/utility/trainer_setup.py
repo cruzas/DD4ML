@@ -1,17 +1,29 @@
 import copy
+import math
 import os
-import pprint
 
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .config import get_config, make_std_config
-from .factory import criterion_factory, dataset_factory, optimizer_factory
 from .dist_utils import dprint
+from .factory import criterion_factory, dataset_factory, optimizer_factory
 
 # You can now add new components dynamically at runtime by calling, e.g.:
 # dataset_factory.register("new_dataset", "dd4ml.datasets.new_dataset", "NewDatasetClass")
+
+
+def parse_norm(norm_value):
+    if norm_value in ("inf", "Inf", "INF"):
+        return float(math.inf)
+    elif norm_value in ("-inf", "-Inf", "-INF"):
+        return float(-math.inf)
+    try:
+        val = float(norm_value)
+        return val
+    except (ValueError, TypeError):
+        raise ValueError(f"Unsupported norm value: {norm_value}")
 
 
 def get_config_model_and_trainer(args, wandb_config):
@@ -69,7 +81,7 @@ def get_config_model_and_trainer(args, wandb_config):
         if sample_input.shape[0] == 1:
             other_sample = dataset.get_sample_input(all_config.trainer)
             sample_input = torch.cat([sample_input, other_sample], dim=0)
-        
+
         model = ParallelizedModel(model_handler, sample=sample_input)
     else:
         model = all_config.model.model_class(all_config.model)
@@ -137,6 +149,8 @@ def get_config_model_and_trainer(args, wandb_config):
     elif optimizer_name == "apts_d":
         from dd4ml.optimizers.apts_d import APTS_D
 
+        all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
+
         all_config.trainer = APTS_D.setup_APTS_args(all_config.trainer)
         all_config.trainer.apts_d = True
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -146,9 +160,10 @@ def get_config_model_and_trainer(args, wandb_config):
             else "cpu"
         )
         model.to(device)
-        model = DDP(
-            model, device_ids=[local_rank] if torch.cuda.is_available() else None
-        )
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            model = DDP(
+                model, device_ids=[local_rank] if torch.cuda.is_available() else None
+            )
         optimizer_obj = APTS_D(
             params=model.parameters(),
             model=model,
@@ -162,6 +177,7 @@ def get_config_model_and_trainer(args, wandb_config):
             global_pass=True,
             foc=True,
             correct_step=all_config.trainer.correct_step,
+            norm_type=all_config.trainer.norm_type,
         )
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
