@@ -6,7 +6,7 @@ from torch.optim import Optimizer
 from .utils import get_trust_region_params
 
 
-class TrustRegion(Optimizer):
+class TrustRegionSecondOrder(Optimizer):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:

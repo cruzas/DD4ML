@@ -53,6 +53,8 @@ class Trainer:
         C.max_subdomain_iters = 3  # for APTS*
         C.norm_type = 2  # for APTS_D (and possibly APTS)
         C.ema = True  # for APTS_D
+        C.global_second_order = False  # for APTS*
+        C.local_second_order = False  # for APTS*
 
         return C
 

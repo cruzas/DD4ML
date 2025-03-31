@@ -14,17 +14,9 @@ parameters:
   correct_step:
     value: False
   ema:
-    value: False
-  global_second_order:
     value: True
-  local_second_order:
-    value: False
   norm_type:
     value: "inf"
-  max_subdomain_iters:
-    value: 3
-  max_global_iters:
-    value: 2
   epochs: 
     value: 100
   max_iters:
@@ -36,7 +28,7 @@ parameters:
   dataset_name: 
     value: "cifar10" 
   model_name: 
-    value: "resnet18"
+    value: "simple_cnn"
   criterion:
     value: "cross_entropy"
   seed:

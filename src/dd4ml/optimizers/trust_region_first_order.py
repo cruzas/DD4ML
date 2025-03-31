@@ -4,7 +4,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from .utils import get_trust_region_params
 
 
-class TrustRegion(torch.optim.Optimizer):
+class TrustRegionFirstOrder(torch.optim.Optimizer):
     @staticmethod
     def setup_TR_args(config):
         params = get_trust_region_params(config)

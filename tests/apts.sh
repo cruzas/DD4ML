@@ -2,7 +2,7 @@
 
 # Define parameter arrays
 NUM_STAGES_ARR=(1)
-NUM_SUBD_ARR=(2)
+NUM_SUBD_ARR=(4)
 NUM_REP_ARR=(1)
 BATCH_SIZE=50000
 OPTIMIZER="apts_d"

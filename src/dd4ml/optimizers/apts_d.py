@@ -7,7 +7,8 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
 from .trust_region_ema import TrustRegionEMA
-from .trust_region_legacy_code import TrustRegion  # Explicit import
+from .trust_region_first_order import TrustRegionFirstOrder  # Explicit import
+from .trust_region_second_order import TrustRegionSecondOrder  # Explicit import
 from .utils import (
     get_local_trust_region_params,
     get_state_dict,
@@ -149,16 +150,27 @@ def clone_model(model):
 class APTS_D(Optimizer):
     @staticmethod
     def setup_APTS_args(config):
-        optimizer_class = TrustRegion if not config.ema else TrustRegionEMA
-
-        print(f"Using optimizer: {optimizer_class.__name__} for APTS_D")
-
-        config.global_optimizer = optimizer_class
+        if config.ema and config.global_second_order:
+            raise ValueError(
+                "APTS_D global optimizer does not support second-order optimizers with EMA."
+            )
+        glob_optim_class = TrustRegionFirstOrder
+        if config.ema:
+            glob_optim_class = TrustRegionEMA
+        elif config.global_second_order:
+            glob_optim_class = TrustRegionSecondOrder
+    
+        config.global_optimizer = glob_optim_class
         config.global_optimizer_args = get_trust_region_params(config)
-
-        config.subdomain_optimizer = optimizer_class
+        
+        loc_optim_class = TrustRegionFirstOrder    
+        if config.local_second_order:
+            loc_optim_class = TrustRegionSecondOrder
+            
+        config.subdomain_optimizer = loc_optim_class
         config.subdomain_optimizer_args = get_local_trust_region_params(config)
 
+        print(f"APTS_D global optimizer: {glob_optim_class.__name__}; local optimizer: {loc_optim_class.__name__}")
         return config
 
     def __init__(

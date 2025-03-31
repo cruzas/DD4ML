@@ -72,6 +72,7 @@ MODEL_MAP = {
     "big_cnn": ("dd4ml.models.cnn.big_cnn", "BigCNN"),
     "simple_resnet": ("dd4ml.models.resnet.simple_resnet", "SimpleResNet"),
     "mingpt": ("dd4ml.models.gpt.mingpt.model", "GPT"),
+    "resnet18": ("torchvision.models", "resnet18"),
 }
 
 CRITERION_MAP = {

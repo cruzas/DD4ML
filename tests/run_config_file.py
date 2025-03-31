@@ -236,7 +236,7 @@ def main(
     ) -> None:
         dprint(
             f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, "
-            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms"
+            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, Learning Rate: {trainer.optimizer.lr:.5f}"
         )
         if rank == 0 and use_wandb:
             log_fn(

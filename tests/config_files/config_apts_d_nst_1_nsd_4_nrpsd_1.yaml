@@ -8,7 +8,7 @@ parameters:
   num_stages:
     value: 1
   num_subdomains:
-    value: 1
+    value: 4
   num_replicas_per_subdomain:
     value: 1
   correct_step:
@@ -36,7 +36,7 @@ parameters:
   dataset_name: 
     value: "cifar10" 
   model_name: 
-    value: "resnet18"
+    value: "simple_cnn"
   criterion:
     value: "cross_entropy"
   seed:

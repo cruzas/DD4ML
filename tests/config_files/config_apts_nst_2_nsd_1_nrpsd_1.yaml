@@ -1,0 +1,29 @@
+method: grid
+metric:
+  name: train_loss
+  goal: minimize
+parameters:
+  batch_size:
+    value: 128
+  num_stages:
+    value: 2
+  num_subdomains:
+    value: 1
+  num_replicas_per_subdomain:
+    value: 1
+  epochs: 
+    value: 10
+  max_iters:
+    value: 100
+  optimizer: 
+    value: "apts" # pmw compatible 
+  learning_rate: 
+    value: 0.001
+  dataset_name: 
+    value: "tinyshakespeare" # "mnist"
+  model_name: 
+    value: "mingpt" # "simple_cnn"
+  criterion:
+    value: "cross_entropy_transformers" # "cross_entropy"
+  seed:
+    value: 42

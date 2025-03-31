@@ -3,7 +3,10 @@ import time
 import torch
 import torch.distributed as dist
 
-from .trust_region import TrustRegion
+from .trust_region_ema import TrustRegionEMA
+from .trust_region_first_order import TrustRegionFirstOrder  # Explicit import
+from .trust_region_second_order import TrustRegionSecondOrder  # Explicit import
+
 from .utils import get_trust_region_params
 
 class APTS(torch.optim.Optimizer):
@@ -17,11 +20,15 @@ class APTS(torch.optim.Optimizer):
         elif config.subdomain_optimizer == torch.optim.SGD:
             config.subdomain_optimizer_args['momentum'] = 0.9
         
-        config.max_subdomain_iters = 3
-        
         # Global optimizer
-        config.global_optimizer = TrustRegion
-        config.global_optimizer_args = get_trust_region_params(config, lr_scale=1.0, max_iter=1)
+        glob_optimizer_class = TrustRegionFirstOrder
+        if config.ema:
+            optimizer_class = TrustRegionEMA
+        elif config.second_order:
+            optimizer_class = TrustRegionSecondOrder
+        
+        config.global_optimizer = glob_optimizer_class
+        config.global_optimizer_args = get_trust_region_params(config)
         
         return config
     
