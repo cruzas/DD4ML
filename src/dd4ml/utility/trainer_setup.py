@@ -110,6 +110,7 @@ def get_config_model_and_trainer(args, wandb_config):
             "subdomain_optimizer_args",
             "global_optimizer",
             "global_optimizer_args",
+            # TODO: probably need to update this
         ]:
             if hasattr(all_config.trainer, attr):
                 delattr(all_config.trainer, attr)
@@ -134,6 +135,7 @@ def get_config_model_and_trainer(args, wandb_config):
         from dd4ml.optimizers.apts import APTS
 
         all_config.trainer = APTS.setup_APTS_args(all_config.trainer)
+
         optimizer_obj = APTS(
             model=model,
             subdomain_optimizer=all_config.trainer.subdomain_optimizer,

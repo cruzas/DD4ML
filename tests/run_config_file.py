@@ -26,7 +26,7 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 
-def parse_cmd_args(optimizer: str = "apts_d") -> argparse.Namespace:
+def parse_cmd_args(optimizer: str = "apts") -> argparse.Namespace:
     # Set some defaults
     config_file = "./config_files/config_sgd.yaml"  # default to SGD
     use_pmw = False  # Parallel Model Wrapper
@@ -140,9 +140,7 @@ def parse_cmd_args(optimizer: str = "apts_d") -> argparse.Namespace:
             help="Max iterations for subdomain optimizer",
         )
 
-    parser.add_argument(
-        "--num_stages", type=int, default=6, help="Number of stages"
-    )
+    parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
     parser.add_argument(
         "--num_subdomains", type=int, default=1, help="Number of subdomains"
     )

@@ -130,10 +130,12 @@ class ModelHandler:
         # Initialize and store the position fields.
         try:
             self.sd, self.rep, self.s, self.sh = self._rank_position_cache[self.rank]
-            print(f"Rank {self.rank}/{dist.get_world_size()} is assigned to SD {self.sd}, Rep {self.rep}, S {self.s}, SH {self.sh}.")
+            print(
+                f"Rank {self.rank}/{dist.get_world_size() - 1} is assigned to SD {self.sd}, Rep {self.rep}, S {self.s}, SH {self.sh}."
+            )
         except:
             raise ValueError(
-                f"Rank {self.rank}/{dist.get_world_size()} is not assigned to any subdomain, replica, stage, or shard."
+                f"Rank {self.rank}/{dist.get_world_size() - 1} is not assigned to any subdomain, replica, stage, or shard."
             )
         self._ = self.rank_to_position()  # Ensures caching within rank_to_position.
         self._stage_data = self.stage_data()
@@ -293,7 +295,9 @@ class ModelHandler:
                 f"Number of available ranks ({len(self.available_ranks)}) is less than required ({total_required})."
             )
         elif len(self.available_ranks) > total_required:
-            dprint(f"Warning: Some available ranks will remain idle. Available ranks: {len(self.available_ranks)}, Required: {total_required}")
+            dprint(
+                f"Warning: Some available ranks will remain idle. Available ranks: {len(self.available_ranks)}, Required: {total_required}"
+            )
             self.available_ranks = self.available_ranks[:total_required]
 
         n = self.num_replicas_per_subdomain * self.num_ranks_per_model
@@ -401,8 +405,10 @@ class ModelHandler:
     def _organize_layers(self):
         net = self.net_dict
         if dist.get_rank() == 0:
-            pprint.pprint(f"Net dict: {net} \n Number of keys: {len(net.keys())}. Keys: {net.keys()}")
-        
+            pprint.pprint(
+                f"Net dict: {net} \n Number of keys: {len(net.keys())}. Keys: {net.keys()}"
+            )
+
         organized_layers = {}
         dst = net["start"]["dst"]["to"]
         organized_layers[net["start"]["stage"]] = ["start"]
