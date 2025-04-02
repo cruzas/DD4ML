@@ -8,12 +8,15 @@ from .trust_region_first_order import TrustRegionFirstOrder  # Explicit import
 from .trust_region_second_order import TrustRegionSecondOrder  # Explicit import
 from .utils import get_trust_region_params
 
+
 class Timer:
     def __init__(self, timings, key):
         self.timings = timings
         self.key = key
+
     def __enter__(self):
         self.start = time.time()
+
     def __exit__(self, *args):
         self.timings[self.key] += time.time() - self.start
 
@@ -29,8 +32,10 @@ class APTS(torch.optim.Optimizer):
         try:
             config.subdomain_optimizer = optimizers[config.subdomain_optimizer.lower()]
         except KeyError:
-            raise ValueError(f"Unknown subdomain optimizer: {config.subdomain_optimizer}")
-        
+            raise ValueError(
+                f"Unknown subdomain optimizer: {config.subdomain_optimizer}"
+            )
+
         config.subdomain_optimizer_args = {"lr": config.learning_rate}
         if config.subdomain_optimizer in {torch.optim.Adam, torch.optim.AdamW}:
             config.subdomain_optimizer_args["betas"] = config.betas
@@ -47,7 +52,7 @@ class APTS(torch.optim.Optimizer):
         config.global_optimizer = glob_optim_class
         config.global_optimizer_args = get_trust_region_params(config)
         return config
-    
+
     def __init__(
         self,
         model,
@@ -135,7 +140,10 @@ class APTS(torch.optim.Optimizer):
         timings.pop("precond", None)
         total_time = sum(timings.values())
         headers = ["Timer", "Time (s)", "Percentage (%)"]
-        rows = [[k, f"{v:.4f}", f"{(v / total_time) * 100:.2f}%"] for k, v in sorted(timings.items())]
+        rows = [
+            [k, f"{v:.4f}", f"{(v / total_time) * 100:.2f}%"]
+            for k, v in sorted(timings.items())
+        ]
         col_widths = [max(len(row[i]) for row in rows + [headers]) for i in range(3)]
         row_fmt = "  ".join(f"{{:<{w}}}" for w in col_widths)
         table = [row_fmt.format(*headers), "-" * sum(col_widths)]
@@ -170,13 +178,13 @@ class APTS(torch.optim.Optimizer):
     def step(self, closure, final_subdomain_closure):
         with Timer(self.timings, "closure_1"):
             initial_loss = closure(compute_grad=True, zero_grad=True)
-        
+
         with Timer(self.timings, "copy_params"):
             initial_parameters = self.model.parameters(clone=True)
             initial_grads = self.model.grad(clone=True)
 
         with Timer(self.timings, "precond"):
-            self.subdomain_steps(final_subdomain_closure)   
+            self.subdomain_steps(final_subdomain_closure)
 
         step = self.model.parameters(clone=False) - initial_parameters
         if self.dogleg:
@@ -206,7 +214,9 @@ class APTS(torch.optim.Optimizer):
 
             # Apply the candidate step
             self._apply_model_update(initial_parameters, candidate_step)
-            new_loss = closure(compute_grad=False, zero_grad=True)
+            new_loss = closure(
+                compute_grad=True, zero_grad=True
+            )  # TODO: can optimize this by computing the grad only if necessary
 
             actual_reduction = initial_loss - new_loss
             predicted_reduction = torch.dot(initial_grads, step) - (0.5 * step_norm**2)
@@ -232,13 +242,14 @@ class APTS(torch.optim.Optimizer):
                 self.lr = self.lr
                 old_loss = new_loss
 
-
         with Timer(self.timings, "smoother"):
             self.global_optimizer.step(closure=closure, old_loss=old_loss)
 
-        self.lr = (self.global_optimizer.param_groups[0]["lr"]
-               if "lr" in self.global_optimizer.param_groups[0]
-               else self.global_optimizer.lr)
+        self.lr = (
+            self.global_optimizer.param_groups[0]["lr"]
+            if "lr" in self.global_optimizer.param_groups[0]
+            else self.global_optimizer.lr
+        )
 
         self.update_param_group()
         return new_loss

@@ -184,6 +184,7 @@ class TrustRegionSecondOrder(Optimizer):
                 )
             else:
                 grad = self.model.grad()
+
         if grad.numel() == 0:
             print(f"Stopping TrustRegion algorithm due to ||g||=0.")
             return old_loss
