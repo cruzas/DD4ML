@@ -13,21 +13,20 @@ class APTS(torch.optim.Optimizer):
     @staticmethod
     def setup_APTS_args(config):    
         # Subdomain optimizer
-        config.subdomain_optimizer_args = {'lr' : config.learning_rate / 10.0}
-        
+        config.subdomain_optimizer_args = {'lr' : config.learning_rate}
         if config.subdomain_optimizer == torch.optim.Adam or config.subdomain_optimizer == torch.optim.AdamW:
             config.subdomain_optimizer_args['betas'] = config.betas
         elif config.subdomain_optimizer == torch.optim.SGD:
             config.subdomain_optimizer_args['momentum'] = 0.9
         
         # Global optimizer
-        glob_optimizer_class = TrustRegionFirstOrder
+        glob_optim_class = TrustRegionFirstOrder    
         if config.ema:
-            optimizer_class = TrustRegionEMA
-        elif config.second_order:
-            optimizer_class = TrustRegionSecondOrder
+            glob_optim_class = TrustRegionEMA
+        elif config.global_second_order:
+            glob_optim_class = TrustRegionSecondOrder
         
-        config.global_optimizer = glob_optimizer_class
+        config.global_optimizer = glob_optim_class
         config.global_optimizer_args = get_trust_region_params(config)
         
         return config
@@ -105,8 +104,8 @@ class APTS(torch.optim.Optimizer):
 
     def subdomain_steps(self, final_subdomain_closure=None):
         if self.max_subdomain_iter > 0:
-            lr_subdomain = self.lr / self.max_subdomain_iter
-            self.subdomain_optimizer.param_groups[0]['lr'] = lr_subdomain
+            # lr_subdomain = self.lr / self.max_subdomain_iter
+            # self.subdomain_optimizer.param_groups[0]['lr'] = lr_subdomain
             for i in range(self.max_subdomain_iter):
                 self.subdomain_optimizer.step()
                 self.subdomain_optimizer.zero_grad()
@@ -187,13 +186,13 @@ class APTS(torch.optim.Optimizer):
                 old_loss = new_loss 
             
         tic = time.time()
-        for _ in range(self.global_optimizer.max_iter):
-            old_loss = self.global_optimizer.step(closure=closure, old_loss=old_loss)
+        self.global_optimizer.step(closure=closure, old_loss=old_loss)
         self.timings['smoother'] += time.time() - tic
 
         if 'lr' in self.global_optimizer.param_groups[0]:
             self.lr = self.global_optimizer.param_groups[0]['lr']
         else:
             self.lr = self.global_optimizer.lr
+            
         self.update_param_group()
         return new_loss

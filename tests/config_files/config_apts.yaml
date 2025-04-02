@@ -11,6 +11,20 @@ parameters:
     value: 1
   num_replicas_per_subdomain:
     value: 1
+  correct_step:
+    value: False
+  ema:
+    value: False
+  global_second_order:
+    value: True
+  local_second_order:
+    value: False
+  norm_type:
+    value: "inf"
+  max_subdomain_iters:
+    value: 3
+  max_global_iters:
+    value: 1
   epochs: 
     value: 10
   max_iters:

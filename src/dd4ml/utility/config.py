@@ -41,10 +41,10 @@ def make_std_config(config):
             "max_global_iters",
         ]
         config = remove_keys(config, keys_to_remove)
-    if config.optimizer != "apts_d":
+    if config.optimizer.lower() != "apts_d" and config.optimizer.lower() != "apts":
         keys_to_remove = ["correct_step", "norm_type", "ema"]
         config = remove_keys(config, keys_to_remove)
-    if config.optimizer == "apts_d":
+    if config.optimizer.lower() == "apts_d":
         keys_to_remove = ["global_optimizer", "subdomain_optimizer"] # as TR used with ema or not
         config = remove_keys(config, keys_to_remove)
     return config

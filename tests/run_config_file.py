@@ -140,20 +140,18 @@ def parse_cmd_args(optimizer: str = "apts_d") -> argparse.Namespace:
             help="Max iterations for subdomain optimizer",
         )
 
-    # Add PMW-related arguments if use_pmw is True.
-    if args.use_pmw:
-        parser.add_argument(
-            "--num_stages", type=int, default=6, help="Number of stages"
-        )
-        parser.add_argument(
-            "--num_subdomains", type=int, default=1, help="Number of subdomains"
-        )
-        parser.add_argument(
-            "--num_replicas_per_subdomain",
-            type=int,
-            default=1,
-            help="Number of replicas per subdomain",
-        )
+    parser.add_argument(
+        "--num_stages", type=int, default=6, help="Number of stages"
+    )
+    parser.add_argument(
+        "--num_subdomains", type=int, default=1, help="Number of subdomains"
+    )
+    parser.add_argument(
+        "--num_replicas_per_subdomain",
+        type=int,
+        default=1,
+        help="Number of replicas per subdomain",
+    )
 
     return parser.parse_args()
 
@@ -370,11 +368,7 @@ if __name__ == "__main__":
         sweep_config = yaml.safe_load(f)
 
     comp_env = detect_environment()
-    for trial in range(args["trials"]):
-        if is_main_process():
-            print(f"Starting trial {trial + 1}/{args['trials']}...")
-        args.update(trial_num=trial)
-        if comp_env == "local":
-            run_local(args, sweep_config)
-        else:
-            run_cluster(args, sweep_config)
+    if comp_env == "local":
+        run_local(args, sweep_config)
+    else:
+        run_cluster(args, sweep_config)

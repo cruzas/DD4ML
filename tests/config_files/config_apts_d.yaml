@@ -4,7 +4,7 @@ metric:
   goal: minimize
 parameters:
   batch_size:
-    value: 50000
+    value: 10000
   num_stages:
     value: 1
   num_subdomains:
@@ -24,7 +24,7 @@ parameters:
   max_subdomain_iters:
     value: 3
   max_global_iters:
-    value: 2
+    value: 1
   epochs: 
     value: 100
   max_iters:
@@ -32,11 +32,11 @@ parameters:
   optimizer: 
     value: "apts_d" # pmw compatible 
   learning_rate: 
-    value: 0.01
+    value: 0.1
   dataset_name: 
     value: "cifar10" 
   model_name: 
-    value: "resnet18"
+    value: "simple_resnet"
   criterion:
     value: "cross_entropy"
   seed:

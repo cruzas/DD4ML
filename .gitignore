@@ -45,3 +45,6 @@ tests/log_files/
 /src/optimizers/
 /src/utility
 /tests/pinns
+
+ tests/config_files/config_files/config_apts_d_*
+ tests/config_files/config_files/config_apts_*
