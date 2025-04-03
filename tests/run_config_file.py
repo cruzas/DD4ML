@@ -26,35 +26,47 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 
-def parse_cmd_args(optimizer: str = "apts") -> argparse.Namespace:
-    # Set some defaults
-    config_file = "./config_files/config_sgd.yaml"  # default to SGD
-    use_pmw = False  # Parallel Model Wrapper
-    if optimizer == "apts_d":
-        config_file = "./config_files/config_apts_d.yaml"
-    elif optimizer == "apts":
-        config_file = "./config_files/config_apts.yaml"
-        use_pmw = True
-    else:
-        optimizer = "sgd"
-
-    # Wandb project name
-    project = optimizer + "_tests"
-
-    """Parse command-line arguments for training configuration."""
+def parse_cmd_args() -> argparse.Namespace:
+    num_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
     parser = argparse.ArgumentParser(
         usage="%(prog)s [options] --entity ENTITY --project PROJECT ...",
-        description="Parse command line arguments. For those that state store_true, a value of true is stored if the flag is present. E.g. simply adding --use_seed, without specifying a value for it.",
+        description="Parse command line arguments.",
     )
 
-    # Set default wandb entity based on WANDB_MODE.
-    wandb_entity_default = "cruzaslocal"
-    if os.getenv("WANDB_MODE") == "online":
-        wandb_entity_default = "cruzas-universit-della-svizzera-italiana"
+    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
 
-    # Always-added arguments.
+    # Preliminary parse to determine defaults based on optimizer
+    temp_args, _ = parser.parse_known_args()
+    default_use_pmw = False
+    if temp_args.optimizer == "apts":
+        default_use_pmw = True
+
+    default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
+    default_project = temp_args.optimizer + "_tests"
+
     parser.add_argument(
-        "--entity", type=str, default=wandb_entity_default, help="Wandb entity"
+        "--use_pmw",
+        action="store_true",
+        default=default_use_pmw,
+        help="Use Parallel Model Wrapper",
+    )
+    parser.add_argument(
+        "--sweep_config",
+        type=str,
+        default=default_config_file,
+        help="Sweep configuration file",
+    )
+    parser.add_argument(
+        "--project",
+        type=str,
+        default=default_project,
+        help="Wandb project",
+    )
+    parser.add_argument(
+        "--entity",
+        type=str,
+        default="cruzas-universit-della-svizzera-italiana",
+        help="Wandb entity",
     )
     parser.add_argument(
         "--work_dir",
@@ -63,36 +75,11 @@ def parse_cmd_args(optimizer: str = "apts") -> argparse.Namespace:
         help="Directory to save models",
     )
     parser.add_argument(
-        "--sweep_config",
-        type=str,
-        default=config_file,
-        help="Sweep configuration file",
-    )
-    parser.add_argument(
-        "--project",
-        type=str,
-        default=project,
-        help="Wandb project",
-    )
-    parser.add_argument(
-        "--use_pmw",
-        action="store_true",
-        default=use_pmw,
-        help="Use Parallel Model Wrapper",
-    )
-    parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
-
-    num_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
-    parser.add_argument(
-        "--num_workers", type=int, default=num_cpus, help="Number of workers to use"
-    )
-    parser.add_argument(
         "--dataset_name", type=str, default="mnist", help="Dataset name"
     )
     parser.add_argument(
         "--model_name", type=str, default="simple_cnn", help="Model name"
     )
-    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
     parser.add_argument(
         "--criterion", type=str, default="cross_entropy", help="Criterion name"
     )
@@ -107,26 +94,35 @@ def parse_cmd_args(optimizer: str = "apts") -> argparse.Namespace:
         help="Metric to determine best learning rate",
     )
     parser.add_argument(
+        "--num_workers", type=int, default=num_cpus, help="Number of workers to use"
+    )
+    parser.add_argument(
         "--use_seed",
         action="store_true",
         default=False,
-        help="Use a seed for reproducibility. Likely unsuitable for hyperparameter tuning.",
+        help="Use a seed for reproducibility.",
     )
+    parser.add_argument("--trials", type=int, default=1, help="Number of trials to run")
     parser.add_argument(
         "--trial_num",
         type=int,
         default=0,
         help="Trial number. Used to generate seed for reproducibility.",
     )
+    parser.add_argument(
+        "--num_subdomains", type=int, default=1, help="Number of subdomains"
+    )
 
-    # Preliminary parse to check conditions.
-    args, _ = parser.parse_known_args()
+    parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
+    parser.add_argument(
+        "--num_replicas_per_subdomain",
+        type=int,
+        default=1,
+        help="Number of replicas per subdomain",
+    )
 
-    # Add APTS-related arguments if applicable.
-    if "apts" in args.sweep_config.lower():
-        parser.add_argument(
-            "--subdomain_optimizer", type=str, default="sgd", help="Subdomain optimizer"
-        )
+    temp_args, _ = parser.parse_known_args()
+    if "apts" in temp_args.sweep_config.lower():
         parser.add_argument(
             "--global_optimizer",
             type=str,
@@ -134,22 +130,14 @@ def parse_cmd_args(optimizer: str = "apts") -> argparse.Namespace:
             help="Global optimizer",
         )
         parser.add_argument(
+            "--subdomain_optimizer", type=str, default="sgd", help="Subdomain optimizer"
+        )
+        parser.add_argument(
             "--max_subdomain_iters",
             type=int,
             default=3,
             help="Max iterations for subdomain optimizer",
         )
-
-    parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
-    parser.add_argument(
-        "--num_subdomains", type=int, default=1, help="Number of subdomains"
-    )
-    parser.add_argument(
-        "--num_replicas_per_subdomain",
-        type=int,
-        default=1,
-        help="Number of replicas per subdomain",
-    )
 
     return parser.parse_args()
 
@@ -208,7 +196,6 @@ def main(
     wandb_config = broadcast_dict(wandb_config, src=0) if use_wandb else {}
 
     trial_args = {**args, **wandb_config}
-
     if trial_args["use_seed"]:
         trial_num = trial_args["trial_num"]
         seed = wandb_config.get("seed", 3407) * trial_num
@@ -230,9 +217,16 @@ def main(
     def epoch_end_callback(
         trainer, save_model: bool = False, save_frequency: int = 5
     ) -> None:
+
+        # Check if lr is in trainer.optimizer
+        if hasattr(trainer.optimizer, "lr"):
+            lr = trainer.optimizer.lr
+        else:
+            lr = trainer.optimizer.param_groups[0]["lr"]
+
         dprint(
             f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, "
-            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, Learning Rate: {trainer.optimizer.lr:.5f}"
+            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, Learning Rate: {lr:.5f}"
         )
         if rank == 0 and use_wandb:
             log_fn(

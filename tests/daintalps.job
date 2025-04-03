@@ -1,15 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=${JOB_NAME} # JOB_NAME should be defined in [submit_job].sh script
-#SBATCH --output=./log_files/${JOB_NAME}.out
-#SBATCH --error=./log_files/${JOB_NAME}.err
+#SBATCH --job-name=${job_name}    # job_name defined in submit_jobs.sh script
+#SBATCH --output=./log_files/${job_name}.out
+#SBATCH --error=./log_files/${job_name}.err
 #SBATCH --nodes=1
 #SBATCH --time=00:30:00
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
 
 # NOTE: these two should match to assign one task per GPU
-#SBATCH --ntasks-per-node=${NTASKS_PER_NODE}   # Dynamically set tasks per node
-#SBATCH --gres=gpu:${NTASKS_PER_NODE}   # Dynamically set tasks per node
+#SBATCH --ntasks-per-node=${ntasks_per_node}   # Dynamically set tasks per node
+#SBATCH --gres=gpu:${ntasks_per_node}           # Dynamically set tasks per node
 
 #SBATCH --hint=nomultithread
 #SBATCH --constraint=gpu
@@ -37,29 +37,29 @@ export NCCL_P2P_DISABLE=0 # Enable peer-to-peer communication
 export NCCL_SHM_DISABLE=0 # Enable shared memory communication
 
 # Optionally source WandB environment
-if [ "${USE_WANDB}" = "1" ]; then
+if [ "${use_wandb}" = "1" ]; then
     source ~/.wandb_env
     export WANDB_MODE=online
+fi
+
+# Set additional flag if optimizer is "apts"
+extra_flags=""
+if [[ "$optimizer" == "apts" ]]; then
+    extra_flags="--use_pmw"
 fi
 
 # Execute the Python script
 echo "Test started $(date)"
 export CUDA_VISIBLE_DEVICES=0,1,2,3
-
-# Set additional flag if optimizer is "apts"
-extra_flags=""
-if [[ "$OPTIMIZER" == "apts" ]]; then
-    extra_flags="--use_pmw"
-fi
-
-srun --kill-on-bad-exit /opt/cray/pe/python/3.11.5/bin/python -u "${SCRIPT}" \
+srun --kill-on-bad-exit /opt/cray/pe/python/3.11.5/bin/python -u "${script}" \
     $extra_flags \
-    --sweep_config="${CONFIG_FILE}" \
-    --num_stages=${NUM_STAGES} \
-    --num_subdomains=${NUM_SUBD} \
-    --num_replicas_per_subdomain=${NUM_REP} \
-    --project=${OPTIMIZER}_tests \
-    --trial_num=${TRIAL}
+    --optimizer="${optimizer}" \
+    --sweep_config="${config_file}" \
+    --num_stages=${num_stages} \
+    --num_subdomains=${num_subd} \
+    --num_replicas_per_subdomain=${num_rep} \
+    --project=${optimizer}_tests \
+    --trial_num=${trial}
 
 echo "Test done $(date)"
 rm core_nid*

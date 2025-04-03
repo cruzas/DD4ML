@@ -85,13 +85,21 @@ def get_config_model_and_trainer(args, wandb_config):
         model = ParallelizedModel(model_handler, sample=sample_input)
     else:
         model = all_config.model.model_class(all_config.model)
+        device = (
+            f"cuda:{torch.cuda.current_device()}"
+            if dist.get_backend() != "gloo"
+            else "cpu"
+        )
+        model.to(device)
         if dist.is_initialized() and dist.get_world_size() > 1:
             local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            print(
+                f"Rank {dist.get_rank()}, local rank {local_rank}, cuda available: {torch.cuda.is_available()}"
+            )
             model = DDP(
                 model, device_ids=[local_rank] if torch.cuda.is_available() else None
             )
 
-    # Criterion selection.
     criterion_key = (
         wandb_config["criterion"] if wandb_config is not None else args["criterion"]
     )

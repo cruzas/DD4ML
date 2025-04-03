@@ -3,6 +3,8 @@ metric:
   name: train_loss
   goal: minimize
 parameters:
+  optimizer: 
+    value: "apts" # pmw compatible 
   batch_size:
     value: 128
   num_stages:
@@ -29,8 +31,6 @@ parameters:
     value: 10
   max_iters:
     value: 100
-  optimizer: 
-    value: "apts" # pmw compatible 
   learning_rate: 
     value: 0.1
   dataset_name: 
