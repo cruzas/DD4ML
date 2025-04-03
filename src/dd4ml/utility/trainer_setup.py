@@ -85,6 +85,11 @@ def get_config_model_and_trainer(args, wandb_config):
         model = ParallelizedModel(model_handler, sample=sample_input)
     else:
         model = all_config.model.model_class(all_config.model)
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            model = DDP(
+                model, device_ids=[local_rank] if torch.cuda.is_available() else None
+            )
 
     # Criterion selection.
     criterion_key = (
@@ -176,8 +181,8 @@ def get_config_model_and_trainer(args, wandb_config):
             global_opt_params=all_config.trainer.global_optimizer_args,
             local_opt=all_config.trainer.subdomain_optimizer,
             local_opt_params=all_config.trainer.subdomain_optimizer_args,
-            global_pass=True,
-            foc=True,
+            global_pass=all_config.trainer.global_pass,
+            foc=all_config.trainer.foc,
             correct_step=all_config.trainer.correct_step,
             norm_type=all_config.trainer.norm_type,
         )

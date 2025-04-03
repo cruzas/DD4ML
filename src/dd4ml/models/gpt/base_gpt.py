@@ -129,7 +129,7 @@ class BaseGPT(BaseModel):
     def get_default_config():
         C = BaseModel.get_default_config()
         # either model_type or (n_layer, n_head, n_embd) must be given in the config
-        C.model_type = "gpt2"
+        C.model_type = "gpt-nano"
         C.n_layer = None
         C.n_head = None
         C.n_embd = None

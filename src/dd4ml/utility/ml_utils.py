@@ -68,7 +68,6 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
             for i, out in enumerate(outputs):
                 losses[i] = criterion(out, targets[i].to(out.device))
             loss = torch.tensor((sum(losses) / len(losses)).item(), device=model.tensor_device)
-
         elif not has_model_handler:
             loss = criterion(outputs, targets.to(outputs.device))
 
@@ -88,6 +87,9 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
                 if len(last_stage_ranks) > 1:
                     raise ValueError('Tensor sharding not implemented yet.')
                 loss_broadcast = dist.broadcast(loss.detach(), src=last_stage_ranks[0], group=model.model_handler.get_sd_group(), async_op=True)
+        elif not has_model_handler and dist.is_initialized() and dist.get_world_size() > 1:
+            dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+            loss /= dist.get_world_size() # gradient averaging taken care of by DDP, assuming model is wrapped by DDP
 
         # Compute gradients
         if compute_grad and torch.is_grad_enabled():

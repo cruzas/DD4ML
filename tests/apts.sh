@@ -1,23 +1,28 @@
 #!/bin/bash
 
 # Define parameter arrays
-NUM_STAGES_ARR=(2)
-NUM_SUBD_ARR=(1)
+NUM_STAGES_ARR=(1)
+NUM_SUBD_ARR=(4 8)
 NUM_REP_ARR=(1)
 BATCH_SIZES=(128)
-OPTIMIZER="apts"
-DATASET="tinyshakespeare"
-MODEL="mingpt"
-CRITERION="cross_entropy_transformers"
+OPTIMIZER="apts_d"
+DATASET="cifar10"
+MODEL="simple_resnet"
+CRITERION="cross_entropy"
+EPOCHS=10
+GLOBAL_PASS=True
+FOC=False
+GRADIENT_ACCUMULATION=True
+ACCUMULATION_STEPS=3
 TRIALS=1
 
 # Get current working directory
 current_dir=$(pwd)
 # System maximum GPUs per node (used as an upper bound)
 if [[ "$current_dir" == *"home"* ]]; then
-    max_ngpu_per_node=2
+    max_ngpu_per_node=1 # 2 only for multi-gpu on USI Rosa
 else
-    max_ngpu_per_node=4
+    max_ngpu_per_node=4 # each node has 4 GPUs on Daint Alps
 fi
 
 # Helper function for job submission
@@ -83,7 +88,23 @@ for NUM_STAGES in "${NUM_STAGES_ARR[@]}"; do
                     sed -i '/dataset_name:/ {n; s/value: .*/value: '"${DATASET}"'/}' "${CONFIG_FILE}"
                     sed -i '/model_name:/ {n; s/value: .*/value: '"${MODEL}"'/}' "${CONFIG_FILE}"
                     sed -i '/criterion:/ {n; s/value: .*/value: '"${CRITERION}"'/}' "${CONFIG_FILE}"
-                    sed -i '/batch_size:/ {n; s/value: .*/value: '"${BATCH_SIZE}"'/}' "${CONFIG_FILE}"
+                    sed -i '/epochs:/ {n; s/value: .*/value: '"${EPOCHS}"'/}' "${CONFIG_FILE}"
+                    sed -i '/gradient_accumulation:/ {n; s/value: .*/value: '"${GRADIENT_ACCUMULATION}"'/}' "${CONFIG_FILE}"
+                    if [[ "$OPTIMIZER" == "apts" ]]; then
+                        sed -i '/batch_size:/ {n; s/value: .*/value: '"${BATCH_SIZE}"'/}' "${CONFIG_FILE}"
+                    else
+                        effective_batch_size=${BATCH_SIZE}
+                        actual_batch_size=$((effective_batch_size * NUM_SUBD))
+                        echo "Effective batch size: ${effective_batch_size}"
+                        echo "Actual batch size: ${actual_batch_size}"
+                        sed -i '/batch_size:/ {n; s/value: .*/value: '"${actual_batch_size}"'/}' "${CONFIG_FILE}"
+                        sed -i '/effective_batch_size:/ {n; s/value: .*/value: '"${effective_batch_size}"'/}' "${CONFIG_FILE}"
+                    fi
+
+                    if [[ "$OPTIMIZER" == "apts_d" ]]; then
+                        sed -i '/global_pass:/ {n; s/value: .*/value: '"${GLOBAL_PASS}"'/}' "${CONFIG_FILE}"
+                        sed -i '/foc:/ {n; s/value: .*/value: '"${FOC}"'/}' "${CONFIG_FILE}"
+                    fi
 
                     export JOB_NAME SCRIPT="run_config_file.py" USE_WANDB=1 NCCL_DEBUG=WARN
                     export NUM_STAGES NUM_SUBD NUM_REP WORLD_SIZE tasks_remaining=${WORLD_SIZE} NTASKS_PER_NODE CONFIG_FILE OPTIMIZER TRIAL

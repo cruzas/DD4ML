@@ -5,6 +5,8 @@ metric:
 parameters:
   batch_size:
     value: 10000
+  effective_batch_size:
+    value: 10000
   num_stages:
     value: 1
   num_subdomains:
@@ -15,18 +17,22 @@ parameters:
     value: False
   ema:
     value: False
+  global_pass:
+    value: True
+  foc:
+    value: True
   global_second_order:
     value: True
   local_second_order:
     value: False
   norm_type:
-    value: "inf"
+    value: 2
   max_subdomain_iters:
     value: 3
   max_global_iters:
     value: 1
   epochs: 
-    value: 100
+    value: 10
   max_iters:
     value: 20
   optimizer: 
@@ -39,5 +45,9 @@ parameters:
     value: "simple_resnet"
   criterion:
     value: "cross_entropy"
+  gradient_accumulation:
+    value: True
+  accumulation_steps:
+    value: 5
   seed:
     values: [42]

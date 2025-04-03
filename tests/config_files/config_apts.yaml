@@ -16,15 +16,15 @@ parameters:
   ema:
     value: False
   global_second_order:
-    value: True
+    value: False
   local_second_order:
     value: False
   norm_type:
-    value: "inf"
+    value: 2
   max_subdomain_iters:
-    value: 3
+    value: 2
   max_global_iters:
-    value: 1
+    value: 2
   epochs: 
     value: 10
   max_iters:
@@ -32,7 +32,7 @@ parameters:
   optimizer: 
     value: "apts" # pmw compatible 
   learning_rate: 
-    value: 0.001
+    value: 0.1
   dataset_name: 
     value: "tinyshakespeare" # "mnist"
   model_name: 
