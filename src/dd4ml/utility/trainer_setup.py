@@ -189,6 +189,8 @@ def get_config_model_and_trainer(args, wandb_config):
             correct_step=all_config.trainer.correct_step,
             norm_type=all_config.trainer.norm_type,
         )
+    elif optimizer_name == "apts_fp":
+        pass
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -235,6 +237,9 @@ def generic_run(
     ):
         args["use_pmw"] = False
         args["num_subdomains"] = dist.get_world_size() if dist.is_initialized() else 1
+    
+    if "apts_d" in wandb_config.get("optimizer", "").lower():
+        pass 
 
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)
