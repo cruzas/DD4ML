@@ -144,12 +144,12 @@ def get_config_model_and_trainer(args, wandb_config):
             max_iter=all_config.trainer.max_iter,
             norm_type=all_config.trainer.norm_type,
         )
-    elif optimizer_name == "apts":
-        from dd4ml.optimizers.apts import APTS
+    elif optimizer_name == "apts_ag":
+        from dd4ml.optimizers.apts_ag import APTS_AG
 
-        all_config.trainer = APTS.setup_APTS_args(all_config.trainer)
+        all_config.trainer = APTS_AG.setup_APTS_args(all_config.trainer)
 
-        optimizer_obj = APTS(
+        optimizer_obj = APTS_AG(
             model=model,
             subdomain_optimizer=all_config.trainer.subdomain_optimizer,
             subdomain_optimizer_defaults=all_config.trainer.subdomain_optimizer_args,
@@ -234,7 +234,10 @@ def generic_run(
         wandb_config = {}
 
     # Adjust args for apts_d optimizer.
-    if "apts_d" in wandb_config.get("optimizer", "").lower():
+    if (
+        "apts" in wandb_config.get("optimizer", "").lower()
+        and not "apts_ag" == wandb_config.get("optimizer", "").lower()
+    ):
         args["use_pmw"] = False
         args["num_subdomains"] = dist.get_world_size() if dist.is_initialized() else 1
 

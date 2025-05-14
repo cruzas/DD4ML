@@ -140,6 +140,8 @@ def restore_params(model, flat_params):
 
 def clone_model(model):
     base_model = model.module if hasattr(model, "module") else model
+    print("Model config:", base_model.config)
+
     config_copy = copy.deepcopy(base_model.config)
     config_copy.model_type = None
     new_model = type(base_model)(config_copy)
@@ -159,18 +161,20 @@ class APTS_D(Optimizer):
             glob_optim_class = TrustRegionEMA
         elif config.global_second_order:
             glob_optim_class = TrustRegionSecondOrder
-    
+
         config.global_optimizer = glob_optim_class
         config.global_optimizer_args = get_trust_region_params(config)
-        
-        loc_optim_class = TrustRegionFirstOrder    
+
+        loc_optim_class = TrustRegionFirstOrder
         if config.local_second_order:
             loc_optim_class = TrustRegionSecondOrder
-            
+
         config.subdomain_optimizer = loc_optim_class
         config.subdomain_optimizer_args = get_local_trust_region_params(config)
 
-        print(f"APTS_D global optimizer: {glob_optim_class.__name__}; local optimizer: {loc_optim_class.__name__}")
+        print(
+            f"APTS_D global optimizer: {glob_optim_class.__name__}; local optimizer: {loc_optim_class.__name__}"
+        )
         return config
 
     def __init__(

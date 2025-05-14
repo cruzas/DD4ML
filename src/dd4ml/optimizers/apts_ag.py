@@ -5,7 +5,8 @@ import torch.distributed as dist
 
 from .trust_region_ema import TrustRegionEMA
 from .trust_region_first_order import TrustRegionFirstOrder  # Explicit import
-from .trust_region_second_order import TrustRegionSecondOrder  # Explicit import
+from .trust_region_second_order import \
+    TrustRegionSecondOrder  # Explicit import
 from .utils import get_trust_region_params
 
 
@@ -21,7 +22,7 @@ class Timer:
         self.timings[self.key] += time.time() - self.start
 
 
-class APTS(torch.optim.Optimizer):
+class APTS_AG(torch.optim.Optimizer):
     @staticmethod
     def setup_APTS_args(config):
         optimizers = {

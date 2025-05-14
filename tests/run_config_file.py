@@ -38,7 +38,7 @@ def parse_cmd_args() -> argparse.Namespace:
     # Preliminary parse to determine defaults based on optimizer
     temp_args, _ = parser.parse_known_args()
     default_use_pmw = False
-    if temp_args.optimizer == "apts":
+    if temp_args.optimizer == "apts_ag":
         default_use_pmw = True
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
@@ -122,7 +122,7 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     temp_args, _ = parser.parse_known_args()
-    if "apts" in temp_args.sweep_config.lower():
+    if "apts_ag" in temp_args.sweep_config.lower():
         parser.add_argument(
             "--global_optimizer",
             type=str,
