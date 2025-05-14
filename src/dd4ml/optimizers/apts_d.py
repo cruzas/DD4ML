@@ -140,8 +140,6 @@ def restore_params(model, flat_params):
 
 def clone_model(model):
     base_model = model.module if hasattr(model, "module") else model
-    print("Model config:", base_model.config)
-
     config_copy = copy.deepcopy(base_model.config)
     config_copy.model_type = None
     new_model = type(base_model)(config_copy)

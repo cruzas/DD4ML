@@ -99,7 +99,6 @@ def get_config_model_and_trainer(args, wandb_config):
             model = DDP(
                 model, device_ids=[local_rank] if torch.cuda.is_available() else None
             )
-
     criterion_key = (
         wandb_config["criterion"] if wandb_config is not None else args["criterion"]
     )
@@ -175,10 +174,6 @@ def get_config_model_and_trainer(args, wandb_config):
             else "cpu"
         )
         model.to(device)
-        if dist.is_initialized() and dist.get_world_size() > 1:
-            model = DDP(
-                model, device_ids=[local_rank] if torch.cuda.is_available() else None
-            )
         optimizer_obj = APTS_D(
             params=model.parameters(),
             model=model,

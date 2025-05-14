@@ -33,7 +33,9 @@ def parse_cmd_args() -> argparse.Namespace:
         description="Parse command line arguments.",
     )
 
-    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
+    parser.add_argument(
+        "--optimizer", type=str, default="apts_d", help="Optimizer name"
+    )
 
     # Preliminary parse to determine defaults based on optimizer
     temp_args, _ = parser.parse_known_args()
@@ -78,7 +80,7 @@ def parse_cmd_args() -> argparse.Namespace:
         "--dataset_name", type=str, default="mnist", help="Dataset name"
     )
     parser.add_argument(
-        "--model_name", type=str, default="simple_cnn", help="Model name"
+        "--model_name", type=str, default="simple_resnet", help="Model name"
     )
     parser.add_argument(
         "--criterion", type=str, default="cross_entropy", help="Criterion name"
@@ -110,10 +112,10 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Trial number. Used to generate seed for reproducibility.",
     )
     parser.add_argument(
-        "--num_subdomains", type=int, default=1, help="Number of subdomains"
+        "--num_subdomains", type=int, default=2, help="Number of subdomains"
     )
 
-    parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
+    parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
     parser.add_argument(
         "--num_replicas_per_subdomain",
         type=int,
@@ -122,7 +124,7 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     temp_args, _ = parser.parse_known_args()
-    if "apts_ag" in temp_args.sweep_config.lower():
+    if "apts" in temp_args.sweep_config.lower():
         parser.add_argument(
             "--global_optimizer",
             type=str,
