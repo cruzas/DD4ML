@@ -107,7 +107,7 @@ class APTS_P(Optimizer):
         self.norm_type = norm_type
         self.dogleg = dogleg
 
-    def non_foc_local_closure(self, compute_grad=False):
+    def local_closure(self, compute_grad=False):
         self.local_optimizer.zero_grad()
         outputs = self.local_model(self.inputs)
         loss = self.criterion(outputs, self.labels)
@@ -118,7 +118,7 @@ class APTS_P(Optimizer):
     def global_closure(self, compute_grad=False):
         self.zero_grad()
         outputs = self.model(self.inputs)
-        loss = self.criterion(outputs, self.targets)
+        loss = self.criterion(outputs, self.labels)
         if torch.is_grad_enabled() or compute_grad:
             loss.backward()  # no division by N as we want all global models to have the same loss
         return loss
@@ -127,17 +127,19 @@ class APTS_P(Optimizer):
         # Send trainable parameters from local model to rank 0
         pass
 
-    def step(self, closure=None):
+    def step(self, inputs, labels):
         self.inputs, self.labels = inputs, labels
-        local_closure = non_foc_local_closure
 
         with torch.no_grad():
             initial_params = flatten_params(
                 self.model, self._flat_params_buffer
             ).clone()
 
-        initial_global_loss = self.global_closure()
-        initial_local_loss = local_closure()
+        initial_global_loss = self.global_closure(compute_grad=True)
+        initial_local_loss = self.local_closure(compute_grad=True)
+
+        print("Initial global loss:", initial_global_loss)
+        print("Initial local loss:", initial_local_loss)
 
         global_grad = parameters_to_vector(
             [p.grad for p in self.model.parameters()]
@@ -153,7 +155,9 @@ class APTS_P(Optimizer):
         )
         current_flat = flatten_params(self.model, self._local_flat_buffer)
 
+        print("Made it to step.")
         step = current_flat - initial_params
+        exit(0)
 
         if self.dogleg:
             lr = self.lr

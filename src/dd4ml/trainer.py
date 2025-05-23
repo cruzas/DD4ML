@@ -231,7 +231,7 @@ class Trainer:
                         closure=general_closure,
                         final_subdomain_closure=final_subdomain_closure,
                     )
-                elif "apts_d" in self.optimizer.__class__.__name__.lower():
+                elif "apts_d" in self.optimizer.__class__.__name__.lower() or "apts_p" in self.optimizer.__class__.__name__.lower():
                     self.loss += self.optimizer.step(inputs=x, labels=y)
                 else:
                     self.loss += self.optimizer.step(closure=general_closure)
@@ -361,7 +361,7 @@ class Trainer:
                         closure=general_closure,
                         final_subdomain_closure=final_subdomain_closure,
                     )
-                elif "apts_d" in self.optimizer.__class__.__name__.lower():
+                elif "apts_d" in self.optimizer.__class__.__name__.lower() or "apts_p" in self.optimizer.__class__.__name__.lower():
                     self.loss += self.optimizer.step(inputs=x, labels=y)
                 else:
                     self.loss = self.optimizer.step(closure=general_closure)
