@@ -5,7 +5,7 @@ current_dir=$(pwd)
 script="run_config_file.py" # Python script to run
 
 # --- General parameter settings ---#
-optimizer="sgd"
+optimizer="apts_p"
 dataset="cifar10"
 batch_sizes=(128)
 model="simple_resnet"
@@ -111,7 +111,7 @@ for num_stages in "${num_stages_arr[@]:-1}"; do
                         update_config "accumulation_steps" "${accumulation_steps}"
                     fi
 
-                    if [[ "$optimizer" == "apts" ]]; then
+                    if [[ "$optimizer" == "apts_p" || "$optimizer" == "apts_ip" ]]; then
                         update_config "batch_size" "${batch_size}"
                     else
                         effective_batch_size=${batch_size}

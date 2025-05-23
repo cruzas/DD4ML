@@ -13,7 +13,7 @@
 
 #SBATCH --hint=nomultithread
 #SBATCH --constraint=gpu
-#SBATCH --partition=normal
+#SBATCH --partition=debug
 #SBATCH --exclusive
 source ~/.slurm_env # You should define SLURM_ACCOUNT in this file
 #SBATCH --account=$SLURM_ACCOUNT
@@ -42,10 +42,9 @@ if [ "${use_wandb}" = "1" ]; then
     export WANDB_MODE=online
 fi
 
-# Set additional flag if optimizer is "apts"
 extra_flags=""
-if [[ "$optimizer" == "apts" ]]; then
-    extra_flags="--use_pmw"
+if [[ "$optimizer" == "apts_ip" ]]; then
+    extra_flags="--use_pmw" # only necessary for inexact gradient version of APTS
 fi
 
 # Execute the Python script
