@@ -1,7 +1,7 @@
 import torch
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
-from .utils import get_trust_region_params
+from dd4ml.utility import get_trust_region_params
 
 
 class TrustRegionEMA(torch.optim.Optimizer):

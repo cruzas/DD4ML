@@ -3,7 +3,7 @@ import math
 import torch
 from torch.optim import Optimizer
 
-from .utils import get_trust_region_params
+from dd4ml.utility import get_trust_region_params
 
 
 class TrustRegionSecondOrder(Optimizer):

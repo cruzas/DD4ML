@@ -6,6 +6,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from .apts_utils import mark_trainable, print_trainable_params_norm
 from .config import get_config, make_std_config
 from .dist_utils import dprint
 from .factory import criterion_factory, dataset_factory, optimizer_factory
@@ -91,7 +92,12 @@ def get_config_model_and_trainer(args, wandb_config):
             else "cpu"
         )
         model.to(device)
-        if dist.is_initialized() and dist.get_world_size() > 1:
+
+        if (
+            all_config.trainer.data_parallel
+            and dist.is_initialized()
+            and dist.get_world_size() > 1
+        ):
             local_rank = int(os.environ.get("LOCAL_RANK", 0))
             print(
                 f"Rank {dist.get_rank()}, local rank {local_rank}, cuda available: {torch.cuda.is_available()}"
@@ -143,12 +149,12 @@ def get_config_model_and_trainer(args, wandb_config):
             max_iter=all_config.trainer.max_iter,
             norm_type=all_config.trainer.norm_type,
         )
-    elif optimizer_name == "apts_ag":
-        from dd4ml.optimizers.apts_ag import APTS_AG
+    elif optimizer_name == "apts_ip":
+        from dd4ml.optimizers.apts_ip import APTS_IP
 
-        all_config.trainer = APTS_AG.setup_APTS_args(all_config.trainer)
+        all_config.trainer = APTS_IP.setup_APTS_args(all_config.trainer)
 
-        optimizer_obj = APTS_AG(
+        optimizer_obj = APTS_IP(
             model=model,
             subdomain_optimizer=all_config.trainer.subdomain_optimizer,
             subdomain_optimizer_defaults=all_config.trainer.subdomain_optimizer_args,
@@ -189,8 +195,36 @@ def get_config_model_and_trainer(args, wandb_config):
             correct_step=all_config.trainer.correct_step,
             norm_type=all_config.trainer.norm_type,
         )
-    elif optimizer_name == "apts_fp":
-        pass
+    elif optimizer_name == "apts_p":
+        from dd4ml.optimizers.apts_p import APTS_P
+
+        all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
+
+        all_config.trainer = APTS_P.setup_APTS_args(all_config.trainer)
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        device = (
+            f"cuda:{torch.cuda.current_device()}"
+            if dist.get_backend() != "gloo"
+            else "cpu"
+        )
+
+        model.to(device)
+        optimizer_obj = APTS_P(
+            params=model.parameters(),
+            model=model,
+            criterion=criterion,
+            device=device,
+            nr_models=all_config.model.num_subdomains,
+            global_opt=all_config.trainer.global_optimizer,
+            global_opt_params=all_config.trainer.global_optimizer_args,
+            local_opt=all_config.trainer.subdomain_optimizer,
+            local_opt_params=all_config.trainer.subdomain_optimizer_args,
+            global_pass=all_config.trainer.global_pass,
+            correct_step=all_config.trainer.correct_step,
+            norm_type=all_config.trainer.norm_type,
+            dogleg=all_config.trainer.dogleg,
+        )
+
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -233,13 +267,13 @@ def generic_run(
     # Adjust args for apts_d optimizer.
     if (
         "apts" in wandb_config.get("optimizer", "").lower()
-        and not "apts_ag" == wandb_config.get("optimizer", "").lower()
+        and not "apts_ip" == wandb_config.get("optimizer", "").lower()
     ):
         args["use_pmw"] = False
         args["num_subdomains"] = dist.get_world_size() if dist.is_initialized() else 1
-    
+
     if "apts_d" in wandb_config.get("optimizer", "").lower():
-        pass 
+        pass
 
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)

@@ -5,24 +5,11 @@ import torch.distributed as dist
 
 from .trust_region_ema import TrustRegionEMA
 from .trust_region_first_order import TrustRegionFirstOrder  # Explicit import
-from .trust_region_second_order import \
-    TrustRegionSecondOrder  # Explicit import
-from .utils import get_trust_region_params
+from .trust_region_second_order import TrustRegionSecondOrder  # Explicit import
+from .utils import Timer, get_trust_region_params
 
 
-class Timer:
-    def __init__(self, timings, key):
-        self.timings = timings
-        self.key = key
-
-    def __enter__(self):
-        self.start = time.time()
-
-    def __exit__(self, *args):
-        self.timings[self.key] += time.time() - self.start
-
-
-class APTS_AG(torch.optim.Optimizer):
+class APTS_IP(torch.optim.Optimizer):
     @staticmethod
     def setup_APTS_args(config):
         optimizers = {
@@ -194,14 +181,11 @@ class APTS_AG(torch.optim.Optimizer):
 
             lr = self.lr
             w = 0
-            c = 0
-
             with Timer(self.timings, "dogleg"):
-                while new_loss > initial_loss and c < 3:
+                while new_loss > initial_loss and w <= 1:
                     with torch.no_grad():
-                        c += 1
-                        lr /= 2
-                        w = min(w + 0.2, 1)
+                        lr *= self.global_optimizer.dec_factor
+                        w += 0.2
                         step_update = ((1 - w) * step) - (w * initial_grads)
                         step_update = (lr / step_update.norm()) * step_update
                         self._apply_model_update(initial_parameters, step_update)
@@ -240,7 +224,7 @@ class APTS_AG(torch.optim.Optimizer):
                 old_loss = new_loss
             else:
                 # Acceptable step, keep the step size
-                self.lr = self.lr
+                # self.lr = self.lr
                 old_loss = new_loss
 
         with Timer(self.timings, "smoother"):

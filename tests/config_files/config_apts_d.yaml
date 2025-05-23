@@ -12,7 +12,7 @@ parameters:
   num_stages:
     value: 1
   num_subdomains:
-    value: 1
+    value: 2
   num_replicas_per_subdomain:
     value: 1
   correct_step:

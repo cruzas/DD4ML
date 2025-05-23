@@ -3,6 +3,8 @@ metric:
   name: train_loss
   goal: minimize
 parameters:
+  optimizer: 
+    value: "apts_ip" # pmw compatible 
   batch_size:
     value: 128
   num_stages:
@@ -11,14 +13,26 @@ parameters:
     value: 1
   num_replicas_per_subdomain:
     value: 1
+  correct_step:
+    value: False
+  ema:
+    value: False
+  global_second_order:
+    value: False
+  local_second_order:
+    value: False
+  norm_type:
+    value: 2
+  max_subdomain_iters:
+    value: 2
+  max_global_iters:
+    value: 2
   epochs: 
     value: 10
   max_iters:
     value: 100
-  optimizer: 
-    value: "apts" # pmw compatible 
   learning_rate: 
-    value: 0.001
+    value: 0.1
   dataset_name: 
     value: "tinyshakespeare" # "mnist"
   model_name: 

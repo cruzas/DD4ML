@@ -34,14 +34,12 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--optimizer", type=str, default="apts_d", help="Optimizer name"
+        "--optimizer", type=str, default="apts_p", help="Optimizer name"
     )
 
     # Preliminary parse to determine defaults based on optimizer
     temp_args, _ = parser.parse_known_args()
-    default_use_pmw = False
-    if temp_args.optimizer == "apts_ag":
-        default_use_pmw = True
+    default_use_pmw = temp_args.optimizer == "apts_ip"
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
     default_project = temp_args.optimizer + "_tests"

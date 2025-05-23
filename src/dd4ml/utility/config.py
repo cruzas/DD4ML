@@ -28,7 +28,10 @@ def make_std_config(config):
     use_pmw = getattr(config.trainer, "use_pmw", False)
     if not use_pmw:
         keys_to_remove = ["num_stages", "num_replicas_per_subdomain", "model_handler"]
-        if "apts_d" not in config.optimizer.lower():
+        if (
+            "apts_d" not in config.optimizer.lower()
+            and not "apts_p" in config.optimizer.lower()
+        ):
             keys_to_remove.append("num_subdomains")
         config = remove_keys(config, keys_to_remove)
     if "apts" not in config.optimizer.lower():
@@ -44,7 +47,7 @@ def make_std_config(config):
             "ema",
         ]
         config = remove_keys(config, keys_to_remove)
-    if config.optimizer.lower() == "apts_d":
+    if config.optimizer.lower() == "apts_d" or config.optimizer.lower() == "apts_p":
         keys_to_remove = [
             "global_optimizer",
             "subdomain_optimizer",

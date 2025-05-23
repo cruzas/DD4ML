@@ -44,15 +44,17 @@ class Trainer:
         C.run_by_epoch = (
             False  # if False, run by iteration, typically for transformer networks
         )
+        C.data_parallel = False
 
         # For APTS_D
         C.correct_step = False  # for APTS_D
         C.norm_type = 2  # for APTS_D (and possibly APTS)
         C.ema = True  # for APTS_D
-        C.global_pass=False
-        C.foc=False 
-        
-        # For APTS* 
+        C.global_pass = False
+        C.foc = False
+        C.dogleg = False  # for APTS_D
+
+        # For APTS*
         C.max_global_iters = 1  # for APTS*
         C.max_subdomain_iters = 3  # for APTS*
         C.global_second_order = False  # for APTS*
@@ -60,7 +62,7 @@ class Trainer:
         C.subdomain_optimizer = None
         C.gradient_accumulation = True
         C.accumulation_steps = 5
-        
+
         # For pipelining via pwm library
         C.data_chunks_amount = 1
         C.use_pmw = False
