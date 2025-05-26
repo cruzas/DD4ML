@@ -79,7 +79,7 @@ class TrustRegionEMA(torch.optim.Optimizer):
 
         grad_norm = grad.norm(p=self.norm_type)
         if grad_norm <= torch.finfo(torch.float32).eps:
-            print(f"Stopping TrustRegion due to ||g|| = {grad_norm}.")
+            # print(f"Stopping TrustRegion due to ||g|| = {grad_norm}.")
             return old_loss
 
         # Compute the update scale with current learning rate.

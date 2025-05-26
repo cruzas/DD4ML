@@ -74,7 +74,7 @@ class TrustRegionFirstOrder(torch.optim.Optimizer):
 
         grad_norm = grad.norm(p=self.norm_type)
         if grad_norm <= torch.finfo(torch.float32).eps:
-            print(f"Stopping TrustRegion algorithm due to ||g|| = {grad_norm}.")
+            # print(f"Stopping TrustRegion algorithm due to ||g|| = {grad_norm}.")
             return old_loss
 
         candidate_lr = self.lr
