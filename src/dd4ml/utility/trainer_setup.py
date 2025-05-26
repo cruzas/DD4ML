@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from .apts_utils import mark_trainable, print_trainable_params_norm
+from .apts_utils import mark_trainable, print_params_norm
 from .config import get_config, make_std_config
 from .dist_utils import dprint
 from .factory import criterion_factory, dataset_factory, optimizer_factory

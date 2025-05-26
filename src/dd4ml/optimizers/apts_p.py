@@ -7,21 +7,16 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
-from dd4ml.utility import (
-    clone_model,
-    decide_tensor_device,
-    flatten_params,
-    get_local_trust_region_params,
-    get_state_dict,
-    get_trust_region_params,
-    mark_trainable,
-    print_trainable_params_norm,
-    restore_params,
-)
+from dd4ml.utility import (clone_model, decide_tensor_device, flatten_params,
+                           get_local_trust_region_params, get_state_dict,
+                           get_trust_region_params, mark_trainable,
+                           print_params_norm, restore_params,
+                           trainable_parameters_to_vector)
 
 from .trust_region_ema import TrustRegionEMA
 from .trust_region_first_order import TrustRegionFirstOrder  # Explicit import
-from .trust_region_second_order import TrustRegionSecondOrder  # Explicit import
+from .trust_region_second_order import \
+    TrustRegionSecondOrder  # Explicit import
 
 
 class APTS_P(Optimizer):
@@ -73,7 +68,13 @@ class APTS_P(Optimizer):
     ):
         super().__init__(params, {})
         self.model = model
+        print("Global model parameters norm...")
+        print_params_norm(self.model)
+
         self.local_model = mark_trainable(clone_model(model))
+        print("Local model parameters norm...")
+        print_params_norm(self.local_model)
+
         self.nr_models = nr_models
         self.device = (
             device
@@ -119,13 +120,56 @@ class APTS_P(Optimizer):
         self.zero_grad()
         outputs = self.model(self.inputs)
         loss = self.criterion(outputs, self.labels)
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            # Average the loss across all processes
+            dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+            loss /= dist.get_world_size()
         if torch.is_grad_enabled() or compute_grad:
             loss.backward()  # no division by N as we want all global models to have the same loss
         return loss
 
-    def sync_params(self, method="average"):
-        # Send trainable parameters from local model to rank 0
-        pass
+    @torch.no_grad()
+    def sync_loc_to_glob(self) -> None:
+        """
+        Make the global model identical on every rank by merging the
+        sub-domain (trainable) updates held in `self.local_model`.
+
+        Assumption: `mark_trainable` assigned *disjoint* index sets, i.e.
+        each parameter tensor is owned by exactly one rank.
+        """
+        # -------- single-process fallback ------------------------------------
+        if (
+            not (dist.is_available() and dist.is_initialized())
+            or dist.get_world_size() == 1
+        ):
+            with torch.no_grad():
+                for pg, pl in zip(
+                    self.model.parameters(), self.local_model.parameters()
+                ):
+                    if pl.requires_grad:  # this rank owns it
+                        pg.copy_(pl.data)
+            self.local_model.load_state_dict(self.model.state_dict())
+            return
+
+        # -------- multi-process merge ----------------------------------------
+        with torch.no_grad():
+            # 1. Copy owned slices; zero the others
+            for pg, pl in zip(self.model.parameters(), self.local_model.parameters()):
+                if pl.requires_grad:
+                    pg.copy_(pl.data)  # owner rank writes its update
+                else:
+                    pg.zero_()  # non-owners write zeros
+
+            # 2. Sum across all ranks – only the owner contributes a non-zero value
+            for pg in self.model.parameters():
+                dist.all_reduce(pg.data, op=dist.ReduceOp.SUM)
+
+        # 3. (optional) broadcast buffers such as BatchNorm running stats
+        # for buf in self.model.buffers():
+        #     dist.broadcast(buf.data, src=0)
+
+        # 4. Keep the local replica in sync for the next local step
+        # self.local_model.load_state_dict(self.model.state_dict())
 
     def step(self, inputs, labels):
         self.inputs, self.labels = inputs, labels
@@ -138,27 +182,25 @@ class APTS_P(Optimizer):
         initial_global_loss = self.global_closure(compute_grad=True)
         initial_local_loss = self.local_closure(compute_grad=True)
 
-        print("Initial global loss:", initial_global_loss)
-        print("Initial local loss:", initial_local_loss)
+        # print("Initial global loss:", initial_global_loss)
+        # print("Initial local loss:", initial_local_loss)
 
         global_grad = parameters_to_vector(
             [p.grad for p in self.model.parameters()]
         ).detach()
 
-        local_grad = (
-            parameters_to_vector([p.grad for p in self.local_model.parameters()])
-            .detach()
-            .clone()
-        )
+        local_grad = trainable_parameters_to_vector(self.local_model)
         local_loss = self.local_optimizer.step(
-            closure=local_closure, old_loss=initial_local_loss, grad=local_grad
+            closure=self.local_closure, old_loss=initial_local_loss, grad=local_grad
         )
+        # Synchronize paramters to build current flat
+        self.sync_loc_to_glob()
         current_flat = flatten_params(self.model, self._local_flat_buffer)
 
-        print("Made it to step.")
+        # Step is current parmeters minus initial parameters
         step = current_flat - initial_params
-        exit(0)
 
+        # Do dogleg or TR control
         if self.dogleg:
             lr = self.lr
             w = 0
@@ -170,17 +212,17 @@ class APTS_P(Optimizer):
                     w += 0.2
                     step_update = ((1 - w) * step) - (w * global_grad)
                     step_update = (lr / step_update.norm()) * step_update
-                    restore_params(initial_parameters, step_update)
+                    restore_params(self.model, step_update)
                 trial_loss = self.global_closure()
                 torch.cuda.empty_cache()
-        else:
+        else:  # TR control
             step_norm = step.norm()
             candidate_step = (
                 step if step_norm <= self.lr else (self.lr / step_norm) * step
             )
 
             # Apply the candidate step
-            restore_params(initial_parameters, candidate_step)
+            restore_params(self.model, candidate_step)
             trial_loss = self.global_closure()
 
             actual_reduction = initial_global_loss - trial_loss
@@ -193,7 +235,7 @@ class APTS_P(Optimizer):
                     self.lr * self.global_optimizer.dec_factor,
                     self.global_optimizer.min_lr,
                 )
-                restore_params(initial_parameters, -candidate_step)
+                restore_params(self.model, -candidate_step)
                 trial_loss = initial_global_loss
             elif rho > 0.75:
                 # Good step, increase the step size
@@ -201,9 +243,14 @@ class APTS_P(Optimizer):
                     self.lr * self.global_optimizer.inc_factor,
                     self.global_optimizer.max_lr,
                 )
-                restore_params(initial_parameters, candidate_step)
-            # else:
-            # Acceptable step, keep the step size
-            # self.lr = self.lr
+                restore_params(self.model, candidate_step)
 
-            self.global_optimizer.step(closure=self.global_closure, old_loss=trial_loss)
+        loss = self.global_optimizer.step(
+            closure=self.global_closure, old_loss=trial_loss
+        )
+        # Local models get global model parameters, as does the local optimizer
+        with torch.no_grad():
+            self.lr = self.global_optimizer.lr
+            self.local_optimizer.lr = self.lr
+            self.local_model.load_state_dict(self.model.state_dict())
+        return loss.item()

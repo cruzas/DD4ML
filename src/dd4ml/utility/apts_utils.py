@@ -3,6 +3,7 @@ import copy
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
 from .optimizer_utils import get_state_dict
 
@@ -171,11 +172,21 @@ def mark_trainable(model: nn.Module):
     return model
 
 
-def print_trainable_params_norm(model: nn.Module):
-    rank = dist.get_rank()
-    if rank == 0:
-        print("Trainable parameters norm:")
+def print_params_norm(model: nn.Module):
+    with torch.no_grad():
+        # Flatten the parameters and print the norm
+        flat_params = flatten_params(model)
+        norm = torch.norm(flat_params)
+        print(norm.item())
 
-    # Flatten the parameters and print the norm
-    flat_params = flatten_params(model)
-    norm = torch.norm(flat_params)
+
+def trainable_parameters_to_vector(model: nn.Module) -> torch.Tensor:
+    """
+    Returns a vector containing only the trainable parameters of the model.
+    """
+    return torch.cat(
+        [
+            (p.grad.view(-1) if p.grad is not None else p.new_zeros(p.numel()))
+            for p in model.parameters()
+        ]
+    ).detach()
