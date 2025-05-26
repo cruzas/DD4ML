@@ -150,22 +150,37 @@ def broadcast_shuffle(num_layers: int, rank: int, world_size: int) -> torch.Tens
 
 
 def split_indices(perm: torch.Tensor, rank: int, world_size: int) -> torch.Tensor:
-    q, r = divmod(len(perm), world_size)
-    start = rank * q + min(rank, r)
-    end = start + q + (1 if rank < r else 0)
-    return perm[start:end]
+    # q, r = divmod(len(perm), world_size)
+    # start = rank * q + min(rank, r)
+    # end = start + q + (1 if rank < r else 0)
+    # return perm[start:end]
+    n = len(perm)
+    start, remaining = 0, n
+    for i in range(world_size):
+        size = remaining // (world_size - i) if i < world_size - 1 else remaining
+        if i == rank:
+            return perm[start : start + size]
+        start += size
+        remaining -= size
 
 
 def mark_trainable(model: nn.Module):
     rank, world_size = dist.get_rank(), dist.get_world_size()
 
-    # Decide which parameters this rank updates
     params = list(model.parameters())
-    perm = broadcast_shuffle(num_layers=len(params), rank=rank, world_size=world_size)
+    num_layers = len(params)
+
+    if world_size > num_layers:
+        raise ValueError(
+            "World size cannot be greater than the number of layers in the model."
+        )
+
+    # All ranks must take part in the broadcast so still call it unconditionally
+    perm = broadcast_shuffle(num_layers=num_layers, rank=rank, world_size=world_size)
 
     local_indices = split_indices(perm=perm, rank=rank, world_size=world_size)
 
-    # Remember the indices that are trainable by this rank
+    # Store and apply
     model._trainable_indices = local_indices
     for i, p in enumerate(params):
         p.requires_grad = i in local_indices
