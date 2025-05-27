@@ -16,37 +16,19 @@ from dd4ml.utility import (
     restore_params,
 )
 
-from .trust_region_ema import TrustRegionEMA
-from .trust_region_first_order import TrustRegionFirstOrder  # Explicit import
-from .trust_region_second_order import TrustRegionSecondOrder  # Explicit import
+from .tr import TR
 
 
 class APTS_D(Optimizer):
     @staticmethod
     def setup_APTS_args(config):
-        if config.ema and config.global_second_order:
-            raise ValueError(
-                "APTS_D global optimizer does not support second-order optimizers with EMA."
-            )
-        glob_optim_class = TrustRegionFirstOrder
-        if config.ema:
-            glob_optim_class = TrustRegionEMA
-        elif config.global_second_order:
-            glob_optim_class = TrustRegionSecondOrder
-
-        config.global_optimizer = glob_optim_class
+        config.global_optimizer = TR
         config.global_optimizer_args = get_trust_region_params(config)
 
-        loc_optim_class = TrustRegionFirstOrder
-        if config.local_second_order:
-            loc_optim_class = TrustRegionSecondOrder
-
-        config.subdomain_optimizer = loc_optim_class
+        config.subdomain_optimizer = TR
         config.subdomain_optimizer_args = get_local_trust_region_params(config)
 
-        print(
-            f"APTS_D global optimizer: {glob_optim_class.__name__}; local optimizer: {loc_optim_class.__name__}"
-        )
+        print(f"APTS_D global optimizer: {TR.__name__}; local optimizer: {TR.__name__}")
         return config
 
     def __init__(
@@ -88,7 +70,10 @@ class APTS_D(Optimizer):
         self._flat_params_buffer = torch.empty_like(sample_flat)
         self._local_flat_buffer = torch.empty_like(sample_flat)
 
-        if "TrustRegion" in str(global_opt):
+        trust_region_names = ("TrustRegion", "TR", "Trust_Region", "trust_region")
+        if any(name in str(global_opt) for name in trust_region_names) or any(
+            name in str(local_opt) for name in trust_region_names
+        ):
             self.global_optimizer = global_opt(self.model, **global_opt_params)
             self.local_optimizer = local_opt(self.local_model, **local_opt_params)
         else:

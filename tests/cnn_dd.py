@@ -5,7 +5,7 @@ import torchvision.datasets as datasets
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
-from dd4ml.optimizers.trust_region_first_order import TrustRegionFirstOrder
+from .tr import TR
 
 # Use MPS on Mac if available; otherwise fallback to CPU.
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")

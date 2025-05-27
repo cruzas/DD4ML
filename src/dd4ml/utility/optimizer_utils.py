@@ -1,3 +1,5 @@
+import math
+
 import torch.distributed as dist
 
 
@@ -26,10 +28,11 @@ def get_trust_region_params(config):
         "nu": 0.5,
         "inc_factor": 2.0,
         "dec_factor": 0.5,
-        "nu_1": 0.25,
-        "nu_2": 0.75,
+        "nu_dec": 0.25,
+        "nu_inc": 0.75,
         "max_iter": config.max_global_iters,
         "norm_type": config.norm_type,
+        "second_order": config.global_second_order,
     }
 
 
@@ -49,8 +52,9 @@ def get_local_trust_region_params(config):
         "dec_factor": (
             0.6 if norm_type != math.inf else 0.5
         ),  # Slightly more aggressive reduction
-        "nu_1": 0.3 if norm_type != math.inf else 0.25,
-        "nu_2": 0.7 if norm_type != math.inf else 0.75,
+        "nu_dec": 0.3 if norm_type != math.inf else 0.25,
+        "nu_inc": 0.7 if norm_type != math.inf else 0.75,
         "max_iter": config.max_subdomain_iters,
         "norm_type": config.norm_type,
+        "second_order": config.local_second_order,
     }

@@ -34,7 +34,7 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--optimizer", type=str, default="apts_p", help="Optimizer name"
+        "--optimizer", type=str, default="apts_d", help="Optimizer name"
     )
 
     # Preliminary parse to determine defaults based on optimizer

@@ -7,16 +7,20 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
-from dd4ml.utility import (clone_model, decide_tensor_device, flatten_params,
-                           get_local_trust_region_params, get_state_dict,
-                           get_trust_region_params, mark_trainable,
-                           print_params_norm, restore_params,
-                           trainable_parameters_to_vector)
+from dd4ml.utility import (
+    clone_model,
+    decide_tensor_device,
+    flatten_params,
+    get_local_trust_region_params,
+    get_state_dict,
+    get_trust_region_params,
+    mark_trainable,
+    print_params_norm,
+    restore_params,
+    trainable_parameters_to_vector,
+)
 
-from .trust_region_ema import TrustRegionEMA
-from .trust_region_first_order import TrustRegionFirstOrder  # Explicit import
-from .trust_region_second_order import \
-    TrustRegionSecondOrder  # Explicit import
+from .tr import TR
 
 
 class APTS_P(Optimizer):

@@ -3,9 +3,7 @@ import time
 import torch
 import torch.distributed as dist
 
-from .trust_region_ema import TrustRegionEMA
-from .trust_region_first_order import TrustRegionFirstOrder  # Explicit import
-from .trust_region_second_order import TrustRegionSecondOrder  # Explicit import
+from .tr import TR
 from .utils import Timer, get_trust_region_params
 
 

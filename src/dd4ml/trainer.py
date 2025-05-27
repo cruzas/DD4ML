@@ -189,7 +189,7 @@ class Trainer:
             train_loader = DataLoader(
                 self.train_dataset,
                 # batch_size=per_process_batch_size,  # Use per-process batch size
-                sampler=train_sampler,
+                batch_sampler=train_sampler,
                 num_workers=config.num_workers,
                 pin_memory=True,
             )
@@ -197,7 +197,7 @@ class Trainer:
             test_loader = DataLoader(
                 self.test_dataset,
                 # batch_size=per_process_batch_size,
-                sampler=test_sampler,
+                batch_sampler=test_sampler,
                 num_workers=config.num_workers,
                 pin_memory=True,
             )
