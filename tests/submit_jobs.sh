@@ -5,10 +5,10 @@ current_dir=$(pwd)
 script="run_config_file.py" # Python script to run
 
 # --- General parameter settings ---#
-optimizer="apts_p"
-dataset="cifar10"
-batch_sizes=(128)
-model="simple_resnet"
+optimizer="apts_d"
+dataset="mnist"
+batch_sizes=(10000)
+model="simple_cnn"
 criterion="cross_entropy"
 epochs=10
 trials=1

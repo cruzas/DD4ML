@@ -10,8 +10,14 @@ import scipy
 import scipy.linalg
 import torch
 from numpy import linalg as LA
-from numpy.linalg import inv
-from scipy import array, dot, linalg, sparse
+
+try:
+    from scipy import array, dot
+except ImportError:
+    import numpy as np
+
+    array, dot = np.array, np.dot
+from scipy import linalg, sparse
 from scipy.linalg import eig, eigh
 
 
