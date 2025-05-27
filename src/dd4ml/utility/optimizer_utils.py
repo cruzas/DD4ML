@@ -24,7 +24,7 @@ def get_trust_region_params(config):
     return {
         "lr": lr,
         "max_lr": 2.0,
-        "min_lr": lr / 100.0,
+        "min_lr": 1e-6,
         "nu": 0.5,
         "inc_factor": 2.0,
         "dec_factor": 0.5,
@@ -44,7 +44,7 @@ def get_local_trust_region_params(config):
     return {
         "lr": lr,
         "max_lr": 2.0,  # Lower maximum for local updates
-        "min_lr": lr / 100.0,
+        "min_lr": 1e-6,
         "nu": (
             0.45 if norm_type != math.inf else 0.5
         ),  # Adjusted to be more conservative locally
