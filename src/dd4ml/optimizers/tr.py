@@ -73,6 +73,7 @@ class TR(Optimizer):
         nu_dec: float = 0.25,
         nu_inc: float = 0.75,
         max_iter: int = 10,
+        mem_length: Optional[int] = 5,
         norm_type: int = 2,
         *,
         second_order: bool = True,
@@ -94,6 +95,7 @@ class TR(Optimizer):
 
         # memory size for (s,y) pairs
         self.max_iter = int(max_iter)
+        self.mem_length = int(mem_length) if mem_length is not None else 5
 
         # first‑ vs second‑order toggle
         self.second_order = bool(second_order)
@@ -104,7 +106,7 @@ class TR(Optimizer):
         if self.second_order:
             device = next(model.parameters()).device
             self.hess = LSR1(
-                gamma=1.0, memory_length=max_iter, device=device, tol=1e-10
+                gamma=1.0, memory_length=mem_length, device=device, tol=1e-10
             )
             self.obs = OBS()
         else:
@@ -164,74 +166,61 @@ class TR(Optimizer):
     # Main optimisation step
     # ------------------------------------------------------------------
     def step(self, closure, **_) -> float:
-        """Perform one trust-region iteration.  *closure* must recompute the
-        loss and gradients when called with *compute_grad=True*.
-        """
-        # 1. evaluate objective and gradient at x_k
-        loss_tensor = closure(compute_grad=True)
-        loss_val = (
-            float(loss_tensor)
-            if isinstance(loss_tensor, (float, int))
-            else float(loss_tensor.item())
-        )
-        grad = _flat_grad(self.model)
-        if grad.numel() == 0:
-            return loss_val  # nothing to do
+        """Perform up to `max_iter` trust-region iterations."""
+        for self.local_iter in range(self.max_iter):
+            # 1. evaluate objective and gradient at x_k
+            loss_tensor = closure(compute_grad=True)
+            loss_val = (
+                float(loss_tensor)
+                if isinstance(loss_tensor, (float, int))
+                else float(loss_tensor.item())
+            )
+            grad = _flat_grad(self.model)
+            if grad.numel() == 0:
+                return loss_val
 
-        # initialise persistent state the first time we are called
-        if not self.state["initialized"]:
-            self.state.update(
-                {
-                    "prev_loss": loss_val,
-                    "prev_grad": grad.clone(),
-                    "prev_params": _flat_params(self.model),
-                    "initialized": True,
-                }
+            if not self.state["initialized"]:
+                self.state.update(
+                    {
+                        "prev_loss": loss_val,
+                        "prev_grad": grad.clone(),
+                        "prev_params": _flat_params(self.model),
+                        "initialized": True,
+                    }
+                )
+
+            # 2. solve TR sub-problem
+            if self.second_order and len(self.hess._S) > 0:
+                step_vec, pred_red = self._solve_tr_second_order(grad, self.lr)
+            elif self.second_order:
+                step_vec, pred_red = self._solve_tr_first_order(grad, self.lr)
+            else:
+                step_vec, pred_red = self._solve_tr_first_order(grad, self.lr)
+
+            # 3. candidate step
+            self._apply_update(step_vec)
+            new_loss_tensor = closure(compute_grad=True)
+            new_loss_val = (
+                float(new_loss_tensor)
+                if isinstance(new_loss_tensor, (float, int))
+                else float(new_loss_tensor.item())
             )
 
-        # 2. solve TR sub‑problem
-        if self.second_order and len(self.hess._S) > 0:
-            step_vec, pred_red = self._solve_tr_second_order(grad, self.lr)
-        elif self.second_order:  # no curvature pairs yet → fall back
-            step_vec, pred_red = self._solve_tr_first_order(grad, self.lr)
-        else:
-            step_vec, pred_red = self._solve_tr_first_order(grad, self.lr)
+            act_red = self.state["prev_loss"] - new_loss_val
+            rho = act_red / (pred_red + 1e-12)
 
-        # keep copy for rollback
-        params_before = _flat_params(self.model)
+            if act_red > 0 and rho >= self.nu_dec:
+                if rho >= self.nu_inc and torch.norm(step_vec) >= 0.9 * self.lr:
+                    self.lr = min(self.max_lr, self.inc_factor * self.lr)
+                if self.second_order:
+                    y = _flat_grad(self.model) - grad
+                    self.hess.update_memory(step_vec.clone(), y.clone())
+                self.state["prev_loss"] = new_loss_val
+                self.state["prev_grad"] = _flat_grad(self.model).clone()
+                self.state["prev_params"] = _flat_params(self.model)
+                return new_loss_val
+            else:
+                self._apply_update(-step_vec)
+                self.lr = max(self.min_lr, self.dec_factor * self.lr)
 
-        # 3. apply candidate step
-        self._apply_update(step_vec)
-
-        # 4. evaluate at trial point x_k + s
-        new_loss_tensor = closure(compute_grad=True)
-        new_loss_val = (
-            float(new_loss_tensor)
-            if isinstance(new_loss_tensor, (float, int))
-            else float(new_loss_tensor.item())
-        )
-
-        # 5. acceptance test
-        act_red = self.state["prev_loss"] - new_loss_val
-        rho = act_red / (pred_red + 1e-12)
-
-        if act_red > 0 and rho >= self.nu_dec:  # accept
-            accepted = True
-            if rho >= self.nu_inc and torch.norm(step_vec) >= 0.9 * self.lr:
-                self.lr = min(self.max_lr, self.inc_factor * self.lr)
-            # SR1 memory update (only if second‑order)
-            if self.second_order:
-                y = _flat_grad(self.model) - grad
-                self.hess.update_memory(step_vec.clone(), y.clone())
-        else:  # reject ⇒ rollback
-            accepted = False
-            self._apply_update(-step_vec)  # undo
-            self.lr = max(self.min_lr, self.dec_factor * self.lr)
-            return self.state["prev_loss"]  # unchanged loss
-
-        # 6. store state for next iteration
-        self.state["prev_loss"] = new_loss_val
-        self.state["prev_grad"] = _flat_grad(self.model).clone()
-        self.state["prev_params"] = _flat_params(self.model)
-
-        return new_loss_val
+        return self.state["prev_loss"]

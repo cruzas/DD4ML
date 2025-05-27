@@ -147,10 +147,9 @@ class APTS_D(Optimizer):
         self.residual = global_grad - local_grad
 
         # Local steps
-        local_loss = self.local_optimizer.step(
-            closure=local_closure, old_loss=initial_local_loss, grad=local_grad
-        )
+        local_loss = self.local_optimizer.step(closure=local_closure)
         total_local_grad_evals_counter += self.local_optimizer.local_iter
+        
         if self.nr_models > 1:
             dist.all_reduce(total_local_grad_evals_counter, op=dist.ReduceOp.SUM)
             total_local_grad_evals_counter /= self.nr_models
@@ -185,31 +184,19 @@ class APTS_D(Optimizer):
         with torch.no_grad():
             acceptance_ratio = (initial_global_loss - trial_loss) / local_reduction
 
-            if acceptance_ratio < self.global_optimizer.nu_1:
-                self.lr = max(
-                    self.lr * self.global_optimizer.dec_factor,
-                    self.global_optimizer.min_lr,
-                )
+            if acceptance_ratio < self.global_optimizer.nu_dec:
+                self.lr = max(self.lr * self.global_optimizer.dec_factor, self.global_optimizer.min_lr)
                 restore_params(self.model, initial_flat)
                 new_loss = initial_global_loss
-                grad_arg = global_grad
-            elif acceptance_ratio > self.global_optimizer.nu_2:
-                self.lr = min(
-                    self.lr * self.global_optimizer.inc_factor,
-                    self.global_optimizer.max_lr,
-                )
-                new_loss = trial_loss
-                grad_arg = None
             else:
+                if acceptance_ratio > self.global_optimizer.nu_inc:
+                    self.lr = min(self.lr * self.global_optimizer.inc_factor, self.global_optimizer.max_lr)
                 new_loss = trial_loss
-                grad_arg = None
 
             self.global_optimizer.lr = self.lr
 
         if self.global_pass:
-            new_loss = self.global_optimizer.step(
-                closure=self.global_closure, old_loss=new_loss, grad=grad_arg
-            )
+            new_loss = self.global_optimizer.step(closure=self.global_closure)
             self.grad_evals_counter += 1
 
         with torch.no_grad():

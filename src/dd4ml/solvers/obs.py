@@ -138,7 +138,7 @@ class OBS:
 
     def ComputeSBySMW(self, tauStar, g, PsiTg, Psi, Minv, PsiPsi):
         W = tauStar * Minv + PsiPsi
-        WinvPsiTg = torch.linalg.solve(ww, PsiTg)
+        WinvPsiTg = torch.linalg.solve(W, PsiTg)
         return (-1.0 / tauStar) * g + Psi @ WinvPsiTg  # pstar
 
     def phiBar_f(self, sigma, Dd, a_j, delta):
