@@ -18,9 +18,10 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from dd4ml.pmw.dataloaders import GeneralizedDistributedDataLoader
 from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure
+
+from .dataloaders import GeneralizedDistributedDataLoader, OverlapBatchSampler
 
 
 class Trainer:
@@ -145,7 +146,7 @@ class Trainer:
                 pin_memory=True,
             )
         else:
-            # Initialize world_size
+            rank = dist.get_rank() if dist.is_initialized() else 0
             world_size = dist.get_world_size() if dist.is_initialized() else 1
 
             # Global batch size from config
@@ -154,12 +155,40 @@ class Trainer:
             # Per-process batch size
             per_process_batch_size = global_batch_size // world_size
 
-            train_sampler = DistributedSampler(self.train_dataset)
-            test_sampler = DistributedSampler(self.test_dataset)
+            base_train_sampler = DistributedSampler(
+                self.train_dataset,
+                num_replicas=world_size,
+                rank=rank,
+                shuffle=True,
+                drop_last=False,
+            )
+            base_test_sampler = DistributedSampler(
+                self.test_dataset,
+                num_replicas=world_size,
+                rank=rank,
+                shuffle=False,
+                drop_last=False,
+            )
+
+            overlap = config.overlap if hasattr(config, "overlap") else 0
+
+            train_sampler = OverlapBatchSampler(
+                base_sampler=base_train_sampler,
+                batch_size=per_process_batch_size,
+                overlap=overlap,
+                drop_last=False,
+            )
+
+            test_sampler = OverlapBatchSampler(
+                base_sampler=base_test_sampler,
+                batch_size=per_process_batch_size,
+                overlap=overlap,
+                drop_last=False,
+            )
 
             train_loader = DataLoader(
                 self.train_dataset,
-                batch_size=per_process_batch_size,  # Use per-process batch size
+                # batch_size=per_process_batch_size,  # Use per-process batch size
                 sampler=train_sampler,
                 num_workers=config.num_workers,
                 pin_memory=True,
@@ -167,7 +196,7 @@ class Trainer:
 
             test_loader = DataLoader(
                 self.test_dataset,
-                batch_size=per_process_batch_size,
+                # batch_size=per_process_batch_size,
                 sampler=test_sampler,
                 num_workers=config.num_workers,
                 pin_memory=True,
@@ -231,7 +260,10 @@ class Trainer:
                         closure=general_closure,
                         final_subdomain_closure=final_subdomain_closure,
                     )
-                elif "apts_d" in self.optimizer.__class__.__name__.lower() or "apts_p" in self.optimizer.__class__.__name__.lower():
+                elif (
+                    "apts_d" in self.optimizer.__class__.__name__.lower()
+                    or "apts_p" in self.optimizer.__class__.__name__.lower()
+                ):
                     self.loss += self.optimizer.step(inputs=x, labels=y)
                 else:
                     self.loss += self.optimizer.step(closure=general_closure)
@@ -361,7 +393,10 @@ class Trainer:
                         closure=general_closure,
                         final_subdomain_closure=final_subdomain_closure,
                     )
-                elif "apts_d" in self.optimizer.__class__.__name__.lower() or "apts_p" in self.optimizer.__class__.__name__.lower():
+                elif (
+                    "apts_d" in self.optimizer.__class__.__name__.lower()
+                    or "apts_p" in self.optimizer.__class__.__name__.lower()
+                ):
                     self.loss += self.optimizer.step(inputs=x, labels=y)
                 else:
                     self.loss = self.optimizer.step(closure=general_closure)

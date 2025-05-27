@@ -77,6 +77,7 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset_name", type=str, default="mnist", help="Dataset name"
     )
+    parser.add_argument("--overlap", type=float, default=0.1, help="Overlap factor")
     parser.add_argument(
         "--model_name", type=str, default="simple_resnet", help="Model name"
     )
