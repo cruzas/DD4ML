@@ -22,7 +22,7 @@ class APTS_IP(torch.optim.Optimizer):
                 f"Unknown subdomain optimizer: {config.subdomain_optimizer}"
             )
 
-        config.subdomain_optimizer_args = {"lr": config.learning_rate}
+        config.subdomain_optimizer_args = {"delta": config.delta}
         if config.subdomain_optimizer in {torch.optim.Adam, torch.optim.AdamW}:
             config.subdomain_optimizer_args["betas"] = config.betas
         elif config.subdomain_optimizer == torch.optim.SGD:
@@ -46,7 +46,7 @@ class APTS_IP(torch.optim.Optimizer):
         subdomain_optimizer_defaults,
         global_optimizer,
         global_optimizer_defaults,
-        lr=0.01,
+        delta=0.01,
         max_local_iters=0,
         dogleg=False,
         APTS_in_data_sync_strategy="average",
@@ -54,7 +54,7 @@ class APTS_IP(torch.optim.Optimizer):
     ):
         super().__init__(
             model.parameters(),
-            {"lr": lr, "max_local_iters": max_local_iters, "dogleg": dogleg},
+            {"delta": delta, "max_local_iters": max_local_iters, "dogleg": dogleg},
         )
         # Synchronize non-parameter attributes from the first param group.
         self._sync_attributes_from_param_group()
@@ -74,10 +74,10 @@ class APTS_IP(torch.optim.Optimizer):
             print(
                 '(WARNING) APTS in data "sum" synchronization strategy still has to be tested/verified.'
             )
-        if lr <= 0:
-            raise ValueError('The learning rate "lr" must be bigger than 0.')
+        if delta <= 0:
+            raise ValueError('The learning rate "delta" must be bigger than 0.')
 
-        # subdomain_optimizer_defaults.update({'lr': lr})
+        # subdomain_optimizer_defaults.update({'delta': delta})
         self.subdomain_optimizer = subdomain_optimizer(
             params=model.subdomain_params(), **subdomain_optimizer_defaults
         )
@@ -86,7 +86,7 @@ class APTS_IP(torch.optim.Optimizer):
                 model=model, **global_optimizer_defaults
             )
         else:
-            global_optimizer_defaults.update({"lr": lr})
+            global_optimizer_defaults.update({"delta": delta})
             self.global_optimizer = global_optimizer(
                 params=model.subdomain_params(), **global_optimizer_defaults
             )
@@ -140,8 +140,8 @@ class APTS_IP(torch.optim.Optimizer):
 
     def subdomain_steps(self, final_subdomain_closure=None):
         if self.max_local_iters > 0:
-            # lr_subdomain = self.lr / self.max_local_iters
-            # self.subdomain_optimizer.param_groups[0]['lr'] = lr_subdomain
+            # delta_subdomain = self.delta / self.max_local_iters
+            # self.subdomain_optimizer.param_groups[0]['delta'] = delta_subdomain
             for i in range(self.max_local_iters):
                 self.subdomain_optimizer.step()
                 self.subdomain_optimizer.zero_grad()
@@ -177,22 +177,22 @@ class APTS_IP(torch.optim.Optimizer):
             with Timer(self.timings, "closure_2"):
                 new_loss = closure(compute_grad=False, zero_grad=True)
 
-            lr = self.lr
+            delta = self.delta
             w = 0
             with Timer(self.timings, "dogleg"):
                 while new_loss > initial_loss and w <= 1:
                     with torch.no_grad():
-                        lr *= self.global_optimizer.dec_factor
+                        delta *= self.global_optimizer.dec_factor
                         w += 0.2
                         step_update = ((1 - w) * step) - (w * initial_grads)
-                        step_update = (lr / step_update.norm()) * step_update
+                        step_update = (delta / step_update.norm()) * step_update
                         self._apply_model_update(initial_parameters, step_update)
                     new_loss = closure(compute_grad=False, zero_grad=True)
                     torch.cuda.empty_cache()
         else:  # assume a trust-region strategy
             step_norm = step.norm()
             candidate_step = (
-                step if step_norm <= self.lr else (self.lr / step_norm) * step
+                step if step_norm <= self.delta else (self.delta / step_norm) * step
             )
 
             # Apply the candidate step
@@ -207,31 +207,31 @@ class APTS_IP(torch.optim.Optimizer):
 
             if rho < 0.25:
                 # Too small step, reduce the step size
-                self.lr = max(
-                    self.lr * self.global_optimizer.dec_factor,
-                    self.global_optimizer.min_lr,
+                self.delta = max(
+                    self.delta * self.global_optimizer.dec_factor,
+                    self.global_optimizer.min_delta,
                 )
                 self._apply_model_update(initial_parameters, -candidate_step)
                 old_loss = initial_loss
             elif rho > 0.75:
                 # Good step, increase the step size
-                self.lr = min(
-                    self.lr * self.global_optimizer.inc_factor,
-                    self.global_optimizer.max_lr,
+                self.delta = min(
+                    self.delta * self.global_optimizer.inc_factor,
+                    self.global_optimizer.max_delta,
                 )
                 old_loss = new_loss
             else:
                 # Acceptable step, keep the step size
-                # self.lr = self.lr
+                # self.delta = self.delta
                 old_loss = new_loss
 
         with Timer(self.timings, "smoother"):
             self.global_optimizer.step(closure=closure, old_loss=old_loss)
 
-        self.lr = (
-            self.global_optimizer.param_groups[0]["lr"]
-            if "lr" in self.global_optimizer.param_groups[0]
-            else self.global_optimizer.lr
+        self.delta = (
+            self.global_optimizer.param_groups[0]["delta"]
+            if "delta" in self.global_optimizer.param_groups[0]
+            else self.global_optimizer.delta
         )
 
         self.update_param_group()

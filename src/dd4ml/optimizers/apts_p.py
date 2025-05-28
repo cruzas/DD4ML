@@ -107,7 +107,7 @@ class APTS_P(Optimizer):
             self.local_optimizer = local_opt(
                 self.local_model.parameters(), **local_opt_params
             )
-        self.lr = self.global_optimizer.lr
+        self.delta = self.global_optimizer.delta
         self.correct_step = correct_step
         self.norm_type = norm_type
         self.dogleg = dogleg
@@ -206,23 +206,23 @@ class APTS_P(Optimizer):
 
         # Do dogleg or TR control
         if self.dogleg:
-            lr = self.lr
+            delta = self.delta
             w = 0
             restore_params(self.model, initial_params + step)
             trial_loss = self.global_closure()
             while trial_loss > initial_global_loss and w <= 1:
                 with torch.no_grad():
-                    lr *= self.global_optimizer.dec_factor
+                    delta *= self.global_optimizer.dec_factor
                     w += 0.2
                     step_update = ((1 - w) * step) - (w * global_grad)
-                    step_update = (lr / step_update.norm()) * step_update
+                    step_update = (delta / step_update.norm()) * step_update
                     restore_params(self.model, step_update)
                 trial_loss = self.global_closure()
                 torch.cuda.empty_cache()
         else:  # TR control
             step_norm = step.norm()
             candidate_step = (
-                step if step_norm <= self.lr else (self.lr / step_norm) * step
+                step if step_norm <= self.delta else (self.delta / step_norm) * step
             )
 
             # Apply the candidate step
@@ -235,17 +235,17 @@ class APTS_P(Optimizer):
 
             if rho < 0.25:
                 # Too small step, reduce the step size
-                self.lr = max(
-                    self.lr * self.global_optimizer.dec_factor,
-                    self.global_optimizer.min_lr,
+                self.delta = max(
+                    self.delta * self.global_optimizer.dec_factor,
+                    self.global_optimizer.min_delta,
                 )
                 restore_params(self.model, -candidate_step)
                 trial_loss = initial_global_loss
             elif rho > 0.75:
                 # Good step, increase the step size
-                self.lr = min(
-                    self.lr * self.global_optimizer.inc_factor,
-                    self.global_optimizer.max_lr,
+                self.delta = min(
+                    self.delta * self.global_optimizer.inc_factor,
+                    self.global_optimizer.max_delta,
                 )
                 restore_params(self.model, candidate_step)
 
@@ -254,7 +254,7 @@ class APTS_P(Optimizer):
         )
         # Local models get global model parameters, as does the local optimizer
         with torch.no_grad():
-            self.lr = self.global_optimizer.lr
-            self.local_optimizer.lr = self.lr
+            self.delta = self.global_optimizer.delta
+            self.local_optimizer.delta = self.delta
             self.local_model.load_state_dict(self.model.state_dict())
         return loss.item()

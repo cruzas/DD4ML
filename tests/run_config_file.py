@@ -89,6 +89,7 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--learning_rate", type=float, default=0.01, help="Learning rate"
     )
+    parser.add_argument("--delta", type=float, default=0.01, help="Trust-region radius")
     parser.add_argument(
         "--metric",
         type=str,

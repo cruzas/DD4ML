@@ -22,7 +22,7 @@ def _flat_grad(params) -> torch.Tensor:
 
 
 # --------------------------------------------------------------------- #
-# optimizer                                                             #
+# optimiser                                                             #
 # --------------------------------------------------------------------- #
 class TR(Optimizer):
     @staticmethod
@@ -31,13 +31,13 @@ class TR(Optimizer):
             setattr(cfg, k, v)
         return cfg
 
-    # -------------- constructor -------------------------------------- #
+    # ---------------- constructor ------------------------------------- #
     def __init__(
         self,
         params: Iterable[torch.nn.Parameter],
-        lr: float = 0.01,
-        max_lr: float = 1.0,
-        min_lr: float = 1e-4,
+        delta: float = 0.01,  # ← trust-region radius Δ₀
+        max_delta: float = 1.0,
+        min_delta: float = 1e-4,
         nu: float = 0.5,
         inc_factor: float = 2.0,
         dec_factor: float = 0.5,
@@ -49,14 +49,15 @@ class TR(Optimizer):
         second_order: bool = True,
         tol: float = 1e-6,
     ) -> None:
-        super().__init__(params, {"lr": lr})
+        # PyTorch still wants a key called "lr"; pass Δ₀ there for compatibility
+        super().__init__(params, {"lr": delta})
 
         self.ps = [p for g in self.param_groups for p in g["params"]]
 
         # trust-region radii / factors
-        self.lr = float(lr)
-        self.max_lr = float(max_lr)
-        self.min_lr = float(min_lr)
+        self.delta = float(delta)
+        self.max_delta = float(max_delta)
+        self.min_delta = float(min_delta)
         self.inc_factor = float(inc_factor)
         self.dec_factor = float(dec_factor)
         self.nu_dec = float(nu_dec)
@@ -80,7 +81,7 @@ class TR(Optimizer):
             self.hess = None  # type: ignore
             self.obs = None  # type: ignore
 
-    # -------------- utilities ---------------------------------------- #
+    # ---------------- utilities --------------------------------------- #
     def _apply_update(self, step: torch.Tensor) -> None:
         """Add flattened *step* to parameters (no grad tracking)."""
         offset = 0
@@ -90,7 +91,7 @@ class TR(Optimizer):
                 p.add_(step[offset : offset + num].view_as(p))
                 offset += num
 
-    # -------------- sub-problem solvers ------------------------------ #
+    # ---------------- sub-problem solvers ----------------------------- #
     def _solve_tr_first_order(
         self, g: torch.Tensor, delta: float
     ) -> Tuple[torch.Tensor, float]:
@@ -104,7 +105,6 @@ class TR(Optimizer):
     def _solve_tr_second_order(
         self, g: torch.Tensor, delta: float
     ) -> Tuple[torch.Tensor, float]:
-        # Build Psi, M_inv, gamma for SR1
         self.hess.precompute()  # type: ignore
         step = -self.obs.solve_tr_subproblem(  # type: ignore
             g,
@@ -118,19 +118,22 @@ class TR(Optimizer):
         predicted = -(g_dot_p + 0.5 * p_B_p)
         return step, float(predicted)
 
+    def update_pytorch_lr(self) -> None:
+        """Update the learning rate in PyTorch's param_groups."""
+        for g in self.param_groups:
+            g["lr"] = self.delta
+
     # -------------------------- main loop ----------------------------- #
     def step(self, closure, **_) -> Tuple[float, torch.Tensor]:
         """Execute one trust-region update.
         Returns (loss_value, accepted_gradient)."""
         # current objective and gradient
-        if "precomp_loss" in _:
-            loss_val = float(_["precomp_loss"])
-        else:
-            loss_val = float(closure(compute_grad=True))
-        if "precomp_grad" in _:
-            grad = _["precomp_grad"]
-        else:
-            grad = _flat_grad(self.ps)
+        loss_val = (
+            float(_["precomp_loss"])
+            if "precomp_loss" in _
+            else float(closure(compute_grad=True))
+        )
+        grad = _["precomp_grad"] if "precomp_grad" in _ else _flat_grad(self.ps)
 
         # convergence check
         if torch.norm(grad, p=self.norm_type) <= self.tol:
@@ -142,7 +145,7 @@ class TR(Optimizer):
             if self.second_order and len(self.hess._S) > 0  # type: ignore[attr-defined]
             else self._solve_tr_first_order
         )
-        step, predicted = solve(grad, self.lr)
+        step, predicted = solve(grad, self.delta)
 
         # trial step
         self._apply_update(step)
@@ -154,8 +157,10 @@ class TR(Optimizer):
         rho = actual / (predicted + 1e-12)
 
         if actual > 0 and rho >= self.nu_dec:  # accepted
-            if rho >= self.nu_inc and torch.norm(step) >= 0.9 * self.lr:
-                self.lr = min(self.max_lr, self.inc_factor * self.lr)
+            if rho >= self.nu_inc and torch.norm(step) >= 0.9 * self.delta:
+                self.delta = min(self.max_delta, self.inc_factor * self.delta)
+                update_pytorch_lr()
+
             if self.second_order:
                 self.hess.update_memory(
                     step.clone(), (new_grad - grad).clone()
@@ -163,5 +168,6 @@ class TR(Optimizer):
             return new_loss, new_grad
         else:  # rejected
             self._apply_update(-step)  # rollback
-            self.lr = max(self.min_lr, self.dec_factor * self.lr)
+            self.delta = max(self.min_delta, self.dec_factor * self.delta)
+            update_pytorch_lr()
             return loss_val, grad

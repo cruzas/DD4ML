@@ -30,6 +30,7 @@ class Trainer:
     def get_default_config():
         # Base settings
         C = CN()
+        C.tol = 1e-6
         # device to train on
         C.device = "auto"
         # dataloder parameters
@@ -38,6 +39,7 @@ class Trainer:
         C.max_iters = 1000  # for Transformer networks, this is the number of iterations
         C.batch_size = 128
         C.learning_rate = 5e-4
+        C.delta = 0.1  # for trust region methods
         C.betas = (0.9, 0.999)  # for Adam
         C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = 1.0
@@ -60,7 +62,7 @@ class Trainer:
         C.local_second_order = False  # for APTS*
         C.subdomain_optimizer = None
         C.gradient_accumulation = True
-        C.accumulation_steps = 5
+        C.accumulation_steps = 1
 
         # For pipelining via pwm library
         C.data_chunks_amount = 1

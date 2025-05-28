@@ -20,11 +20,11 @@ def get_state_dict(model):
 
 
 def get_lssr1_trust_region_params(config):
-    lr = config.learning_rate
+    delta = config.delta
     return {
-        "lr_init": lr,
-        "delta_init": 1.0,
-        "gamma_init": 1e-3,
+        "delta": delta,
+        "delta": 1.0,
+        "gamma": 1e-3,
         "mem_length": 5,
         "mu": 0.9,
         "tau_1": 0.1,
@@ -39,11 +39,11 @@ def get_lssr1_trust_region_params(config):
 
 
 def get_trust_region_params(config):
-    lr = config.learning_rate
+    delta = config.delta
     return {
-        "lr": lr,
-        "max_lr": 2.0,
-        "min_lr": 1e-6,
+        "delta": delta,
+        "max_delta": 2.0,
+        "min_delta": 1e-6,
         "nu": 0.5,
         "inc_factor": 1.2,
         "dec_factor": 0.9,
@@ -59,12 +59,12 @@ def get_trust_region_params(config):
 def get_local_trust_region_params(config):
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     norm_type = config.norm_type
-    lr_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
-    lr = config.learning_rate * lr_scale
+    delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
+    delta = config.delta * delta_scale
     return {
-        "lr": lr,
-        "max_lr": 2.0,  # Lower maximum for local updates
-        "min_lr": 1e-6,
+        "delta": delta,
+        "max_delta": 2.0,  # Lower maximum for local updates
+        "min_delta": 1e-6,
         "nu": (
             0.45 if norm_type != math.inf else 0.5
         ),  # Adjusted to be more conservative locally

@@ -37,7 +37,7 @@ parameters:
     value: 10
   max_iters:
     value: 20
-  learning_rate: 
+  delta: 
     value: 0.1
   dataset_name: 
     value: "cifar10" 

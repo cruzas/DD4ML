@@ -115,12 +115,13 @@ def get_config_model_and_trainer(args, wandb_config):
     )
 
     # Optimizer selection.
-    lr = (
-        wandb_config["learning_rate"]
-        if wandb_config is not None
-        else args["learning_rate"]
-    )
     if optimizer_name in optimizer_factory.mapping:
+        lr = (
+            wandb_config["learning_rate"]
+            if wandb_config is not None
+            else args["learning_rate"]
+        )
+
         optimizer_obj = optimizer_factory.create(optimizer_name, model, lr)
         # Remove any unused attributes.
         for attr in [
@@ -132,15 +133,15 @@ def get_config_model_and_trainer(args, wandb_config):
         ]:
             if hasattr(all_config.trainer, attr):
                 delattr(all_config.trainer, attr)
-    elif optimizer_name == "trust_region":
-        from dd4ml.optimizers.trust_region import TrustRegion
+    elif optimizer_name == "tr":
+        from dd4ml.optimizers.tr import TR
 
-        all_config.trainer = TrustRegion.setup_TR_args(all_config.trainer)
-        optimizer_obj = TrustRegion(
+        all_config.trainer = TR.setup_TR_args(all_config.trainer)
+        optimizer_obj = TR(
             model=model,
-            lr=all_config.trainer.learning_rate,
-            max_lr=all_config.trainer.max_lr,
-            min_lr=all_config.trainer.min_lr,
+            delta=all_config.trainer.delta,
+            max_delta=all_config.trainer.max_delta,
+            min_delta=all_config.trainer.min_delta,
             nu=all_config.trainer.nu,
             inc_factor=all_config.trainer.inc_factor,
             dec_factor=all_config.trainer.dec_factor,
@@ -160,7 +161,7 @@ def get_config_model_and_trainer(args, wandb_config):
             subdomain_optimizer_defaults=all_config.trainer.subdomain_optimizer_args,
             global_optimizer=all_config.trainer.global_optimizer,
             global_optimizer_defaults=all_config.trainer.global_optimizer_args,
-            lr=all_config.trainer.learning_rate,
+            delta=all_config.trainer.delta,
             max_local_iters=all_config.trainer.max_local_iters,
             dogleg=False,
             APTS_in_data_sync_strategy="average",
@@ -192,7 +193,6 @@ def get_config_model_and_trainer(args, wandb_config):
             local_opt_params=all_config.trainer.subdomain_optimizer_args,
             global_pass=all_config.trainer.global_pass,
             foc=all_config.trainer.foc,
-            correct_step=all_config.trainer.correct_step,
             norm_type=all_config.trainer.norm_type,
             max_local_iters=all_config.trainer.max_local_iters,
             max_global_iters=all_config.trainer.max_global_iters,
@@ -222,7 +222,6 @@ def get_config_model_and_trainer(args, wandb_config):
             local_opt=all_config.trainer.subdomain_optimizer,
             local_opt_params=all_config.trainer.subdomain_optimizer_args,
             global_pass=all_config.trainer.global_pass,
-            correct_step=all_config.trainer.correct_step,
             norm_type=all_config.trainer.norm_type,
             dogleg=all_config.trainer.dogleg,
         )

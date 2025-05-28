@@ -6,9 +6,9 @@ parameters:
   optimizer: 
     value: "apts_d" 
   batch_size:
-    value: 10000
+    value: 5000
   effective_batch_size:
-    value: 10000
+    value: 5000
   num_stages:
     value: 1
   num_subdomains:
@@ -29,25 +29,27 @@ parameters:
     value: False
   norm_type:
     value: 2
-  max_subdomain_iters:
+  max_local_iters:
     value: 3
   max_global_iters:
     value: 1
+  max_iters:
+    value: 10 # for Transformers
   epochs: 
     value: 10
-  max_iters:
-    value: 3
-  learning_rate: 
+  delta: 
     value: 0.1
   dataset_name: 
-    value: "cifar10" 
+    value: "mnist" 
   model_name: 
-    value: "simple_resnet"
+    value: "simple_cnn"
   criterion:
     value: "cross_entropy"
   gradient_accumulation:
     value: True
   accumulation_steps:
-    value: 5
+    value: 1
   seed:
     values: [42]
+  tol:
+    value: 1e-6
