@@ -15,6 +15,7 @@ from dd4ml.utility import (
     get_state_dict,
     get_trust_region_params,
     restore_params,
+    get_apts_params
 )
 
 from .lssr1_tr import LSSR1_TR
@@ -28,19 +29,20 @@ class APTS_D(Optimizer):
     @staticmethod
     def setup_APTS_args(config):
         if config.global_second_order:
-            config.global_optimizer = LSSR1_TR
-            config.global_optimizer_args = get_lssr1_trust_region_params(config)
+            config.global_optimizer = TR #LSSR1_TR
+            config.global_optimizer_args = get_trust_region_params(config) #get_lssr1_trust_region_params(config)
         else:
             config.global_optimizer = TR
             config.global_optimizer_args = get_trust_region_params(config)
         if config.local_second_order:
-            config.local_optimizer = LSSR1_TR
-            config.local_optimizer_args = get_lssr1_trust_region_params(config)
+            config.local_optimizer = TR# LSSR1_TR
+            config.local_optimizer_args = get_trust_region_params(config) #get_lssr1_trust_region_params(config)
         else:
             config.subdomain_optimizer = TR
             config.subdomain_optimizer_args = get_local_trust_region_params(config)
 
         print(f"APTS_D global optimizer: {TR.__name__}; local optimizer: {TR.__name__}")
+        config.apts_params = get_apts_params(config)
         return config
 
     # --------------------------------------------------------------------- #
@@ -50,6 +52,12 @@ class APTS_D(Optimizer):
         self,
         params,
         model=None,
+        delta=None,
+        max_delta=None,
+        nu_dec=None,
+        nu_inc=None,
+        inc_factor=None,
+        dec_factor=None,
         criterion=None,
         device=None,
         nr_models=None,
@@ -64,6 +72,7 @@ class APTS_D(Optimizer):
         norm_type=2,
         max_local_iters=3,
         max_global_iters=3,
+        tol=1e-6,
     ):
         # Register hyper-parameters through ``defaults`` ------------------- #
         defaults = dict(
@@ -73,6 +82,14 @@ class APTS_D(Optimizer):
             norm_type=norm_type,
             max_local_iters=max_local_iters,
             max_global_iters=max_global_iters,
+            tol=float(tol),
+            delta=float(delta),
+            lr=float(delta),
+            nu_dec=float(nu_dec) if nu_dec is not None else 0.25,
+            nu_inc=float(nu_inc) if nu_inc is not None else 0.75,
+            inc_factor=float(inc_factor) if inc_factor is not None else 1.2,
+            dec_factor=float(dec_factor) if dec_factor is not None else 0.9,
+            max_delta=float(max_delta) if max_delta is not None else 2.0,
         )
         super().__init__(params, defaults)
 
@@ -103,6 +120,11 @@ class APTS_D(Optimizer):
             self.local_model.parameters(), **local_opt_params
         )
         self.delta = self.global_optimizer.defaults["delta"]  # will be kept in sync
+
+    def update_pytorch_lr(self) -> None:
+        """Update the learning rate in PyTorch's param_groups."""
+        for g in self.param_groups:
+            g["lr"] = self.delta
 
     # --------------------------------------------------------------------- #
     # Closure helpers
@@ -229,19 +251,19 @@ class APTS_D(Optimizer):
         with torch.no_grad():
             acceptance_ratio = (initial_global_loss - trial_loss) / local_reduction
 
-            if acceptance_ratio < self.global_optimizer.nu_dec:
-                self.delta = max(
-                    self.delta * self.global_optimizer.dec_factor,
-                    self.global_optimizer.min_delta,
-                )
+            if acceptance_ratio < self.defaults["nu_dec"]:
+                self.delta = max(self.delta * self.defaults["dec_factor"], self.defaults["tol"])
+                self.update_pytorch_lr()
+                
                 restore_params(self.model, initial_flat)
                 new_loss = initial_global_loss
             else:
-                if acceptance_ratio > self.global_optimizer.nu_inc:
+                if acceptance_ratio > self.defaults["nu_inc"]:
                     self.delta = min(
-                        self.delta * self.global_optimizer.inc_factor,
-                        self.global_optimizer.max_delta,
+                        self.delta * self.defaults["inc_factor"],
+                        self.defaults["max_delta"],
                     )
+                    self.update_pytorch_lr()
                 new_loss = trial_loss
 
             self.global_optimizer.defaults["delta"] = self.delta
@@ -266,6 +288,8 @@ class APTS_D(Optimizer):
         # ------------------------------------------------------------------ #
         with torch.no_grad():
             self.delta = self.global_optimizer.defaults["delta"]
+            self.update_pytorch_lr()
+            
             self.local_optimizer.delta = self.global_optimizer.defaults["delta"]
             if norm_type != math.inf:
                 self.local_optimizer.defaults["delta"] /= self.nr_models

@@ -27,8 +27,24 @@ class OBS:
         self.tol = 1e-6
 
     def _check_finite(self, *tensors):
-        if not all(torch.isfinite(t).all() for t in tensors):
-            raise ValueError("Inputs contain NaN or Inf.")
+        for t in tensors:
+            if isinstance(t, torch.Tensor):
+                if not torch.isfinite(t).all():
+                    raise ValueError("Inputs contain NaN or Inf.")
+            elif isinstance(t, np.ndarray):
+                if not np.isfinite(t).all():
+                    raise ValueError("Inputs contain NaN or Inf.")
+            elif np.isscalar(t):
+                if not np.isfinite(t):
+                    raise ValueError("Inputs contain NaN or Inf.")
+            else:
+                # Try to convert to numpy array and check
+                try:
+                    arr = np.asarray(t)
+                    if not np.isfinite(arr).all():
+                        raise ValueError("Inputs contain NaN or Inf.")
+                except Exception:
+                    raise TypeError(f"Unsupported input type: {type(t)}")
 
     def solve_tr_subproblem(self, g, delta, gamma, Psi, Minv):
         self._check_finite(g, delta, gamma, Psi, Minv)

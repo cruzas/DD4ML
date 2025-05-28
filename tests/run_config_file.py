@@ -223,15 +223,29 @@ def main(
     ) -> None:
 
         # Check if lr is in trainer.optimizer
-        if hasattr(trainer.optimizer, "lr"):
-            lr = trainer.optimizer.lr
-        else:
-            lr = trainer.optimizer.param_groups[0]["lr"]
+        try:
+            if hasattr(trainer.optimizer, "lr"):
+                lr = trainer.optimizer.lr
+            else:
+                lr = trainer.optimizer.param_groups[0]["lr"]
 
-        dprint(
-            f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, "
-            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, Learning Rate: {lr:.6e}"
-        )
+            dprint(
+                f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, "
+                f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, Learning Rate: {lr:.6e}"
+            )
+        except:
+            try:
+                if hasattr(trainer.optimizer, "delta"):
+                    delta = trainer.optimizer.delta
+                else:
+                    delta = trainer.optimizer.param_groups[0]["delta"]
+                dprint(
+                    f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, "
+                    f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, Delta: {delta:.6e}"
+                )
+            except Exception as e:
+                print("Error retrieving learning rate or delta:", e)
+            
         if rank == 0 and use_wandb:
             log_fn(
                 {

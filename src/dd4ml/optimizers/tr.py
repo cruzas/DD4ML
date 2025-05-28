@@ -25,6 +25,22 @@ def _flat_grad(params) -> torch.Tensor:
 # optimiser                                                             #
 # --------------------------------------------------------------------- #
 class TR(Optimizer):
+    # Default values for optimizer hyperparameters
+    defaults = dict(
+        delta=0.01,
+        max_delta=1.0,
+        min_delta=1e-4,
+        nu=0.5,
+        inc_factor=2.0,
+        dec_factor=0.5,
+        nu_dec=0.25,
+        nu_inc=0.75,
+        mem_length=5,
+        norm_type=2,
+        second_order=True,
+        tol=1e-6,
+    )
+
     @staticmethod
     def setup_TR_args(cfg):
         for k, v in get_trust_region_params(cfg).items():
@@ -35,7 +51,7 @@ class TR(Optimizer):
     def __init__(
         self,
         params: Iterable[torch.nn.Parameter],
-        delta: float = 0.01,  # ← trust-region radius Δ₀
+        delta: float = 0.01,
         max_delta: float = 1.0,
         min_delta: float = 1e-4,
         nu: float = 0.5,
@@ -49,30 +65,46 @@ class TR(Optimizer):
         second_order: bool = True,
         tol: float = 1e-6,
     ) -> None:
-        # PyTorch still wants a key called "lr"; pass Δ₀ there for compatibility
-        super().__init__(params, {"lr": delta})
+        # Use defaults for param_groups
+        defaults = dict(
+            delta=delta,
+            max_delta=max_delta,
+            min_delta=min_delta,
+            nu=nu,
+            inc_factor=inc_factor,
+            dec_factor=dec_factor,
+            nu_dec=nu_dec,
+            nu_inc=nu_inc,
+            mem_length=mem_length,
+            norm_type=norm_type,
+            second_order=second_order,
+            tol=tol,
+            lr=delta,  # PyTorch expects 'lr'
+        )
+        super().__init__(params, defaults)
 
         self.ps = [p for g in self.param_groups for p in g["params"]]
 
         # trust-region radii / factors
-        self.delta = float(delta)
-        self.max_delta = float(max_delta)
-        self.min_delta = float(min_delta)
-        self.inc_factor = float(inc_factor)
-        self.dec_factor = float(dec_factor)
-        self.nu_dec = float(nu_dec)
-        self.nu_inc = float(nu_inc)
-        self.nu = min(nu, self.nu_dec)
-        self.norm_type = norm_type
-        self.tol = float(tol)
+        group = self.param_groups[0]
+        self.delta = float(group.get("delta", self.defaults["delta"]))
+        self.max_delta = float(group.get("max_delta", self.defaults["max_delta"]))
+        self.min_delta = float(group.get("min_delta", self.defaults["min_delta"]))
+        self.inc_factor = float(group.get("inc_factor", self.defaults["inc_factor"]))
+        self.dec_factor = float(group.get("dec_factor", self.defaults["dec_factor"]))
+        self.nu_dec = float(group.get("nu_dec", self.defaults["nu_dec"]))
+        self.nu_inc = float(group.get("nu_inc", self.defaults["nu_inc"]))
+        self.nu = min(group.get("nu", self.defaults["nu"]), self.nu_dec)
+        self.norm_type = group.get("norm_type", self.defaults["norm_type"])
+        self.tol = float(group.get("tol", self.defaults["tol"]))
 
         # second-order helpers
-        self.second_order = bool(second_order)
+        self.second_order = bool(group.get("second_order", self.defaults["second_order"]))
         if self.second_order:
             dev = self.ps[0].device
             self.hess = LSR1(
                 gamma=1.0,
-                memory_length=int(mem_length or 5),
+                memory_length=int(group.get("mem_length", self.defaults["mem_length"]) or 5),
                 device=dev,
                 tol=1e-10,
             )
@@ -111,7 +143,7 @@ class TR(Optimizer):
             torch.tensor(delta, device=g.device, dtype=g.dtype),
             self.hess.gamma,
             self.hess.Psi,
-            self.hess.M_inv,  # type: ignore
+            self.hess.Minv,  # type: ignore
         )
         g_dot_p = torch.dot(g, step)
         p_B_p = torch.dot(step, self.hess.B(step))  # type: ignore
@@ -159,7 +191,7 @@ class TR(Optimizer):
         if actual > 0 and rho >= self.nu_dec:  # accepted
             if rho >= self.nu_inc and torch.norm(step) >= 0.9 * self.delta:
                 self.delta = min(self.max_delta, self.inc_factor * self.delta)
-                update_pytorch_lr()
+                self.update_pytorch_lr()
 
             if self.second_order:
                 self.hess.update_memory(
@@ -169,5 +201,5 @@ class TR(Optimizer):
         else:  # rejected
             self._apply_update(-step)  # rollback
             self.delta = max(self.min_delta, self.dec_factor * self.delta)
-            update_pytorch_lr()
+            self.update_pytorch_lr()
             return loss_val, grad

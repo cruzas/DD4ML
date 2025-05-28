@@ -196,6 +196,8 @@ def get_config_model_and_trainer(args, wandb_config):
             norm_type=all_config.trainer.norm_type,
             max_local_iters=all_config.trainer.max_local_iters,
             max_global_iters=all_config.trainer.max_global_iters,
+            tol=all_config.trainer.tol,
+            **all_config.trainer.apts_params,
         )
     elif optimizer_name == "apts_p":
         from dd4ml.optimizers.apts_p import APTS_P

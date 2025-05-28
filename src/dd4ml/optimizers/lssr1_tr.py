@@ -39,7 +39,7 @@ class LSSR1_TR(Optimizer):
         self,
         params,
         *,
-        lr: float = 1.0,  # current line-search step length (α)
+        lr: float = 0.1,  # current line-search step length (α)
         delta: float = 1.0,  # current trust-region radius (Δk in Alg. 3)
         gamma: float = 1e-3,
         mem_length: int = 10,
@@ -99,7 +99,6 @@ class LSSR1_TR(Optimizer):
     # ------------------------------------------------------------------ #
     # Main optimisation step                                             #
     # ------------------------------------------------------------------ #
-    @torch.no_grad()
     def step(self, closure: Callable[[], Tensor], **_) -> Tuple[float, float]:
         params = self.param_groups[0]["params"]
 
@@ -129,7 +128,7 @@ class LSSR1_TR(Optimizer):
             delta=self.defaults["delta"],
             gamma=self.hess.gamma,
             Psi=self.hess.Psi,
-            Minv=self.hess.M_inv,
+            Minv=self.hess.Minv,
         )
 
         # -- momentum grafting ------------------------------------------
@@ -179,7 +178,7 @@ class LSSR1_TR(Optimizer):
             delta_new = self.defaults["nu_4"] * delta_old
         else:
             delta_new = delta_old
-        self.defaults["delta"] = max(delta_new, 1e-12)
+        self.defaults["delta"] = max(delta_new, self.defaults["tol"])
 
         # -- prepare return values --------------------------------------
         grad_norm = g_norm if alpha == 0.0 else float(_concat_grads(params).norm())

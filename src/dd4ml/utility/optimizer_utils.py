@@ -19,13 +19,22 @@ def get_state_dict(model):
     return model.module.state_dict() if hasattr(model, "module") else model.state_dict()
 
 
-def get_lssr1_trust_region_params(config):
-    delta = config.delta
+def get_apts_params(config):
     return {
-        "delta": delta,
+        "delta": config.delta,
+        "nu_dec": 0.25,
+        "nu_inc": 0.75,
+        "inc_factor": 1.2,
+        "dec_factor": 0.9,
+        "max_delta": 2.0,
+    }
+
+def get_lssr1_trust_region_params(config):
+    return {
+        "delta": config.delta,
         "delta": 1.0,
         "gamma": 1e-3,
-        "mem_length": 5,
+        "mem_length": 3,
         "mu": 0.9,
         "tau_1": 0.1,
         "tau_2": 0.25,
@@ -39,9 +48,8 @@ def get_lssr1_trust_region_params(config):
 
 
 def get_trust_region_params(config):
-    delta = config.delta
     return {
-        "delta": delta,
+        "delta": config.delta,
         "max_delta": 2.0,
         "min_delta": 1e-6,
         "nu": 0.5,
