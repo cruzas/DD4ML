@@ -45,7 +45,7 @@ class LSR1:
 
         # workspaces filled by `precompute`
         self.Psi: torch.Tensor | None = None  # (n, k)
-        self.M_inv: torch.Tensor | None = None  # (k, k)
+        self.Minv: torch.Tensor | None = None  # (k, k)
 
     # ------------------------------------------------------------------
     # public API
@@ -84,7 +84,7 @@ class LSR1:
         if not self._S:
             # no pairs yet: use pure multiple of identity
             self.Psi = torch.zeros((0, 0), device=self.device, dtype=self.dtype)
-            self.M_inv = torch.zeros((0, 0), device=self.device, dtype=self.dtype)
+            self.Minv = torch.zeros((0, 0), device=self.device, dtype=self.dtype)
             return
 
         S = torch.stack(self._S, dim=1)  # (n, k)
@@ -99,14 +99,14 @@ class LSR1:
         D = torch.diag(torch.diag(SY))  # (k, k)
         L = torch.tril(SY, diagonal=-1)  # (k, k)
 
-        self.M_inv = (
+        self.Minv = (
             D + L + L.transpose(0, 1) - self.gamma * (S.transpose(0, 1) @ S)
         )  # (k, k)
 
         # Small diagonal regularisation if badly conditioned
         eye_k = torch.eye(k, device=self.device, dtype=self.dtype)
-        lambda_reg = self.tol * torch.norm(self.M_inv, p="fro")
-        self.M_inv += lambda_reg * eye_k
+        lambda_reg = self.tol * torch.norm(self.Minv, p="fro")
+        self.Minv += lambda_reg * eye_k
 
     def B(self, v: torch.Tensor) -> torch.Tensor:
         """
@@ -119,8 +119,8 @@ class LSR1:
         # Solve  M x = Ψᵀ v   without forming M
         #       (M⁻¹ already stored)  =>  x = (M⁻¹)⁻¹ Ψᵀ v
         rhs = self.Psi.transpose(0, 1) @ v  # (k,)
-        # x = (M_inv)⁻¹ rhs   ==>   solve instead of inverse
-        x = torch.linalg.solve(self.M_inv, rhs)  # (k,)
+        # x = (Minv)⁻¹ rhs   ==>   solve instead of inverse
+        x = torch.linalg.solve(self.Minv, rhs)  # (k,)
         return self.gamma * v + self.Psi @ x  # (n,)
 
     # convenience accessors -------------------------------------------------
