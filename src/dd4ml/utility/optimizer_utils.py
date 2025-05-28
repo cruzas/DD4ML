@@ -44,6 +44,7 @@ def get_lssr1_trust_region_params(config):
         "nu_3": 0.8,
         "nu_4": 2.0,
         "tol": config.tol,
+        "norm_type": config.norm_type,
     }
 
 

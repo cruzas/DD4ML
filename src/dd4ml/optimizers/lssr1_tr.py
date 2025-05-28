@@ -52,6 +52,7 @@ class LSSR1_TR(Optimizer):
         nu_3: float = 0.8,
         nu_4: float = 2.0,
         tol: float = 1e-8,
+        norm_type: int = 2,  # norm type for gradient and step length
     ):
         # (range checks unchanged …)
 
@@ -74,6 +75,7 @@ class LSSR1_TR(Optimizer):
             nu_2=nu_2,
             nu_3=nu_3,
             nu_4=nu_4,
+            norm_type=norm_type,
         )
         super().__init__(param_list, defaults)
 
@@ -95,6 +97,33 @@ class LSSR1_TR(Optimizer):
         self.state["wk"] = None
         self.state["prev_grad"] = None
         self.state["vk"] = torch.zeros(1)
+
+    # ---------------- sub-problem solvers ----------------------------- #
+    def _solve_tr_first_order(
+        self, g: torch.Tensor, delta: float
+    ) -> Tuple[torch.Tensor, float]:
+        g_norm = torch.norm(g, p=self.defaults["norm_type"])
+        if g_norm == 0:
+            return torch.zeros_like(g), 0.0
+        step = -g * (delta / g_norm)
+        predicted = delta * g_norm  # since B ≈ I
+        return step, float(predicted)
+
+    def _solve_tr_second_order(
+        self, g: torch.Tensor, delta: float
+    ) -> Tuple[torch.Tensor, float]:
+        self.hess.precompute()  # type: ignore
+        step = -self.obs.solve_tr_subproblem(  # type: ignore
+            g,
+            torch.tensor(delta, device=g.device, dtype=g.dtype),
+            self.hess.gamma,
+            self.hess.Psi,
+            self.hess.Minv,  # type: ignore
+        )
+        g_dot_p = torch.dot(g, step)
+        p_B_p = torch.dot(step, self.hess.B(step))  # type: ignore
+        predicted = -(g_dot_p + 0.5 * p_B_p)
+        return step, float(predicted)
 
     # ------------------------------------------------------------------ #
     # Main optimisation step                                             #
@@ -120,16 +149,15 @@ class LSSR1_TR(Optimizer):
         if st["prev_grad"] is not None:
             self.hess.update_memory(wk - st["wk"], g - st["prev_grad"])
         st["wk"], st["prev_grad"] = wk.clone(), g.clone()
-        self.hess.precompute()
 
         # -- trust-region sub-problem -----------------------------------
-        p_star = self.obs.solve_tr_subproblem(
-            g,
-            delta=self.defaults["delta"],
-            gamma=self.hess.gamma,
-            Psi=self.hess.Psi,
-            Minv=self.hess.Minv,
+        solve = (
+            self._solve_tr_second_order
+            if len(self.hess._S) > 0  # type: ignore[attr-defined]
+            else self._solve_tr_first_order
         )
+
+        p_star, pred = solve(g, self.defaults["delta"])
 
         # -- momentum grafting ------------------------------------------
         vk = st["vk"] * self.defaults["mu"] + (wk - st["wk"])
@@ -161,10 +189,8 @@ class LSSR1_TR(Optimizer):
         # -- trust-region radius update ---------------------------------
         delta_old = self.defaults["delta"]
         rho = 0.0
-        if alpha > 0:
-            pred = g.dot(p_alpha)
-            if pred < 0:
-                rho = (new_loss - orig_loss) / pred
+        if alpha > 0 and pred < 0:
+            rho = (new_loss - orig_loss) / pred
 
         s_norm = p_alpha.norm()
         if rho < self.defaults["tau_2"]:
