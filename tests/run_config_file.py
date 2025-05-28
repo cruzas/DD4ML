@@ -77,7 +77,7 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset_name", type=str, default="mnist", help="Dataset name"
     )
-    parser.add_argument("--overlap", type=float, default=0.1, help="Overlap factor")
+    parser.add_argument("--overlap", type=float, default=0.01, help="Overlap factor")
     parser.add_argument(
         "--model_name", type=str, default="simple_resnet", help="Model name"
     )
@@ -227,7 +227,7 @@ def main(
 
         dprint(
             f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, "
-            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, Learning Rate: {lr:.5f}"
+            f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, Learning Rate: {lr:.6e}"
         )
         if rank == 0 and use_wandb:
             log_fn(

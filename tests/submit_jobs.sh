@@ -6,8 +6,8 @@ script="run_config_file.py" # Python script to run
 
 # --- General parameter settings ---#
 optimizer="apts_d"
-dataset="mnist"
-batch_sizes=(10000)
+dataset="cifar10"
+batch_sizes=(1000)
 model="simple_cnn"
 criterion="cross_entropy"
 epochs=10

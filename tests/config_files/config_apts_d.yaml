@@ -36,7 +36,7 @@ parameters:
   epochs: 
     value: 10
   max_iters:
-    value: 20
+    value: 3
   learning_rate: 
     value: 0.1
   dataset_name: 

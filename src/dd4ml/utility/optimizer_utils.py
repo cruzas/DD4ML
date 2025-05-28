@@ -26,8 +26,8 @@ def get_trust_region_params(config):
         "max_lr": 2.0,
         "min_lr": 1e-6,
         "nu": 0.5,
-        "inc_factor": 2.0,
-        "dec_factor": 0.5,
+        "inc_factor": 1.2,
+        "dec_factor": 0.9,
         "nu_dec": 0.25,
         "nu_inc": 0.75,
         "max_iter": config.max_global_iters,
@@ -48,9 +48,9 @@ def get_local_trust_region_params(config):
         "nu": (
             0.45 if norm_type != math.inf else 0.5
         ),  # Adjusted to be more conservative locally
-        "inc_factor": 1.5 if norm_type != math.inf else 2.0,  # Reduced increase factor
+        "inc_factor": 1.5 if norm_type != math.inf else 1.2,  # Reduced increase factor
         "dec_factor": (
-            0.6 if norm_type != math.inf else 0.5
+            0.6 if norm_type != math.inf else 0.9
         ),  # Slightly more aggressive reduction
         "nu_dec": 0.3 if norm_type != math.inf else 0.25,
         "nu_inc": 0.7 if norm_type != math.inf else 0.75,
