@@ -1,17 +1,23 @@
 """lssr1.py - Limited-Memory Stochastic SR1 Trust-Region Optimiser
-----------------------------------------------------------------
-Full implementation of **LSSR1_TR** that delegates
+------------------------------------------------------------------
+ASCII-only implementation of **LSSR1_TR** that delegates
+
 * Hessian modelling to   ``hessian_approx.LSR1``
 * SR1 trust-region solves to ``obs.OBS``
 
-It now follows the radius-update rule of Algorithm 3 in the paper, with
-parameters  (τ₁, τ₂, τ₃) and (ν₁, ν₂, ν₃, ν₄).
+It follows the radius-update rule of Algorithm 3 in the paper and now
+includes two explicit stopping criteria:
+
+1. Optimisation is declared converged when ``||g_k|| <= tol``.
+2. The ``step`` method returns the tuple ``(loss, grad_norm)``, where
+   ``grad_norm`` is the Euclidean norm of the gradient *at the parameters*
+   that are finally accepted (original or updated).
 """
 
 from __future__ import annotations
 
 import math
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Callable, Iterable, Tuple
 
 import torch
 from hessian_approx import LSR1
@@ -44,45 +50,30 @@ def _set_param_vector(params: Iterable[Tensor], vec: Tensor) -> None:
 
 
 # -----------------------------------------------------------------------------
-# PyTorch optimiser implementing Algorithm 3 (L-SSR1-TR)
+# PyTorch optimizer implementing Algorithm 3 (L-SSR1-TR)
 # -----------------------------------------------------------------------------
 
 
 class LSSR1_TR(Optimizer):
-    r"""Limited-Memory **Stochastic SR1** Trust-Region optimiser.
+    r"""Limited-Memory **Stochastic SR1** Trust-Region optimizer.
 
-    The trust-region radius δ is updated exactly as prescribed by
-    Algorithm 3 (lines 15-23) with user-exposed parameters::
+    The trust-region radius ``delta`` is updated exactly as in Algorithm 3
+    with user-exposed parameters::
 
-        0 ≤ τ₁ < τ₂ < 0.5 < τ₃ < 1
-        0 < ν₁ < ν₂ ≤ 0.5 < ν₃ < 1 < ν₄.
+        0 <= tau_1 < tau_2 < 0.5 < tau_3 < 1
+        0 <  nu_1 < nu_2 <= 0.5 < nu_3 < 1 < nu_4
 
-    Parameters
-    ----------
-    params : iterable of *torch.Tensor*
-        Model parameters.
-    lr_init : float, default 1.0
-        Initial step length for the Wolfe line search.
-    delta_init : float, default 1.0
-        Initial trust-region radius δ₀.
-    gamma_init : float, default 1e-3
-        Scaling of the initial Hessian approximation B₀ = gamma * I.
-    memory : int, default 10
-        Number of (s, y) pairs kept in limited memory.
-    mu : float, default 0.9
-        Momentum parameter.
-    overlap : float, default 0.33
-        Required mini-batch overlap fraction.
-    tol_grad : float, default 1e-8
-        Gradient-norm termination tolerance.
+    Convergence is declared when the Euclidean norm of the full gradient
+    is below ``tol``.
 
-    Radius-update hyper-parameters
-    ------------------------------
-    tau_1, tau_2, tau_3 : float
-        Acceptance thresholds (see paper).  Defaults (0.1, 0.25, 0.75).
-    nu_1 … nu_4 : float
-        Contraction / expansion factors.  Defaults (0.25, 0.5, 0.8, 2.0).
+    The :meth:`step` routine returns ``(loss, grad_norm)`` where
+    ``grad_norm`` corresponds to the parameters that are actually retained
+    (i.e., after the line-search decision).
     """
+
+    # ------------------------------------------------------------------
+    # Constructor
+    # ------------------------------------------------------------------
 
     def __init__(
         self,
@@ -94,7 +85,7 @@ class LSSR1_TR(Optimizer):
         memory: int = 10,
         mu: float = 0.9,
         overlap: float = 0.33,
-        tol_grad: float = 1e-8,
+        tol: float = 1e-8,
         tau_1: float = 0.1,
         tau_2: float = 0.25,
         tau_3: float = 0.75,
@@ -104,10 +95,12 @@ class LSSR1_TR(Optimizer):
         nu_4: float = 2.0,
     ):
         if not (0.0 <= tau_1 < tau_2 < 0.5 < tau_3 < 1.0):
-            raise ValueError("Tau parameters must satisfy 0 ≤ τ₁ < τ₂ < 0.5 < τ₃ < 1.")
+            raise ValueError(
+                "tau parameters must satisfy 0 <= tau_1 < tau_2 < 0.5 < tau_3 < 1."
+            )
         if not (0.0 < nu_1 < nu_2 <= 0.5 < nu_3 < 1.0 < nu_4):
             raise ValueError(
-                "Nu parameters must satisfy 0 < ν₁ < ν₂ ≤ 0.5 < ν₃ < 1 < ν₄."
+                "nu parameters must satisfy 0 < nu_1 < nu_2 <= 0.5 < nu_3 < 1 < nu_4."
             )
 
         defaults = dict(
@@ -117,7 +110,7 @@ class LSSR1_TR(Optimizer):
             memory=memory,
             mu=mu,
             overlap=overlap,
-            tol_grad=tol_grad,
+            tol=tol,
             tau_1=tau_1,
             tau_2=tau_2,
             tau_3=tau_3,
@@ -148,16 +141,27 @@ class LSSR1_TR(Optimizer):
     # ------------------------------------------------------------------
 
     @torch.no_grad()
-    def step(self, closure: Callable[[], Tensor]):
-        """Perform one optimisation step and return the loss."""
-        loss = closure()  # forward & backward - gradients populated
+    def step(self, closure: Callable[[], Tensor]) -> Tuple[Tensor, float]:
+        """Perform one optimisation step.
 
+        Returns
+        -------
+        (loss, grad_norm)
+            * loss - objective value before any parameter update
+            * grad_norm - ||∇f||₂ at the parameters finally accepted
+        """
+        # -- evaluate loss and gradient at current parameters ------------
+        loss = closure()  # forward & backward pass
         params = self.param_groups[0]["params"]
-        g = _concat_grads(params)
-        if g.norm() <= self.defaults["tol_grad"]:
-            return loss  # converged
 
-        # Current point ----------------------------------------------------
+        g = _concat_grads(params)
+        g_norm = float(g.norm())
+
+        # -- convergence test --------------------------------------------
+        if g_norm <= self.defaults["tol"]:
+            return loss, g_norm
+
+        # -- current point bookkeeping -----------------------------------
         wk = _concat_params(params)
         st = self.state
         if st["wk"] is None:
@@ -165,9 +169,9 @@ class LSSR1_TR(Optimizer):
         if st["vk"].numel() != wk.numel():
             st["vk"] = torch.zeros_like(wk)
 
-        # ------------------------------------------------------------------
+        # ----------------------------------------------------------------
         # 1. Update limited-memory pairs
-        # ------------------------------------------------------------------
+        # ----------------------------------------------------------------
         if st["prev_grad"] is not None:
             s_vec = wk - st["wk"]
             y_vec = g - st["prev_grad"]
@@ -175,9 +179,9 @@ class LSSR1_TR(Optimizer):
         st["wk"], st["prev_grad"] = wk.clone(), g.clone()
         self.hess.precompute()
 
-        # ------------------------------------------------------------------
+        # ----------------------------------------------------------------
         # 2. Solve trust-region sub-problem via OBS
-        # ------------------------------------------------------------------
+        # ----------------------------------------------------------------
         p_star = self.obs.solve_tr_subproblem(
             g,
             delta=self.defaults["delta"],
@@ -186,10 +190,11 @@ class LSSR1_TR(Optimizer):
             Minv=self.hess.M_inv,
         )
 
-        # ------------------------------------------------------------------
+        # ----------------------------------------------------------------
         # 3. Momentum grafting (Eq. 17)
-        # ------------------------------------------------------------------
-        vk = st["vk"] * self.defaults["mu"] + (wk - st["wk"])  # previous step
+        # ----------------------------------------------------------------
+        vk_prev = st["vk"]
+        vk = vk_prev * self.defaults["mu"] + (wk - st["wk"])  # previous step
         if vk.norm() > 0:
             vk = self.defaults["mu"] * min(1.0, self.defaults["delta"] / vk.norm()) * vk
         p_comb = p_star + vk
@@ -197,40 +202,42 @@ class LSSR1_TR(Optimizer):
             p_comb = min(1.0, self.defaults["delta"] / p_comb.norm()) * p_comb
         st["vk"] = vk.clone()
 
-        # ------------------------------------------------------------------
-        # 4. Wolfe back-tracking line-search along *p_comb*
-        # ------------------------------------------------------------------
+        # ----------------------------------------------------------------
+        # 4. Wolfe back-tracking line-search along p_comb
+        # ----------------------------------------------------------------
         alpha = self.defaults["lr_init"]
-        c1, c2 = 1e-4, 0.9
+        c1 = 1e-4
         orig_loss = loss.item()
         grad_dot_dir = g.dot(p_comb)
+
         for _ in range(10):
             _set_param_vector(params, wk + alpha * p_comb)
-            new_loss = closure().item()
-            if new_loss <= orig_loss + c1 * alpha * grad_dot_dir:
-                break  # Armijo satisfied - curvature check omitted for speed
+            new_loss = closure().item()  # new gradients
+            if new_loss <= orig_loss + c1 * alpha * grad_dot_dir:  # Armijo
+                break
             alpha *= 0.5
         else:
-            alpha = 0.0  # fallback - reject step
+            alpha = 0.0  # reject step
             _set_param_vector(params, wk)
 
-        p_alpha = alpha * p_comb  # accepted step (may be zero)
+        p_alpha = alpha * p_comb  # accepted step
 
-        # ------------------------------------------------------------------
+        # ----------------------------------------------------------------
         # 5. Trust-region radius update (Algorithm 3)
-        # ------------------------------------------------------------------
+        # ----------------------------------------------------------------
         delta_old = self.defaults["delta"]
         rho = 0.0
-        if alpha > 0:  # predicted reduction (quadratic model)
-            # approximate predicted reduction using linear term only - cheap
-            pred = g.dot(p_alpha)
+        if alpha > 0:  # predicted reduction
+            pred = g.dot(p_alpha)  # linear term
             if pred < 0:
                 rho = (new_loss - orig_loss) / pred
+
         s_norm = p_alpha.norm()
 
         if rho < self.defaults["tau_2"]:
             delta_new = min(
-                self.defaults["nu_1"] * delta_old, self.defaults["nu_2"] * (s_norm**2)
+                self.defaults["nu_1"] * delta_old,
+                self.defaults["nu_2"] * (s_norm**2),
             )
         else:
             if (
@@ -242,5 +249,12 @@ class LSSR1_TR(Optimizer):
                 delta_new = delta_old
         self.defaults["delta"] = max(delta_new, 1e-12)
 
-        # Parameters already updated during line-search --------------------
-        return loss
+        # ----------------------------------------------------------------
+        # 6. Gradient-norm selection for return value
+        # ----------------------------------------------------------------
+        if alpha == 0.0:
+            grad_norm = g_norm  # kept old point
+        else:
+            grad_norm = float(_concat_grads(params).norm())  # accepted new point
+
+        return loss, grad_norm

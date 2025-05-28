@@ -1,14 +1,6 @@
-"""trust_region_second_order.py
---------------------------------
-Second-order (OBS + limited-memory SR1) **or** first-order (gradient-only)
-trust-region optimiser for PyTorch.  The behaviour is controlled by a single
-boolean flag `second_order` passed at construction time.
-"""
-
 from __future__ import annotations
 
-import math
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import torch
 from torch.optim import Optimizer
@@ -17,53 +9,32 @@ from dd4ml.optimizers.hessian_approx import LSR1
 from dd4ml.solvers.obs import OBS
 from dd4ml.utility import get_trust_region_params
 
-__all__ = ["TR"]
+
+# --------------------------------------------------------------------- #
+# helpers                                                               #
+# --------------------------------------------------------------------- #
+def _flat_grad(params) -> torch.Tensor:
+    """Return concatenated, detached gradients of *params*."""
+    gs: List[torch.Tensor] = [
+        p.grad.detach().flatten() for p in params if p.grad is not None
+    ]
+    return torch.cat(gs) if gs else torch.zeros(0, dtype=torch.float32)
 
 
-def _flat_grad(model) -> torch.Tensor:
-    """Return the concatenated gradients of all parameters."""
-    grads: List[torch.Tensor] = []
-    for p in model.parameters():
-        if p.grad is not None:
-            grads.append(p.grad.detach().flatten())
-    return torch.cat(grads) if grads else torch.zeros(0, dtype=torch.float32)
-
-
-def _flat_params(model) -> torch.Tensor:
-    """Return parameters flattened into a single tensor (no gradients)."""
-    return torch.cat([p.detach().flatten() for p in model.parameters()])
-
-
+# --------------------------------------------------------------------- #
+# optimizer                                                             #
+# --------------------------------------------------------------------- #
 class TR(Optimizer):
-    """Limited-memory SR1 / OBS trust-region optimiser.
-
-    Parameters
-    ----------
-    model          : nn.Module   - model whose parameters are optimised.
-    second_order   : bool        - if *False* the optimiser falls back to a
-                                   first-order Cauchy step inside the
-                                   trust-region; if *True* it uses OBS with an
-                                   SR1 Hessian approximation.
-    Remaining arguments are identical to the previous version and documented in
-    the docstring below.
-    """
-
-    # ---------------------------------------------------------------------
-    # Static helpers
-    # ---------------------------------------------------------------------
     @staticmethod
-    def setup_TR_args(config):
-        params = get_trust_region_params(config)
-        for k, v in params.items():
-            setattr(config, k, v)
-        return config
+    def setup_TR_args(cfg):
+        for k, v in get_trust_region_params(cfg).items():
+            setattr(cfg, k, v)
+        return cfg
 
-    # ------------------------------------------------------------------
-    # Initialisation
-    # ------------------------------------------------------------------
+    # -------------- constructor -------------------------------------- #
     def __init__(
         self,
-        model,
+        params: Iterable[torch.nn.Parameter],
         lr: float = 0.01,
         max_lr: float = 1.0,
         min_lr: float = 1e-4,
@@ -77,12 +48,13 @@ class TR(Optimizer):
         norm_type: int = 2,
         *,
         second_order: bool = True,
+        tol: float = 1e-6,
     ) -> None:
-        super().__init__(model.parameters(), {"lr": lr})
-        self.model = model
-        self.param_list = list(model.parameters())
+        super().__init__(params, {"lr": lr})
 
-        # trust‑region radii / factors
+        self.ps = [p for g in self.param_groups for p in g["params"]]
+
+        # trust-region radii / factors
         self.lr = float(lr)
         self.max_lr = float(max_lr)
         self.min_lr = float(min_lr)
@@ -90,137 +62,102 @@ class TR(Optimizer):
         self.dec_factor = float(dec_factor)
         self.nu_dec = float(nu_dec)
         self.nu_inc = float(nu_inc)
-        self.nu = min(nu, nu_dec)
+        self.nu = min(nu, self.nu_dec)
         self.norm_type = norm_type
-
-        # memory size for (s,y) pairs
         self.max_iter = int(max_iter)
-        self.mem_length = int(mem_length) if mem_length is not None else 5
+        self.tol = float(tol)
 
-        # first‑ vs second‑order toggle
+        # second-order helpers
         self.second_order = bool(second_order)
-
-        # ------------------------------------------------------------------
-        # Second‑order helpers (allocated only if needed)
-        # ------------------------------------------------------------------
         if self.second_order:
-            device = next(model.parameters()).device
+            dev = self.ps[0].device
             self.hess = LSR1(
-                gamma=1.0, memory_length=mem_length, device=device, tol=1e-10
+                gamma=1.0,
+                memory_length=int(mem_length or 5),
+                device=dev,
+                tol=1e-10,
             )
             self.obs = OBS()
         else:
             self.hess = None  # type: ignore
             self.obs = None  # type: ignore
 
-        # Persistent state
-        self.state["prev_loss"]: Optional[float] = None
-        self.state["prev_grad"]: Optional[torch.Tensor] = None
-        self.state["prev_params"]: Optional[torch.Tensor] = None
-        self.state["initialized"] = False
-
-    # ------------------------------------------------------------------
-    # Internal utilities
-    # ------------------------------------------------------------------
+    # -------------- utilities ---------------------------------------- #
     def _apply_update(self, step: torch.Tensor) -> None:
-        """Add the flattened *step* vector to the model parameters."""
+        """Add flattened *step* to parameters (no grad tracking)."""
         offset = 0
-        for p in self.param_list:
-            num = p.numel()
-            p.data.add_(step[offset : offset + num].view_as(p.data))
-            offset += num
+        with torch.no_grad():
+            for p in self.ps:
+                num = p.numel()
+                p.add_(step[offset : offset + num].view_as(p))
+                offset += num
 
-    # ------------------------- sub‑problem solvers -----------------------
+    # -------------- sub-problem solvers ------------------------------ #
     def _solve_tr_first_order(
         self, g: torch.Tensor, delta: float
     ) -> Tuple[torch.Tensor, float]:
-        """Cauchy step inside the trust region (gradient only)."""
         g_norm = torch.norm(g, p=self.norm_type)
         if g_norm == 0:
             return torch.zeros_like(g), 0.0
         step = -g * (delta / g_norm)
-        predicted = delta * g_norm  # |g|*delta, since B ≈ I and step = −ĝ·δ
+        predicted = delta * g_norm  # since B ≈ I
         return step, float(predicted)
 
     def _solve_tr_second_order(
         self, g: torch.Tensor, delta: float
     ) -> Tuple[torch.Tensor, float]:
-        """OBS closed‑form solution using the current SR1 approximation."""
-        # build Ψ, M⁻¹, γ
-        self.hess.precompute()
-        # OBS returns *minus* the step; we keep the sign convention consistent
-        p_star = -self.obs.solve_tr_subproblem(
+        # Build Psi, M_inv, gamma for SR1
+        self.hess.precompute()  # type: ignore
+        step = -self.obs.solve_tr_subproblem(  # type: ignore
             g,
             torch.tensor(delta, device=g.device, dtype=g.dtype),
             self.hess.gamma,
             self.hess.Psi,
-            self.hess.M_inv,
+            self.hess.M_inv,  # type: ignore
         )
-        # model reduction  m(p) = gᵀp + 0.5 pᵀBp
-        gTp = torch.dot(g, p_star)
-        pTBp = torch.dot(p_star, self.hess.B(p_star))
-        predicted = -(gTp + 0.5 * pTBp)
-        return p_star, float(predicted)
+        g_dot_p = torch.dot(g, step)
+        p_B_p = torch.dot(step, self.hess.B(step))  # type: ignore
+        predicted = -(g_dot_p + 0.5 * p_B_p)
+        return step, float(predicted)
 
-    # ------------------------------------------------------------------
-    # Main optimisation step
-    # ------------------------------------------------------------------
-    def step(self, closure, **_) -> float:
-        """Perform up to `max_iter` trust-region iterations."""
-        for self.local_iter in range(self.max_iter):
-            # 1. evaluate objective and gradient at x_k
-            loss_tensor = closure(compute_grad=True)
-            loss_val = (
-                float(loss_tensor)
-                if isinstance(loss_tensor, (float, int))
-                else float(loss_tensor.item())
-            )
-            grad = _flat_grad(self.model)
-            if grad.numel() == 0:
-                return loss_val
+    # -------------------------- main loop ----------------------------- #
+    def step(self, closure, **_) -> Tuple[float, float]:
+        """Execute one trust-region update.
+        Returns (loss_value, ‖accepted_gradient‖)."""
+        # current objective and gradient
+        loss_val = float(closure(compute_grad=True))
+        grad = _flat_grad(self.ps)
 
-            if not self.state["initialized"]:
-                self.state.update(
-                    {
-                        "prev_loss": loss_val,
-                        "prev_grad": grad.clone(),
-                        "prev_params": _flat_params(self.model),
-                        "initialized": True,
-                    }
-                )
+        # convergence check
+        if torch.norm(grad, p=self.norm_type) <= self.tol:
+            return loss_val, float(torch.norm(grad, p=self.norm_type))
 
-            # 2. solve TR sub-problem
-            if self.second_order and len(self.hess._S) > 0:
-                step_vec, pred_red = self._solve_tr_second_order(grad, self.lr)
-            elif self.second_order:
-                step_vec, pred_red = self._solve_tr_first_order(grad, self.lr)
-            else:
-                step_vec, pred_red = self._solve_tr_first_order(grad, self.lr)
+        # select sub-problem solver
+        solve = (
+            self._solve_tr_second_order
+            if self.second_order and len(self.hess._S) > 0  # type: ignore[attr-defined]
+            else self._solve_tr_first_order
+        )
+        step, predicted = solve(grad, self.lr)
 
-            # 3. candidate step
-            self._apply_update(step_vec)
-            new_loss_tensor = closure(compute_grad=True)
-            new_loss_val = (
-                float(new_loss_tensor)
-                if isinstance(new_loss_tensor, (float, int))
-                else float(new_loss_tensor.item())
-            )
+        # trial step
+        self._apply_update(step)
+        new_loss = float(closure(compute_grad=True))
+        new_grad = _flat_grad(self.ps)
 
-            act_red = self.state["prev_loss"] - new_loss_val
-            rho = act_red / (pred_red + 1e-12)
+        # acceptance test
+        actual = loss_val - new_loss
+        rho = actual / (predicted + 1e-12)
 
-            if act_red > 0 and rho >= self.nu_dec:
-                if rho >= self.nu_inc and torch.norm(step_vec) >= 0.9 * self.lr:
-                    self.lr = min(self.max_lr, self.inc_factor * self.lr)
-                if self.second_order:
-                    y = _flat_grad(self.model) - grad
-                    self.hess.update_memory(step_vec.clone(), y.clone())
-                self.state["prev_loss"] = new_loss_val
-                self.state["prev_grad"] = _flat_grad(self.model).clone()
-                self.state["prev_params"] = _flat_params(self.model)
-                return new_loss_val
-            else:
-                self._apply_update(-step_vec)
-                self.lr = max(self.min_lr, self.dec_factor * self.lr)
+        if actual > 0 and rho >= self.nu_dec:  # accepted
+            if rho >= self.nu_inc and torch.norm(step) >= 0.9 * self.lr:
+                self.lr = min(self.max_lr, self.inc_factor * self.lr)
+            if self.second_order:
+                self.hess.update_memory(step.clone(), (new_grad - grad).clone())  # type: ignore
+            loss_val, g_norm = new_loss, torch.norm(new_grad, p=self.norm_type)
+        else:  # rejected
+            self._apply_update(-step)  # rollback
+            self.lr = max(self.min_lr, self.dec_factor * self.lr)
+            g_norm = torch.norm(grad, p=self.norm_type)
 
-        return self.state["prev_loss"]
+        return loss_val, float(g_norm)
