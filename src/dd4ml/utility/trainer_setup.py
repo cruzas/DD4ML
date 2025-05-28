@@ -161,7 +161,7 @@ def get_config_model_and_trainer(args, wandb_config):
             global_optimizer=all_config.trainer.global_optimizer,
             global_optimizer_defaults=all_config.trainer.global_optimizer_args,
             lr=all_config.trainer.learning_rate,
-            max_subdomain_iter=all_config.trainer.max_subdomain_iters,
+            max_local_iters=all_config.trainer.max_local_iters,
             dogleg=False,
             APTS_in_data_sync_strategy="average",
             step_strategy="mean",
@@ -194,6 +194,8 @@ def get_config_model_and_trainer(args, wandb_config):
             foc=all_config.trainer.foc,
             correct_step=all_config.trainer.correct_step,
             norm_type=all_config.trainer.norm_type,
+            max_local_iters=all_config.trainer.max_local_iters,
+            max_global_iters=all_config.trainer.max_global_iters,
         )
     elif optimizer_name == "apts_p":
         from dd4ml.optimizers.apts_p import APTS_P

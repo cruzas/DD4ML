@@ -47,14 +47,14 @@ class APTS_IP(torch.optim.Optimizer):
         global_optimizer,
         global_optimizer_defaults,
         lr=0.01,
-        max_subdomain_iter=0,
+        max_local_iters=0,
         dogleg=False,
         APTS_in_data_sync_strategy="average",
         step_strategy="mean",
     ):
         super().__init__(
             model.parameters(),
-            {"lr": lr, "max_subdomain_iter": max_subdomain_iter, "dogleg": dogleg},
+            {"lr": lr, "max_local_iters": max_local_iters, "dogleg": dogleg},
         )
         # Synchronize non-parameter attributes from the first param group.
         self._sync_attributes_from_param_group()
@@ -139,13 +139,13 @@ class APTS_IP(torch.optim.Optimizer):
         return table_str
 
     def subdomain_steps(self, final_subdomain_closure=None):
-        if self.max_subdomain_iter > 0:
-            # lr_subdomain = self.lr / self.max_subdomain_iter
+        if self.max_local_iters > 0:
+            # lr_subdomain = self.lr / self.max_local_iters
             # self.subdomain_optimizer.param_groups[0]['lr'] = lr_subdomain
-            for i in range(self.max_subdomain_iter):
+            for i in range(self.max_local_iters):
                 self.subdomain_optimizer.step()
                 self.subdomain_optimizer.zero_grad()
-                if i != self.max_subdomain_iter - 1:
+                if i != self.max_local_iters - 1:
                     outputs = self.model.subdomain_forward()
                     losses = (
                         final_subdomain_closure(outputs)

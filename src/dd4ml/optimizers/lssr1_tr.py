@@ -82,10 +82,8 @@ class LSSR1_TR(Optimizer):
         lr_init: float = 1.0,
         delta_init: float = 1.0,
         gamma_init: float = 1e-3,
-        memory: int = 10,
+        mem_length: int = 10,
         mu: float = 0.9,
-        overlap: float = 0.33,
-        tol: float = 1e-8,
         tau_1: float = 0.1,
         tau_2: float = 0.25,
         tau_3: float = 0.75,
@@ -93,6 +91,7 @@ class LSSR1_TR(Optimizer):
         nu_2: float = 0.5,
         nu_3: float = 0.8,
         nu_4: float = 2.0,
+        tol: float = 1e-8,
     ):
         if not (0.0 <= tau_1 < tau_2 < 0.5 < tau_3 < 1.0):
             raise ValueError(
@@ -107,9 +106,8 @@ class LSSR1_TR(Optimizer):
             lr_init=lr_init,
             delta=delta_init,
             gamma=gamma_init,
-            memory=memory,
+            mem_length=mem_length,
             mu=mu,
-            overlap=overlap,
             tol=tol,
             tau_1=tau_1,
             tau_2=tau_2,
@@ -125,7 +123,7 @@ class LSSR1_TR(Optimizer):
         self.obs = OBS()
         self.hess = LSR1(
             gamma=gamma_init,
-            memory_length=memory,
+            memory_length=mem_length,
             device=params[0].device,
             dtype=params[0].dtype,
         )
@@ -140,8 +138,7 @@ class LSSR1_TR(Optimizer):
     # Main optimisation step
     # ------------------------------------------------------------------
 
-    @torch.no_grad()
-    def step(self, closure: Callable[[], Tensor]) -> Tuple[Tensor, float]:
+    def step(self, closure: Callable[[], Tensor], **_) -> Tuple[Tensor, float]:
         """Perform one optimisation step.
 
         Returns
@@ -151,15 +148,21 @@ class LSSR1_TR(Optimizer):
             * grad_norm - ||∇f||₂ at the parameters finally accepted
         """
         # -- evaluate loss and gradient at current parameters ------------
-        loss = closure()  # forward & backward pass
         params = self.param_groups[0]["params"]
 
-        g = _concat_grads(params)
-        g_norm = float(g.norm())
+        if "precomp_loss" in _:
+            loss = float(_["precomp_loss"])
+        else:
+            loss = closure()  # forward & backward pass
+        if "precomp_grad" in _
+            g = _["precomp_grad"]
+        else:
+            g = _concat_grads(params)
 
+        g_norm = float(g.norm())
         # -- convergence test --------------------------------------------
         if g_norm <= self.defaults["tol"]:
-            return loss, g_norm
+            return loss, g
 
         # -- current point bookkeeping -----------------------------------
         wk = _concat_params(params)
@@ -210,7 +213,7 @@ class LSSR1_TR(Optimizer):
         orig_loss = loss.item()
         grad_dot_dir = g.dot(p_comb)
 
-        for _ in range(10):
+        for wls in range(10):
             _set_param_vector(params, wk + alpha * p_comb)
             new_loss = closure().item()  # new gradients
             if new_loss <= orig_loss + c1 * alpha * grad_dot_dir:  # Armijo
@@ -257,4 +260,4 @@ class LSSR1_TR(Optimizer):
         else:
             grad_norm = float(_concat_grads(params).norm())  # accepted new point
 
-        return loss, grad_norm
+        return loss, g

@@ -35,7 +35,7 @@ class Trainer:
         # dataloder parameters
         C.num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
         # optimizer parameters
-        C.max_iters = 1000
+        C.max_iters = 1000  # for Transformer networks, this is the number of iterations
         C.batch_size = 128
         C.learning_rate = 5e-4
         C.betas = (0.9, 0.999)  # for Adam
@@ -48,16 +48,14 @@ class Trainer:
         C.data_parallel = False
 
         # For APTS_D
-        C.correct_step = False  # for APTS_D
         C.norm_type = 2  # for APTS_D (and possibly APTS)
-        C.ema = True  # for APTS_D
         C.global_pass = False
         C.foc = False
         C.dogleg = False  # for APTS_D
 
         # For APTS*
         C.max_global_iters = 1  # for APTS*
-        C.max_subdomain_iters = 3  # for APTS*
+        C.max_local_iters = 3  # for APTS*
         C.global_second_order = False  # for APTS*
         C.local_second_order = False  # for APTS*
         C.subdomain_optimizer = None

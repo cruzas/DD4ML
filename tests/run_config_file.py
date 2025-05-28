@@ -36,7 +36,9 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--optimizer", type=str, default="apts_d", help="Optimizer name"
     )
-
+    parser.add_argument(
+        "--tol", type=float, default=1e-6, help="Tolerance for convergence"
+    )
     # Preliminary parse to determine defaults based on optimizer
     temp_args, _ = parser.parse_known_args()
     default_use_pmw = temp_args.optimizer == "apts_ip"
@@ -134,7 +136,7 @@ def parse_cmd_args() -> argparse.Namespace:
             "--subdomain_optimizer", type=str, default="sgd", help="Subdomain optimizer"
         )
         parser.add_argument(
-            "--max_subdomain_iters",
+            "--max_local_iters",
             type=int,
             default=3,
             help="Max iterations for subdomain optimizer",

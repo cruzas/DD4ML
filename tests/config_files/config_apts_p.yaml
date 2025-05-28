@@ -29,7 +29,7 @@ parameters:
     value: False
   norm_type:
     value: 2
-  max_subdomain_iters:
+  max_local_iters:
     value: 3
   max_global_iters:
     value: 1

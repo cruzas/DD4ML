@@ -43,7 +43,6 @@ class TR(Optimizer):
         dec_factor: float = 0.5,
         nu_dec: float = 0.25,
         nu_inc: float = 0.75,
-        max_iter: int = 10,
         mem_length: Optional[int] = 5,
         norm_type: int = 2,
         *,
@@ -64,7 +63,6 @@ class TR(Optimizer):
         self.nu_inc = float(nu_inc)
         self.nu = min(nu, self.nu_dec)
         self.norm_type = norm_type
-        self.max_iter = int(max_iter)
         self.tol = float(tol)
 
         # second-order helpers
@@ -121,16 +119,22 @@ class TR(Optimizer):
         return step, float(predicted)
 
     # -------------------------- main loop ----------------------------- #
-    def step(self, closure, **_) -> Tuple[float, float]:
+    def step(self, closure, **_) -> Tuple[float, torch.Tensor]:
         """Execute one trust-region update.
-        Returns (loss_value, ‖accepted_gradient‖)."""
+        Returns (loss_value, accepted_gradient)."""
         # current objective and gradient
-        loss_val = float(closure(compute_grad=True))
-        grad = _flat_grad(self.ps)
+        if "precomp_loss" in _:
+            loss_val = float(_["precomp_loss"])
+        else:
+            loss_val = float(closure(compute_grad=True))
+        if "precomp_grad" in _:
+            grad = _["precomp_grad"]
+        else:
+            grad = _flat_grad(self.ps)
 
         # convergence check
         if torch.norm(grad, p=self.norm_type) <= self.tol:
-            return loss_val, float(torch.norm(grad, p=self.norm_type))
+            return loss_val, grad
 
         # select sub-problem solver
         solve = (
@@ -153,11 +157,11 @@ class TR(Optimizer):
             if rho >= self.nu_inc and torch.norm(step) >= 0.9 * self.lr:
                 self.lr = min(self.max_lr, self.inc_factor * self.lr)
             if self.second_order:
-                self.hess.update_memory(step.clone(), (new_grad - grad).clone())  # type: ignore
-            loss_val, g_norm = new_loss, torch.norm(new_grad, p=self.norm_type)
+                self.hess.update_memory(
+                    step.clone(), (new_grad - grad).clone()
+                )  # type: ignore
+            return new_loss, new_grad
         else:  # rejected
             self._apply_update(-step)  # rollback
             self.lr = max(self.min_lr, self.dec_factor * self.lr)
-            g_norm = torch.norm(grad, p=self.norm_type)
-
-        return loss_val, float(g_norm)
+            return loss_val, grad

@@ -40,7 +40,7 @@ def make_std_config(config):
             "subdomain_optimizer_args",
             "global_optimizer",
             "global_optimizer_args",
-            "max_subdomain_iters",
+            "max_local_iters",
             "max_global_iters",
             "correct_step",
             "norm_type",

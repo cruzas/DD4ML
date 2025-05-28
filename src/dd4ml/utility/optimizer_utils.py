@@ -19,6 +19,25 @@ def get_state_dict(model):
     return model.module.state_dict() if hasattr(model, "module") else model.state_dict()
 
 
+def get_lssr1_trust_region_params(config):
+    lr = config.learning_rate
+    return {
+        "lr_init": lr,
+        "delta_init": 1.0,
+        "gamma_init": 1e-3,
+        "mem_length": 5,
+        "mu": 0.9,
+        "tau_1": 0.1,
+        "tau_2": 0.25,
+        "tau_3": 0.75,
+        "nu_1": 0.25,
+        "nu_2": 0.5,
+        "nu_3": 0.8,
+        "nu_4": 2.0,
+        "tol": config.tol,
+    }
+
+
 def get_trust_region_params(config):
     lr = config.learning_rate
     return {
@@ -30,9 +49,10 @@ def get_trust_region_params(config):
         "dec_factor": 0.9,
         "nu_dec": 0.25,
         "nu_inc": 0.75,
-        "max_iter": config.max_global_iters,
+        "mem_length": 5,
         "norm_type": config.norm_type,
         "second_order": config.global_second_order,
+        "tol": config.tol,
     }
 
 
@@ -54,7 +74,8 @@ def get_local_trust_region_params(config):
         ),  # Slightly more aggressive reduction
         "nu_dec": 0.3 if norm_type != math.inf else 0.25,
         "nu_inc": 0.7 if norm_type != math.inf else 0.75,
-        "max_iter": config.max_subdomain_iters,
+        "mem_length": 5,
         "norm_type": config.norm_type,
         "second_order": config.local_second_order,
+        "tol": config.tol,
     }
