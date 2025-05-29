@@ -16,7 +16,7 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from dd4ml.utility import CfgNode as CN
-from dd4ml.utility import closure
+from dd4ml.utility import closure, dprint
 
 from .dataloaders import GeneralizedDistributedDataLoader, OverlapBatchSampler
 
@@ -205,7 +205,7 @@ class Trainer:
         
         if loss > self.last_loss - cfg.loss_tol:
             new_bs = min(int(math.floor(self.current_batch_size * cfg.batch_inc_factor)), len(self.train_dataset))
-            print(f"Current loss ({loss:.4f}) is greater than previous loss - tolerance ({(self.last_loss-cfg.loss_tol):.4f}). Increasing batch size from {self.current_batch_size} to {new_bs}.")
+            dprint(f"Current loss ({loss:.4f}) is greater than previous loss - tolerance ({(self.last_loss-cfg.loss_tol):.4f}). Increasing batch size from {self.current_batch_size} to {new_bs}.")
             self.current_batch_size = new_bs
         self.last_loss = loss
             
