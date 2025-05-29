@@ -39,6 +39,10 @@ parameters:
     value: 10
   delta: 
     value: 0.1
+  min_delta: 
+    value: 0.001
+  max_delta:
+    value: 2.0
   dataset_name: 
     value: "mnist" 
   model_name: 
@@ -55,3 +59,5 @@ parameters:
     value: 1e-6
   batch_inc_factor:
     value: 2.0
+  mem_length:
+    value: 3

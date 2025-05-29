@@ -22,37 +22,61 @@ def get_state_dict(model):
 def get_apts_params(config):
     return {
         "delta": config.delta,
+        "min_delta": config.min_delta,
         "nu_dec": 0.25,
         "nu_inc": 0.75,
         "inc_factor": 1.2,
         "dec_factor": 0.9,
-        "max_delta": 2.0,
+        "max_delta": config.max_delta,
     }
 
 def get_lssr1_trust_region_params(config):
     return {
         "delta": config.delta,
-        "delta": 1.0,
+        "min_delta": config.min_delta,
+        "max_delta": config.max_delta,
         "gamma": 1e-3,
-        "mem_length": 3,
+        "mem_length": config.mem_length,
         "mu": 0.9,
         "tau_1": 0.1,
         "tau_2": 0.25,
         "tau_3": 0.75,
         "nu_1": 0.25,
         "nu_2": 0.5,
-        "nu_3": 0.8,
-        "nu_4": 2.0,
+        "nu_3": 0.9,
+        "nu_4": 1.2,
         "tol": config.tol,
         "norm_type": config.norm_type,
     }
 
+def get_lssr1_local_trust_region_params(config):
+    world_size = dist.get_world_size() if dist.is_initialized() else 1
+    norm_type = config.norm_type
+    delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
+    delta = config.delta * delta_scale
+    return {
+        "delta": delta,
+        "min_delta": config.min_delta,
+        "max_delta": config.max_delta,  # Lower maximum for local updates
+        "gamma": 1e-3,
+        "mem_length": config.mem_length,
+        "mu": 0.9,
+        "tau_1": 0.1,
+        "tau_2": 0.25,
+        "tau_3": 0.75,
+        "nu_1": 0.25,
+        "nu_2": 0.5,
+        "nu_3": 0.9,
+        "nu_4": 1.2,
+        "tol": config.tol,
+        "norm_type": config.norm_type,
+    }
 
 def get_trust_region_params(config):
     return {
         "delta": config.delta,
-        "max_delta": 2.0,
-        "min_delta": 1e-6,
+        "max_delta": config.max_delta,
+        "min_delta": config.min_delta,
         "nu": 0.5,
         "inc_factor": 1.2,
         "dec_factor": 0.9,
@@ -72,7 +96,7 @@ def get_local_trust_region_params(config):
     delta = config.delta * delta_scale
     return {
         "delta": delta,
-        "max_delta": 2.0,  # Lower maximum for local updates
+        "max_delta": config.max_delta,  # Lower maximum for local updates
         "min_delta": 1e-6,
         "nu": (
             0.45 if norm_type != math.inf else 0.5

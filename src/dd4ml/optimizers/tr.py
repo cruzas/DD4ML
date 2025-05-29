@@ -53,7 +53,7 @@ class TR(Optimizer):
         params: Iterable[torch.nn.Parameter],
         delta: float = 0.01,
         max_delta: float = 1.0,
-        min_delta: float = 1e-4,
+        min_delta: float = 1e-3,
         nu: float = 0.5,
         inc_factor: float = 2.0,
         dec_factor: float = 0.5,

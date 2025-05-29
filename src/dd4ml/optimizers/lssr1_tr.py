@@ -39,8 +39,10 @@ class LSSR1_TR(Optimizer):
         self,
         params,
         *,
-        lr: float = 0.1,  # current line-search step length (α)
+        lr: float = 1.0,  # current line-search step length (α)
         delta: float = 1.0,  # current trust-region radius (Δk in Alg. 3)
+        min_delta: float = 1e-3,  # minimum trust-region radius
+        max_delta: float = 2.0,  # maximum trust-region radius
         gamma: float = 1e-3,
         mem_length: int = 10,
         mu: float = 0.9,
@@ -62,6 +64,8 @@ class LSSR1_TR(Optimizer):
         defaults = dict(
             lr=lr,
             delta=delta,
+            min_delta=min_delta,
+            max_delta=max_delta,
             gamma=gamma,
             mem_length=mem_length,
             mu=mu,
@@ -180,7 +184,7 @@ class LSSR1_TR(Optimizer):
             new_loss = float(closure())
             if new_loss <= orig_loss + c1 * alpha * grad_dot_dir:  # Armijo
                 break
-            alpha = max(0.5*alpha, self.defaults["tol"])
+            alpha = max(0.5*alpha, self.defaults["min_delta"])
         else:  # no break
             alpha = 0.0
             _set_param_vector(params, wk)
@@ -206,6 +210,6 @@ class LSSR1_TR(Optimizer):
         else:
             delta_new = delta_old
             
-        self.defaults["delta"] = max(delta_new, self.defaults["tol"])
+        self.defaults["delta"] = min(max(delta_new, self.defaults["min_delta"]), self.defaults["max_delta"])
 
         return float(loss), g

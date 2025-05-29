@@ -39,7 +39,7 @@ class APTS_D(Optimizer):
             
         if config.local_second_order:
             config.local_optimizer = LSSR1_TR 
-            config.local_optimizer_args = get_lssr1_trust_region_params(config) 
+            config.local_optimizer_args = get_lssr1_local_trust_region_params(config) 
             
             # config.local_optimizer = TR 
             # config.local_optimizer_args = get_trust_region_params(config)
@@ -59,6 +59,7 @@ class APTS_D(Optimizer):
         params,
         model=None,
         delta=None,
+        min_delta=None,
         max_delta=None,
         nu_dec=None,
         nu_inc=None,
@@ -90,6 +91,7 @@ class APTS_D(Optimizer):
             max_global_iters=max_global_iters,
             tol=float(tol),
             delta=float(delta),
+            min_delta=float(min_delta) if min_delta is not None else 1e-3,
             lr=float(delta),
             nu_dec=float(nu_dec) if nu_dec is not None else 0.25,
             nu_inc=float(nu_inc) if nu_inc is not None else 0.75,
@@ -253,7 +255,7 @@ class APTS_D(Optimizer):
             acceptance_ratio = (initial_global_loss - trial_loss) / local_reduction
 
             if acceptance_ratio < self.defaults["nu_dec"]:
-                self.delta = max(self.delta * self.defaults["dec_factor"], self.defaults["tol"])
+                self.delta = max(self.delta * self.defaults["dec_factor"], self.defaults["min_delta"])
                 self.update_pytorch_lr()
                 
                 restore_params(self.model, initial_flat)

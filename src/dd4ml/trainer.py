@@ -46,6 +46,8 @@ class Trainer:
         C.loss_tol = 1e-3  # loss tolerance for adaptive batch size
         # APTS and TR
         C.delta = 0.1  # for trust region methods
+        C.min_delta = 1e-3
+        C.max_delta = 2.0
         C.data_parallel = False
         C.norm_type = 2  # for APTS_D (and possibly APTS_IP)
         C.global_pass = False 
@@ -58,6 +60,7 @@ class Trainer:
         C.subdomain_optimizer = None # for APTS*
         C.gradient_accumulation = True # for APTS*
         C.accumulation_steps = 1 # for APTS*
+        C.mem_length = 3  # for TR methods
         # For pipelining via pwm library
         C.data_chunks_amount = 1
         C.use_pmw = False
