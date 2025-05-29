@@ -7,12 +7,13 @@ script="run_config_file.py" # Python script to run
 # --- General parameter settings ---#
 optimizer="apts_d"
 dataset="mnist"
-batch_sizes=(25000)
+batch_sizes=(10000)
 model="simple_cnn"
 criterion="cross_entropy"
-epochs=10
+epochs=20
 trials=1
 num_subd_arr=(2) # For data-parallel executions
+batch_inc_factor=2.0
 
 # --- Optimizer-specific settings ---#
 use_pmw="false"

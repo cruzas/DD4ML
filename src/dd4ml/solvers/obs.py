@@ -26,35 +26,20 @@ class OBS:
         super(OBS, self).__init__()
         self.tol = 1e-6
 
-    def _check_finite(self, *tensors):
-        for idx, t in enumerate(tensors):
-            if isinstance(t, torch.Tensor):
-                if not torch.isfinite(t).all():
-                    mask = ~torch.isfinite(t)
-                    print(f"Input at position {idx} (type torch.Tensor) contains NaN or Inf at indices: {mask.nonzero(as_tuple=True)}")
-                    raise ValueError("Inputs contain NaN or Inf.")
-            elif isinstance(t, np.ndarray):
-                if not np.isfinite(t).all():
-                    mask = ~np.isfinite(t)
-                    print(f"Input at position {idx} (type np.ndarray) contains NaN or Inf at indices: {np.argwhere(mask)}")
-                    raise ValueError("Inputs contain NaN or Inf.")
-            elif np.isscalar(t):
-                if not np.isfinite(t):
-                    print(f"Input at position {idx} (scalar) is not finite: {t}")
-                    raise ValueError("Inputs contain NaN or Inf.")
-            else:
-                # Try to convert to numpy array and check
-                try:
-                    arr = np.asarray(t)
-                    if not np.isfinite(arr).all():
-                        mask = ~np.isfinite(arr)
-                        print(f"Input at position {idx} (converted to np.ndarray) contains NaN or Inf at indices: {np.argwhere(mask)}")
-                        raise ValueError("Inputs contain NaN or Inf.")
-                except Exception:
-                    raise TypeError(f"Unsupported input type: {type(t)}")
-
     def solve_tr_subproblem(self, g, delta, gamma, Psi, Minv):
-        self._check_finite(g, delta, gamma, Psi, Minv)
+        # Check that g, delta, gamma, Psi, and Minv do not have NaN or Inf values
+        if torch.isnan(g).any() or torch.isinf(g).any():
+            raise ValueError(f"Gradient g contains NaN or Inf values. g: {g}")
+        if torch.isnan(delta) or torch.isinf(delta):
+            raise ValueError(f"Delta contains NaN or Inf values. Delta: {delta}")
+        if torch.isnan(gamma) or torch.isinf(gamma):
+            raise ValueError(f"Gamma contains NaN or Inf values. Gamma: {gamma}")
+        if torch.isnan(Psi).any() or torch.isinf(Psi).any():
+            raise ValueError(f"Psi contains NaN or Inf values. Psi: {Psi}")
+        if torch.isnan(Minv).any() or torch.isinf(Minv).any():
+            raise ValueError(f"Minv contains NaN or Inf values. Minv: {Minv}")
+        if delta < 0:
+            raise ValueError(f"Delta must be non-negative. Delta: {delta}")
 
         PsiPsi = torch.matmul(Psi.transpose(0, 1), Psi)
         R = torch.linalg.cholesky(PsiPsi, upper=True)

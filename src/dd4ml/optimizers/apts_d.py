@@ -29,14 +29,21 @@ class APTS_D(Optimizer):
     @staticmethod
     def setup_APTS_args(config):
         if config.global_second_order:
-            config.global_optimizer = LSSR1_TR # TR 
-            config.global_optimizer_args = get_lssr1_trust_region_params(config) # get_trust_region_params(config)
+            config.global_optimizer = LSSR1_TR 
+            config.global_optimizer_args = get_lssr1_trust_region_params(config) 
+            
+            # config.global_optimizer = TR 
+            # config.global_optimizer_args = get_trust_region_params(config)
         else:
             config.global_optimizer = TR
             config.global_optimizer_args = get_trust_region_params(config)
+            
         if config.local_second_order:
-            config.local_optimizer = LSSR1_TR # TR 
-            config.local_optimizer_args = get_lssr1_trust_region_params(config) # get_trust_region_params(config)
+            config.local_optimizer = LSSR1_TR 
+            config.local_optimizer_args = get_lssr1_trust_region_params(config) 
+            
+            # config.local_optimizer = TR 
+            # config.local_optimizer_args = get_trust_region_params(config)
         else:
             config.subdomain_optimizer = TR
             config.subdomain_optimizer_args = get_local_trust_region_params(config)

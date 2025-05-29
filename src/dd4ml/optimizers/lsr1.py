@@ -1,5 +1,3 @@
-# optimizers/hessian_approx.py
-#
 # Limited-memory SR1 “compact” Hessian approximation for use with the
 # OBS trust-region sub-problem solver (Fletcher & Gould, 2021).
 #
@@ -27,9 +25,10 @@ class LSR1:
         self,
         gamma: float = 1.0,
         memory_length: int = 10,
-        tol: float = 1e-10,
+        tol: float = 1e-6,
         device: Optional[torch.device] = None,
         dtype: torch.dtype | None = None,
+        # TODO: add norm_type
     ):
         self.memory_length = int(memory_length)
         self.tol = float(tol)
@@ -57,11 +56,11 @@ class LSR1:
         """
         s = s.to(self.device, self.dtype).flatten()
         y = y.to(self.device, self.dtype).flatten()
-        if s.numel() == 0:
+        if s.norm() < self.tol or y.norm() < self.tol:
             return
 
         curvature = torch.dot(y, s)
-        if abs(curvature) < self.tol * (torch.norm(s) * torch.norm(y)):
+        if abs(curvature) <= self.tol * (torch.norm(s) * torch.norm(y)): # <= in case of 0 compared against 0
             # reject pair – insufficient curvature information
             return
 

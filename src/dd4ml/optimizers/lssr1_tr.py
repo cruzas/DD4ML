@@ -9,7 +9,7 @@ from torch.optim.optimizer import Optimizer
 
 from dd4ml.solvers.obs import OBS
 
-from .hessian_approx import LSR1
+from .lsr1 import LSR1
 
 
 # --------------------------------------------------------------------------- #
@@ -147,7 +147,10 @@ class LSSR1_TR(Optimizer):
 
         # -- update L-SR1 pairs -----------------------------------------
         if st["prev_grad"] is not None:
-            self.hess.update_memory(wk - st["wk"], g - st["prev_grad"])
+            sk = wk - st["wk"]
+            yk = g - st["prev_grad"]
+            if sk.norm() > self.defaults["tol"] and yk.norm() > self.defaults["tol"]:
+                self.hess.update_memory(sk, yk)
         st["wk"], st["prev_grad"] = wk.clone(), g.clone()
 
         # -- trust-region sub-problem -----------------------------------

@@ -5,7 +5,7 @@ from typing import Iterable, List, Optional, Tuple
 import torch
 from torch.optim import Optimizer
 
-from dd4ml.optimizers.hessian_approx import LSR1
+from dd4ml.optimizers.lsr1 import LSR1
 from dd4ml.solvers.obs import OBS
 from dd4ml.utility import get_trust_region_params
 
@@ -106,7 +106,7 @@ class TR(Optimizer):
                 gamma=1.0,
                 memory_length=int(group.get("mem_length", self.defaults["mem_length"]) or 5),
                 device=dev,
-                tol=1e-10,
+                tol=self.tol,
             )
             self.obs = OBS()
         else:

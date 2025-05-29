@@ -53,3 +53,5 @@ parameters:
     values: [42]
   tol:
     value: 1e-6
+  batch_inc_factor:
+    value: 2.0
