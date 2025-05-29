@@ -1,9 +1,5 @@
 """
-Simple training loop; Boilerplate that could apply to any arbitrary neural network,
-so nothing in this file really has anything to do with GPT specifically.
-
-Note:
-This code runs with our dictionary-defined model, which is instantiated as a ParallelizedModel object.
+This code also runs with our dictionary-defined model, which is instantiated as a ParallelizedModel object.
 Model handler takes care of the parallelized model logic. This is why this is slightly different from the trainer in mingpt.
 """
 
@@ -25,49 +21,45 @@ from .dataloaders import GeneralizedDistributedDataLoader, OverlapBatchSampler
 
 
 class Trainer:
-
     @staticmethod
     def get_default_config():
-        # Base settings
         C = CN()
+        # tolerance for convergence
         C.tol = 1e-6
-        # device to train on
+        # device
         C.device = "auto"
-        # dataloder parameters
+        # data loader workers
         C.num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
-        # optimizer parameters
-        C.max_iters = 1000  # for Transformer networks, this is the number of iterations
-        C.batch_size = 128
+        # training schedule
+        C.epochs = 3  
+        C.run_by_epoch = False  # if False, run by iteration instead of epochs, typically for transformer networks
+        C.max_iters = 1000  
+        # optimizer 
         C.learning_rate = 5e-4
-        C.delta = 0.1  # for trust region methods
         C.betas = (0.9, 0.999)  # for Adam
         C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = 1.0
-        C.epochs = 3  # in case epochs instead of iter
-        C.run_by_epoch = (
-            False  # if False, run by iteration, typically for transformer networks
-        )
+        # initial batch size and adaptive params
+        C.batch_size = 128
+        C.patience = 2 # epochs to wait before increasing batch size
+        C.loss_tol = 1e-3  # loss tolerance for adaptive batch size
+        # APTS and TR
+        C.delta = 0.1  # for trust region methods
         C.data_parallel = False
-
-        # For APTS_D
-        C.norm_type = 2  # for APTS_D (and possibly APTS)
-        C.global_pass = False
-        C.foc = False
+        C.norm_type = 2  # for APTS_D (and possibly APTS_IP)
+        C.global_pass = False 
+        C.foc = False # for APTS_D
         C.dogleg = False  # for APTS_D
-
-        # For APTS*
         C.max_global_iters = 1  # for APTS*
         C.max_local_iters = 3  # for APTS*
         C.global_second_order = False  # for APTS*
         C.local_second_order = False  # for APTS*
-        C.subdomain_optimizer = None
-        C.gradient_accumulation = True
-        C.accumulation_steps = 1
-
+        C.subdomain_optimizer = None # for APTS*
+        C.gradient_accumulation = True # for APTS*
+        C.accumulation_steps = 1 # for APTS*
         # For pipelining via pwm library
         C.data_chunks_amount = 1
         C.use_pmw = False
-
         return C
 
     def __init__(
@@ -102,10 +94,13 @@ class Trainer:
             )
         ):
             self.device = torch.device("mps")
-
         self.model = self.model.to(self.device)
-
-        # variables that will be assigned to trainer class later for logging and etc
+        # adaptive-batch state
+        self.current_batch_size = config.batch_size
+        self.best_loss = float("inf")
+        self.wait = 0
+    
+        # timing
         self.total_start_time = 0.0  # for computing the total running time
         if config.run_by_epoch:
             self.epoch_num = 0
@@ -126,109 +121,117 @@ class Trainer:
         for callback in self.callbacks.get(onevent, []):
             callback(self)
 
-    def run(self):
-        _, config = self.model, self.config
-
-        if config.use_pmw:
+    def setup_data_loaders(self):
+        """(Re)create train and test loaders using current_batch_size"""
+        cfg, ds_train, ds_test = self.config, self.train_dataset, self.test_dataset
+        bs = self.current_batch_size
+        if cfg.use_pmw:
             train_loader = GeneralizedDistributedDataLoader(
-                model_handler=config.model_handler,
-                dataset=self.train_dataset,
-                batch_size=config.batch_size,
+                model_handler=cfg.model_handler,
+                dataset=ds_train,
+                batch_size=bs,
                 shuffle=False,
-                num_workers=config.num_workers,
+                num_workers=cfg.num_workers,
                 pin_memory=True,
             )
             test_loader = DataLoader(
-                self.test_dataset,
-                batch_size=config.batch_size,
+                ds_test,
+                batch_size=bs,
                 shuffle=False,
-                num_workers=config.num_workers,
+                num_workers=cfg.num_workers,
                 pin_memory=True,
             )
         else:
-            rank = dist.get_rank() if dist.is_initialized() else 0
             world_size = dist.get_world_size() if dist.is_initialized() else 1
-
-            # Global batch size from config
-            global_batch_size = config.batch_size  # e.g., 200
-
+            rank = dist.get_rank() if dist.is_initialized() else 0
+    
             # Per-process batch size
-            per_process_batch_size = global_batch_size // world_size
+            pp_bs = bs // world_size
 
             base_train_sampler = DistributedSampler(
-                self.train_dataset,
+                ds_train,
                 num_replicas=world_size,
                 rank=rank,
                 shuffle=True,
                 drop_last=False,
             )
             base_test_sampler = DistributedSampler(
-                self.test_dataset,
+                ds_test,
                 num_replicas=world_size,
                 rank=rank,
                 shuffle=False,
                 drop_last=False,
             )
 
-            overlap = config.overlap if hasattr(config, "overlap") else 0
+            # Overlap between consecutive batches
+            overlap = cfg.overlap if hasattr(cfg, "overlap") else 0
 
             train_sampler = OverlapBatchSampler(
                 base_sampler=base_train_sampler,
-                batch_size=per_process_batch_size,
+                batch_size=pp_bs,
                 overlap=overlap,
                 drop_last=False,
             )
 
             test_sampler = OverlapBatchSampler(
                 base_sampler=base_test_sampler,
-                batch_size=per_process_batch_size,
+                batch_size=pp_bs,
                 overlap=overlap,
                 drop_last=False,
             )
 
-            train_loader = DataLoader(
-                self.train_dataset,
-                # batch_size=per_process_batch_size,  # Use per-process batch size
+            self.train_loader = DataLoader(
+                ds_train,
                 batch_sampler=train_sampler,
-                num_workers=config.num_workers,
+                num_workers=cfg.num_workers,
                 pin_memory=True,
             )
 
-            test_loader = DataLoader(
-                self.test_dataset,
-                # batch_size=per_process_batch_size,
+            self.test_loader = DataLoader(
+                ds_test,
                 batch_sampler=test_sampler,
-                num_workers=config.num_workers,
+                num_workers=cfg.num_workers,
                 pin_memory=True,
             )
 
-        self.train_loader = train_loader
-        self.test_loader = test_loader
+    def adjust_batch_size(self, loss):
+        """Increase batch size when loss plateaus."""
+        cfg = self.config
+        if self.best_loss - loss > cfg.loss_tol:
+            self.best_loss = loss
+            self.wait = 0
+        else:
+            self.wait += 1
+            if self.wait > cfg.patience and self.current_batch_size < len(self.train_dataset):
+                new_bs = min(self.current_batch_size * 2, len(self.train_dataset))
+                print(f"Adjusting batch size from {self.current_batch_size} to {new_bs}")
+                self.current_batch_size = new_bs
+                self.wait = 0
+                self.setup_data_loaders()
 
+    def run(self):
+        self.setup_data_loaders()
         if config.run_by_epoch:
             self.run_by_epoch()
         else:
             self.run_by_iter()
 
     def compute_epoch_loss(self):
-        model, config = self.model, self.config
-
+        model, cfg = self.model, self.config
         model.train()
         criterion = self.criterion
-        self.loss = 0.0  # epoch loss
-        total_batches = len(self.train_loader)
+        total_loss = 0.0  # epoch loss
         self.iter_num = 0
         for batch_idx, (x, y) in enumerate(self.train_loader):
             batch_time_start = time.time()
             x, y = x.to(self.device), y.to(self.device)
-
             if self.epoch_num == 0:
                 first_closure = closure(
                     x,
                     y,
                     criterion,
                     model,
-                    data_chunks_amount=config.data_chunks_amount,
+                    data_chunks_amount=cfg.data_chunks_amount,
                     compute_grad=False,
                 )
                 self.loss += first_closure()
@@ -242,31 +245,19 @@ class Trainer:
                     compute_grad=True,
                     grad_norm_clip=config.grad_norm_clip,
                 )
-
+                step_args = {}
+                sig = inspect.signature(self.optimizer.step).parameters
                 # Check if final_subdomain_closure is part of self.optimizer arguments
-                if (
-                    "final_subdomain_closure"
-                    in inspect.signature(self.optimizer.step).parameters
-                ):
-
+                if "final_subdomain_closure" in sig:
                     def final_subdomain_closure(outputs, y=y):
                         y_chunks = y.chunk(len(outputs))
-                        loss = []
-                        for i, o in enumerate(outputs):
-                            loss.append(self.criterion(o, y_chunks[i]))
-                        return loss
-
-                    self.loss += self.optimizer.step(
-                        closure=general_closure,
-                        final_subdomain_closure=final_subdomain_closure,
-                    )
-                elif (
-                    "apts_d" in self.optimizer.__class__.__name__.lower()
-                    or "apts_p" in self.optimizer.__class__.__name__.lower()
-                ):
-                    self.loss += self.optimizer.step(inputs=x, labels=y)
+                        return [self.criterion(o, yc) for o, yc in zip(outputs, y_chunks)]
+                    step_args = {"closure": general_closure, "final_subdomain_closure": final_subdomain_closure}
+                elif any(k in self.optimizer.__class__.__name__.lower() for k in ("apts_d", "apts_p")):
+                    step_args = {"inputs": x, "labels": y}
                 else:
-                    self.loss += self.optimizer.step(closure=general_closure)
+                    step_args = {"closure": general_closure}
+                total_loss += self.optimizer.step(**step_args)
 
             # Print progress within the epoch
             self.epoch_progress = 100.0 * (batch_idx + 1) / total_batches
@@ -276,7 +267,8 @@ class Trainer:
             self.trigger_callbacks("on_batch_end")
             self.iter_num += 1
 
-        self.loss = self.loss / total_batches
+        self.loss = total_loss / len(self.train_loader)
+        self.adjust_batch_size(self.loss)
         tnow = time.time()
         self.epoch_dt = tnow - self.epoch_time
         self.epoch_time = tnow
@@ -324,12 +316,10 @@ class Trainer:
             self.accuracy = 100.0 * correct / total
 
     def run_by_epoch(self):
-        config = self.config
-
         self.total_start_time = time.time()
         self.epoch_num = 0
         self.epoch_time = time.time()
-        for _ in range(config.epochs + 1):
+        for _ in range(self.config.epochs + 1):
             self.compute_epoch_loss()
             self.compute_accuracy()
             self.running_time = time.time() - self.total_start_time
@@ -337,14 +327,13 @@ class Trainer:
             self.epoch_num += 1
 
     def run_by_iter(self):
-        model, config = self.model, self.config
-
+        model, cfg = self.model, self.config
         model.train()
         self.total_start_time = time.time()
         self.iter_time = time.time()
         self.data_iter = iter(self.train_loader)
         for self.iter_num in range(
-            config.max_iters + 1 if config.max_iters is not None else float("inf")
+            cfg.max_iters + 1 if cfg.max_iters is not None else float("inf")
         ):
             # fetch the next batch (x, y) and re-init iterator if needed
             try:
@@ -361,7 +350,7 @@ class Trainer:
                     y,
                     self.criterion,
                     self.model,
-                    data_chunks_amount=config.data_chunks_amount,
+                    data_chunks_amount=cfg.data_chunks_amount,
                     compute_grad=False,
                 )
                 self.loss = first_closure()
@@ -372,9 +361,9 @@ class Trainer:
                     y,
                     criterion=self.criterion,
                     model=self.model,
-                    data_chunks_amount=config.data_chunks_amount,
+                    data_chunks_amount=cfg.data_chunks_amount,
                     compute_grad=True,
-                    grad_norm_clip=config.grad_norm_clip,
+                    grad_norm_clip=cfg.grad_norm_clip,
                 )
                 # Check if self.optimizer.step requires final_subdomain_closure
                 if (
