@@ -42,7 +42,6 @@ class Trainer:
         C.grad_norm_clip = 1.0
         # initial batch size and adaptive params
         C.batch_size = 128 # max batch size is lenght of dataset
-        C.patience = 2 # epochs to wait before increasing batch size
         C.batch_inc_factor = 1  # factor to increase batch size
         C.loss_tol = 1e-3  # loss tolerance for adaptive batch size
         # APTS and TR
@@ -99,8 +98,7 @@ class Trainer:
         self.model = self.model.to(self.device)
         # adaptive-batch state
         self.current_batch_size = config.batch_size
-        self.best_loss = float("inf")
-        self.wait = 0
+        self.last_loss = float("inf")
     
         # timing
         self.total_start_time = 0.0  # for computing the total running time
@@ -197,23 +195,17 @@ class Trainer:
             )
 
     def adjust_batch_size(self, loss):
-        """Increase batch size when loss plateaus."""
+        """Increase batch size when current loss is greater than previous loss."""
         cfg = self.config
         if cfg.batch_inc_factor == 1:
             return # no batch size adjustment
         
-        if self.best_loss - loss > cfg.loss_tol:
-            self.best_loss = loss
-            self.wait = 0
-        else:
-            self.wait += 1
-            if self.wait > cfg.patience and self.current_batch_size < len(self.train_dataset):
-                new_bs = min(int(math.ceil(self.current_batch_size * cfg.batch_inc_factor)), len(self.train_dataset))
-                print(f"Adjusting batch size from {self.current_batch_size} to {new_bs}")
-                self.current_batch_size = new_bs
-                self.wait = 0
-                self.setup_data_loaders()
-
+        if loss > self.last_loss - cfg.loss_tol:
+            new_bs = min(int(math.floor(self.current_batch_size * cfg.batch_inc_factor)), len(self.train_dataset))
+            print(f"Current loss ({loss:.4f}) is greater than previous loss - tolerance ({(self.last_loss-cfg.loss_tol):.4f}). Increasing batch size from {self.current_batch_size} to {new_bs}.")
+            self.current_batch_size = new_bs
+        self.last_loss = loss
+            
     def run(self):
         self.setup_data_loaders()
         if self.config.run_by_epoch:

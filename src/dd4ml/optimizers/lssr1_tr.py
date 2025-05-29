@@ -32,7 +32,7 @@ def _set_param_vector(params: Iterable[Tensor], vec: Tensor) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# L-SSR1-TR Optimiser                                                         #
+# L-SSR1-TR optimizer                                                         #
 # --------------------------------------------------------------------------- #
 class LSSR1_TR(Optimizer):
     def __init__(
@@ -50,12 +50,10 @@ class LSSR1_TR(Optimizer):
         nu_1: float = 0.25,
         nu_2: float = 0.5,
         nu_3: float = 0.8,
-        nu_4: float = 2.0,
+        nu_4: float = 1.2,
         tol: float = 1e-8,
         norm_type: int = 2,  # norm type for gradient and step length
     ):
-        # (range checks unchanged …)
-
         param_list = list(params)
         if not param_list:
             raise ValueError("Optimizer got an empty parameter list")
@@ -126,7 +124,7 @@ class LSSR1_TR(Optimizer):
         return step, float(predicted)
 
     # ------------------------------------------------------------------ #
-    # Main optimisation step                                             #
+    # Main optimization step                                             #
     # ------------------------------------------------------------------ #
     def step(self, closure: Callable[[], Tensor], **_) -> Tuple[float, float]:
         params = self.param_groups[0]["params"]
@@ -177,12 +175,12 @@ class LSSR1_TR(Optimizer):
         orig_loss = float(loss)
         grad_dot_dir = g.dot(p_comb)
 
-        for _ in range(10):
+        for _ in range(20):
             _set_param_vector(params, wk + alpha * p_comb)
             new_loss = float(closure())
             if new_loss <= orig_loss + c1 * alpha * grad_dot_dir:  # Armijo
                 break
-            alpha *= 0.5
+            alpha = max(0.5*alpha, self.defaults["tol"])
         else:  # no break
             alpha = 0.0
             _set_param_vector(params, wk)
@@ -207,14 +205,7 @@ class LSSR1_TR(Optimizer):
             delta_new = self.defaults["nu_4"] * delta_old
         else:
             delta_new = delta_old
+            
         self.defaults["delta"] = max(delta_new, self.defaults["tol"])
-
-        # -- prepare return values --------------------------------------
-        grad_norm = g_norm if alpha == 0.0 else float(_concat_grads(params).norm())
-
-        # expose the step length through every param-group (for schedulers)
-        for group in self.param_groups:
-            group["lr"] = alpha
-        self.defaults["lr"] = alpha
 
         return float(loss), g

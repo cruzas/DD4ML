@@ -8,7 +8,6 @@ from torch.optim.optimizer import Optimizer
 
 from dd4ml.utility import (
     clone_model,
-    fix_aggregated_local_steps_pnorm,
     flatten_params,
     get_local_trust_region_params,
     get_lssr1_trust_region_params,
@@ -207,11 +206,12 @@ class APTS_D(Optimizer):
         # ------------------------------------------------------------------ #
         # Local steps
         # ------------------------------------------------------------------ #
+        local_loss = initial_local_loss
         for _ in range(hp["max_local_iters"]):
             local_loss, local_grad = self.local_optimizer.step(
                 closure=local_closure,
-                precom_loss=initial_local_loss,
-                precom_grad=local_grad,
+                precomp_loss=local_loss,
+                precomp_grad=local_grad,
             )
             total_local_grad_evals_counter += 1
             local_grad_norm = local_grad.norm(p=norm_type).item()
@@ -243,13 +243,7 @@ class APTS_D(Optimizer):
                 if norm_type == math.inf:
                     step_vec /= self.nr_models
 
-            if hp["correct_step"]:
-                corrected_step = fix_aggregated_local_steps_pnorm(
-                    aggregated_step=step_vec, global_grad=global_grad, p=norm_type
-                )
-                restore_params(self.model, initial_flat + corrected_step)
-            else:
-                restore_params(self.model, initial_flat + step_vec)
+            restore_params(self.model, initial_flat + step_vec)
 
         # ------------------------------------------------------------------ #
         # Global acceptance test

@@ -222,29 +222,17 @@ def main(
         trainer, save_model: bool = False, save_frequency: int = 5
     ) -> None:
 
-        # Check if lr is in trainer.optimizer
-        try:
-            if hasattr(trainer.optimizer, "lr"):
-                lr = trainer.optimizer.lr
-            else:
-                lr = trainer.optimizer.param_groups[0]["lr"]
-
-            dprint(
-                f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, "
-                f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, Learning Rate: {lr:.6e}"
+        # Check if optimizer has "APTS" or "TR" in its class to determine if delta is available
+        delta = None
+        if hasattr(trainer.optimizer, "delta"):
+            delta = trainer.optimizer.delta
+            thing_to_print = "delta"
+        else:
+            delta = trainer.optimizer.param_groups[0]["lr"]
+            thing_to_print = "lr"
+            
+        dprint(f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, {thing_to_print}: {delta:.6e}"
             )
-        except:
-            try:
-                if hasattr(trainer.optimizer, "delta"):
-                    delta = trainer.optimizer.delta
-                else:
-                    delta = trainer.optimizer.param_groups[0]["delta"]
-                dprint(
-                    f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, "
-                    f"Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, Delta: {delta:.6e}"
-                )
-            except Exception as e:
-                print("Error retrieving learning rate or delta:", e)
             
         if rank == 0 and use_wandb:
             log_fn(
