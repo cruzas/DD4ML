@@ -40,7 +40,7 @@ class Trainer:
         C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = 1.0
         # initial batch size and adaptive params
-        C.batch_size = 128
+        C.batch_size = 128 # max batch size is lenght of dataset
         C.patience = 2 # epochs to wait before increasing batch size
         C.loss_tol = 1e-3  # loss tolerance for adaptive batch size
         # APTS and TR
@@ -211,7 +211,7 @@ class Trainer:
 
     def run(self):
         self.setup_data_loaders()
-        if config.run_by_epoch:
+        if self.config.run_by_epoch:
             self.run_by_epoch()
         else:
             self.run_by_iter()
@@ -234,16 +234,16 @@ class Trainer:
                     data_chunks_amount=cfg.data_chunks_amount,
                     compute_grad=False,
                 )
-                self.loss += first_closure()
+                total_loss += first_closure()
             else:
                 general_closure = closure(
                     x,
                     y,
                     criterion=criterion,
                     model=model,
-                    data_chunks_amount=config.data_chunks_amount,
+                    data_chunks_amount=cfg.data_chunks_amount,
                     compute_grad=True,
-                    grad_norm_clip=config.grad_norm_clip,
+                    grad_norm_clip=cfg.grad_norm_clip,
                 )
                 step_args = {}
                 sig = inspect.signature(self.optimizer.step).parameters
@@ -260,7 +260,7 @@ class Trainer:
                 total_loss += self.optimizer.step(**step_args)
 
             # Print progress within the epoch
-            self.epoch_progress = 100.0 * (batch_idx + 1) / total_batches
+            self.epoch_progress = 100.0 * (batch_idx + 1) / len(self.train_loader)
             self.batch_dt = time.time() - batch_time_start
             self.iter_dt = self.batch_dt
             self.running_time = time.time() - self.total_start_time
