@@ -61,3 +61,5 @@ parameters:
     value: 2.0
   mem_length:
     value: 3
+  max_wolfe_iter:
+    value: 10

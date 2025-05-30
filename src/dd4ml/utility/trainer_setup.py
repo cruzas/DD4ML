@@ -125,8 +125,8 @@ def get_config_model_and_trainer(args, wandb_config):
         optimizer_obj = optimizer_factory.create(optimizer_name, model, lr)
         # Remove any unused attributes.
         for attr in [
-            "subdomain_optimizer",
-            "subdomain_optimizer_args",
+            "local_optimizer",
+            "local_optimizer_args",
             "global_optimizer",
             "global_optimizer_args",
             # TODO: probably need to update this
@@ -157,8 +157,8 @@ def get_config_model_and_trainer(args, wandb_config):
 
         optimizer_obj = APTS_IP(
             model=model,
-            subdomain_optimizer=all_config.trainer.subdomain_optimizer,
-            subdomain_optimizer_defaults=all_config.trainer.subdomain_optimizer_args,
+            local_optimizer=all_config.trainer.local_optimizer,
+            local_optimizer_defaults=all_config.trainer.local_optimizer_args,
             global_optimizer=all_config.trainer.global_optimizer,
             global_optimizer_defaults=all_config.trainer.global_optimizer_args,
             delta=all_config.trainer.delta,
@@ -189,8 +189,8 @@ def get_config_model_and_trainer(args, wandb_config):
             nr_models=all_config.model.num_subdomains,
             global_opt=all_config.trainer.global_optimizer,
             global_opt_params=all_config.trainer.global_optimizer_args,
-            local_opt=all_config.trainer.subdomain_optimizer,
-            local_opt_params=all_config.trainer.subdomain_optimizer_args,
+            local_opt=all_config.trainer.local_optimizer,
+            local_opt_params=all_config.trainer.local_optimizer_args,
             global_pass=all_config.trainer.global_pass,
             foc=all_config.trainer.foc,
             norm_type=all_config.trainer.norm_type,
@@ -221,8 +221,8 @@ def get_config_model_and_trainer(args, wandb_config):
             nr_models=all_config.model.num_subdomains,
             global_opt=all_config.trainer.global_optimizer,
             global_opt_params=all_config.trainer.global_optimizer_args,
-            local_opt=all_config.trainer.subdomain_optimizer,
-            local_opt_params=all_config.trainer.subdomain_optimizer_args,
+            local_opt=all_config.trainer.local_optimizer,
+            local_opt_params=all_config.trainer.local_optimizer_args,
             global_pass=all_config.trainer.global_pass,
             norm_type=all_config.trainer.norm_type,
             dogleg=all_config.trainer.dogleg,

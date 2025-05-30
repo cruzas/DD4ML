@@ -9,10 +9,11 @@ from torch.optim.optimizer import Optimizer
 from dd4ml.utility import (
     clone_model,
     flatten_params,
+    get_trust_region_params,
     get_local_trust_region_params,
     get_lssr1_trust_region_params,
+    get_lssr1_local_trust_region_params,
     get_state_dict,
-    get_trust_region_params,
     restore_params,
     get_apts_params
 )
@@ -30,9 +31,6 @@ class APTS_D(Optimizer):
         if config.global_second_order:
             config.global_optimizer = LSSR1_TR 
             config.global_optimizer_args = get_lssr1_trust_region_params(config) 
-            
-            # config.global_optimizer = TR 
-            # config.global_optimizer_args = get_trust_region_params(config)
         else:
             config.global_optimizer = TR
             config.global_optimizer_args = get_trust_region_params(config)
@@ -40,14 +38,11 @@ class APTS_D(Optimizer):
         if config.local_second_order:
             config.local_optimizer = LSSR1_TR 
             config.local_optimizer_args = get_lssr1_local_trust_region_params(config) 
-            
-            # config.local_optimizer = TR 
-            # config.local_optimizer_args = get_trust_region_params(config)
         else:
-            config.subdomain_optimizer = TR
-            config.subdomain_optimizer_args = get_local_trust_region_params(config)
+            config.local_optimizer = TR
+            config.local_optimizer_args = get_local_trust_region_params(config)
 
-        print(f"APTS_D global optimizer: {TR.__name__}; local optimizer: {TR.__name__}")
+        print(f"APTS_D global optimizer: {config.global_optimizer.__name__}; local optimizer: {config.local_optimizer.__name__}")
         config.apts_params = get_apts_params(config)
         return config
 
@@ -219,7 +214,8 @@ class APTS_D(Optimizer):
             local_grad_norm = local_grad.norm(p=norm_type).item()
             if local_grad_norm <= self.local_optimizer.defaults["tol"]:
                 break
-
+        
+        dist.barrier()
         if self.nr_models > 1:
             dist.all_reduce(total_local_grad_evals_counter, op=dist.ReduceOp.SUM)
             total_local_grad_evals_counter /= self.nr_models
@@ -266,7 +262,7 @@ class APTS_D(Optimizer):
                         self.delta * self.defaults["inc_factor"],
                         self.defaults["max_delta"],
                     )
-                    self.update_pytorch_lr()
+                    self.update_pytorch_lr() 
                 new_loss = trial_loss
 
             self.global_optimizer.defaults["delta"] = self.delta
@@ -281,7 +277,7 @@ class APTS_D(Optimizer):
                     extra_args["precomp_grad"] = global_grad
 
                 # Perform the global step
-                new_loss, new_grad = self.global_optimizer.step(
+                new_loss, new_grad_norm = self.global_optimizer.step(
                     closure=self.global_closure, **extra_args
                 )
             self.grad_evals_counter += 1

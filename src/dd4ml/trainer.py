@@ -57,6 +57,7 @@ class Trainer:
         C.max_local_iters = 3  # for APTS*
         C.global_second_order = False  # for APTS*
         C.local_second_order = False  # for APTS*
+        C.max_wolfe_iter = 10  # for APTS*
         C.subdomain_optimizer = None # for APTS*
         C.gradient_accumulation = True # for APTS*
         C.accumulation_steps = 1 # for APTS*

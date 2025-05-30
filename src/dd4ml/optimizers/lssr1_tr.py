@@ -20,7 +20,9 @@ class LSSR1_TR(Optimizer):
         min_delta: float = 1e-3,
         max_delta: float = 2.0,
         gamma: float = 1e-3,
+        second_order: bool = True,
         mem_length: int = 10,
+        max_wolfe_iter: int = 10,
         mu: float = 0.9,
         tau_1: float = 0.1,
         tau_2: float = 0.25,
@@ -37,22 +39,33 @@ class LSSR1_TR(Optimizer):
             raise ValueError("Optimizer got an empty parameter list")
 
         defaults = dict(
-            lr=lr, delta=delta, min_delta=min_delta, max_delta=max_delta,
-            gamma=gamma, mem_length=mem_length, mu=mu,
-            tau_1=tau_1, tau_2=tau_2, tau_3=tau_3,
-            nu_1=nu_1, nu_2=nu_2, nu_3=nu_3, nu_4=nu_4,
-            tol=tol, norm_type=norm_type,
+            lr=lr,
+            delta=delta,
+            min_delta=min_delta,
+            max_delta=max_delta,
+            gamma=gamma,
+            second_order=second_order,
+            mem_length=mem_length,
+            mu=mu,
+            tau_1=tau_1,
+            tau_2=tau_2,
+            tau_3=tau_3,
+            nu_1=nu_1,
+            nu_2=nu_2,
+            nu_3=nu_3,
+            nu_4=nu_4,
+            tol=tol,
+            norm_type=norm_type,
+            max_wolfe_iter=max_wolfe_iter,
         )
         super().__init__(param_list, defaults)
 
-        # preserve your p0 logic
         p0 = (
             param_list[0]["params"][0]
             if isinstance(param_list[0], dict)
             else param_list[0]
         )
 
-        # record shapes & offsets
         shapes, offsets = [], [0]
         for p in self.param_groups[0]["params"]:
             n = p.numel()
@@ -62,18 +75,18 @@ class LSSR1_TR(Optimizer):
         self._shapes = shapes
         self._offsets = offsets
 
-        # persistent flat buffers
         st = self.state
         st["flat_wk"] = torch.zeros(total, device=p0.device, dtype=p0.dtype)
         st["flat_gk"] = torch.zeros_like(st["flat_wk"])
         st["flat_vk"] = torch.zeros_like(st["flat_wk"])
         st["prev_grad"] = None
 
-        # Hessian machinery
         self.obs = OBS()
         self.hess = LSR1(
-            gamma=gamma, memory_length=mem_length,
-            device=p0.device, dtype=p0.dtype,
+            gamma=gamma,
+            memory_length=mem_length,
+            device=p0.device,
+            dtype=p0.dtype,
         )
 
     def _flatten_params(self) -> Tensor:
@@ -100,7 +113,9 @@ class LSSR1_TR(Optimizer):
         predicted = delta * gn
         return step, float(predicted)
 
-    def _solve_tr_second_order(self, g: Tensor, gn: float, delta: float) -> Tuple[Tensor, float]:
+    def _solve_tr_second_order(
+        self, g: Tensor, gn: float, delta: float
+    ) -> Tuple[Tensor, float]:
         if gn <= self.defaults["tol"]:
             return torch.zeros_like(g), 0.0
         self.hess.precompute()
@@ -125,22 +140,24 @@ class LSSR1_TR(Optimizer):
 
         wk = self._flatten_params().clone()
         st = self.state
+        sec = self.defaults["second_order"]
 
-        # update L-SR1 memory
-        if st["prev_grad"] is not None:
+        if sec and st["prev_grad"] is not None:
             sk = wk - st["old_wk"]
             yk = g - st["prev_grad"]
             if sk.norm() > self.defaults["tol"] and yk.norm() > self.defaults["tol"]:
                 self.hess.update_memory(sk, yk)
         st["old_wk"], st["prev_grad"] = wk.clone(), g.clone()
 
-        # choose TR solver
-        if len(self.hess._S) > 0:
-            p_star, pred = self._solve_tr_second_order(g, gn, self.defaults["delta"])
+        if sec and len(self.hess._S) > 0:
+            p_star, pred = self._solve_tr_second_order(
+                g, gn, self.defaults["delta"]
+            )
         else:
-            p_star, pred = self._solve_tr_first_order(g, gn, self.defaults["delta"])
+            p_star, pred = self._solve_tr_first_order(
+                g, gn, self.defaults["delta"]
+            )
 
-        # momentum grafting
         vk = st["flat_vk"]
         vk.mul_(self.defaults["mu"]).add_(wk - st["old_wk"])
         if vk.norm() > 0:
@@ -150,21 +167,27 @@ class LSSR1_TR(Optimizer):
             p_comb.mul_(min(1.0, self.defaults["delta"] / p_comb.norm()))
         st["flat_vk"] = vk.clone()
 
-        # Armijo line search
         alpha = self.defaults["lr"]
-        c1 = 1e-4
-        grad_dir = g.dot(p_comb).item()
-        for _ in range(20):
+        c1, c2 = 1e-4, 0.9
+        deriv0 = g.dot(p_comb).item()
+
+        for _ in range(self.defaults["max_wolfe_iter"]):
             self._unflatten_update(wk + alpha * p_comb)
-            new_loss = float(closure())
-            if new_loss <= loss + c1 * alpha * grad_dir:
+            new_loss = float(closure(compute_grad=True))
+            new_g = self._flatten_grads()
+            deriv = new_g.dot(p_comb).item()
+
+            if (
+                new_loss <= loss + c1 * alpha * deriv0
+                and abs(deriv) <= c2 * abs(deriv0)
+            ):
                 break
-            alpha = max(0.5 * alpha, self.defaults["min_delta"])
+            alpha *= 0.5
         else:
             alpha = 0.0
             self._unflatten_update(wk)
+            new_loss, new_g = loss, g
 
-        # final step and trust-region update
         p_step = alpha * p_comb
         self._unflatten_update(wk + p_step)
 
@@ -172,11 +195,17 @@ class LSSR1_TR(Optimizer):
         s_norm = p_step.norm().item()
         delta_old = self.defaults["delta"]
         if rho < self.defaults["tau_2"]:
-            delta_new = min(self.defaults["nu_1"] * delta_old, self.defaults["nu_2"] * s_norm**2)
+            delta_new = min(
+                self.defaults["nu_1"] * delta_old,
+                self.defaults["nu_2"] * s_norm**2,
+            )
         elif rho >= self.defaults["tau_3"] and s_norm >= self.defaults["nu_3"] * delta_old:
             delta_new = self.defaults["nu_4"] * delta_old
         else:
             delta_new = delta_old
-        self.defaults["delta"] = max(self.defaults["min_delta"], min(delta_new, self.defaults["max_delta"]))
+        self.defaults["delta"] = max(
+            self.defaults["min_delta"],
+            min(delta_new, self.defaults["max_delta"]),
+        )
 
-        return loss, gn
+        return new_loss, new_g
