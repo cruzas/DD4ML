@@ -40,11 +40,12 @@ class LSSR1_TR(Optimizer):
         alpha_max: float = 10.0,
         sync: bool = False,
     ):
+        # Ensure at least one parameter is provided
         param_list = list(params)
         if not param_list:
             raise ValueError("Optimiser got an empty parameter list")
 
-        # Store hyperparameters in defaults
+        # Store hyperparameters in defaults dictionary
         defaults = dict(
             lr=lr,
             delta=delta,
@@ -70,7 +71,7 @@ class LSSR1_TR(Optimizer):
         )
         super().__init__(param_list, defaults)
 
-        # Determine device/dtype from first parameter
+        # Derive device and dtype from the first parameter tensor
         first_param = (
             param_list[0]["params"][0]
             if isinstance(param_list[0], dict)
@@ -79,7 +80,7 @@ class LSSR1_TR(Optimizer):
         device = first_param.device
         dtype = first_param.dtype
 
-        # Compute shapes and offsets for flattening
+        # Compute shapes and offsets to flatten all parameters into a single vector
         shapes: list[torch.Size] = []
         offsets = [0]
         for p in self.param_groups[0]["params"]:
@@ -90,18 +91,19 @@ class LSSR1_TR(Optimizer):
         self._shapes = shapes
         self._offsets = offsets
 
-        # Preallocate flat buffers for parameters, gradient, previous step
+        # Preallocate flat buffers in optimizer state for parameters, gradients, and momentum-like term
         st = self.state
         st["flat_wk"] = torch.zeros(total_size, device=device, dtype=dtype)
         st["flat_gk"] = torch.zeros_like(st["flat_wk"])
         st["flat_vk"] = torch.zeros_like(st["flat_wk"])
         st["prev_grad"] = None
 
-        # Cache a tolerance tensor to avoid recreating it repeatedly
+        # Cache tolerance as tensor to avoid recreating each time
         st["tol_tensor"] = torch.tensor(tol, device=device, dtype=dtype)
 
-        # OBS solver for trust-region subproblem
+        # Instantiate OBS solver for trust-region subproblem
         self.obs = OBS()
+        # Instantiate limited-memory SR1 Hessian approximation
         self.hess = LSR1(
             gamma=gamma,
             memory_length=mem_length,
@@ -109,19 +111,19 @@ class LSSR1_TR(Optimizer):
             dtype=dtype,
         )
         
-        # Distributed synchronisation flags
+        # Flags for distributed synchronisation
         self.sync = bool(sync)
         self.rank = dist.get_rank() if dist.is_initialized() else 0
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
 
     def _avg_scalar(self, value: Tensor) -> Tensor:
         """
-        Rank-0 reduce-average and broadcast for bit-exact synchronisation.
-        If `sync` is False or `world_size == 1`, return `value` unchanged.
+        Perform reduce-average on scalar tensor across ranks, then broadcast.
+        If `sync` is False or single process, return value unchanged.
         """
         if not (self.sync and self.world_size > 1):
             return value
-        # Cast to float64 once and reuse
+        # Use float64 accumulation for precision
         buf = value.detach().to(torch.float64)
         dist.reduce(buf, dst=0, op=dist.ReduceOp.SUM)
         if self.rank == 0:
@@ -175,18 +177,18 @@ class LSSR1_TR(Optimizer):
         closure: Callable,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
-        Move to trial point: w = wk + alpha * p,
-        evaluate loss and gradient, return (loss, flat_grad, directional_derivative).
-        Synchronise scalars if in distributed mode.
+        Move to trial point w = wk + alpha * p, evaluate loss and gradient.
+        Return loss value, flattened gradient, and directional derivative along p.
+        Synchronise scalars and gradient if in distributed mode.
         """
-        # Update parameters to trial point
+        # Update parameters to the trial point
         self._unflatten_update(wk + alpha * p)
 
-        # Compute loss and gradient via closure
+        # Compute loss and gradients via closure
         loss = closure(compute_grad=True)
         grad = self._flatten_grads()
         
-        # Synchronise if needed
+        # Synchronise loss and gradient if needed
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
             deriv = grad.dot(p)
@@ -213,11 +215,13 @@ class LSSR1_TR(Optimizer):
         max_iter: int = 20,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
-        Perform zoom phase of strong Wolfe line search, narrowing interval [alpha_lo, alpha_hi].
+        Perform the zoom phase of the strong Wolfe line search,
+        narrowing the interval [alpha_lo, alpha_hi] until conditions are met
+        or maximum iterations exceeded. Returns (alpha_j, loss, gradient).
         """
         tol_tensor = self.state["tol_tensor"]
         for _ in range(max_iter):
-            # Interpolate trial alpha
+            # Interpolate new trial alpha within [alpha_lo, alpha_hi]
             if _ == 0:
                 alpha_j = 0.5 * (alpha_lo + alpha_hi)
             else:
@@ -235,28 +239,31 @@ class LSSR1_TR(Optimizer):
                     0.5 * (alpha_lo + alpha_hi),
                 )
 
-            # Evaluate at candidate α_j
+            # Evaluate function, gradient, and derivative at alpha_j
             phi_j, grad_j, dphi_j = self._evaluate_function_and_gradient(
                 wk, p, alpha_j, closure
             )
 
+            # Check Armijo condition or if phi_j >= phi_lo
             armijo = phi_j > phi_0 + c1 * alpha_j * dphi_0
             if armijo or (phi_j >= phi_lo):
                 alpha_hi, phi_hi = alpha_j, phi_j
             else:
+                # Check strong Wolfe curvature condition
                 strong_wolfe = torch.abs(dphi_j) <= -c2 * dphi_0
                 if strong_wolfe:
                     return alpha_j, phi_j, grad_j
                 switch = dphi_j * (alpha_hi - alpha_lo) >= 0
                 if switch:
                     alpha_hi, phi_hi = alpha_lo, phi_lo
+                # Update lower bound
                 alpha_lo, phi_lo, dphi_lo = alpha_j, phi_j, dphi_j
 
-            # Gap tolerance check
+            # Terminate if interval is sufficiently small
             if torch.abs(alpha_hi - alpha_lo) < tol_tensor:
                 break
 
-        # Return best lower bound if max_iter exceeded
+        # If maximum iterations exceeded, return best lower bound
         return alpha_lo, phi_lo, self._flatten_grads()
 
     def _strong_wolfe_line_search(
@@ -273,7 +280,9 @@ class LSSR1_TR(Optimizer):
         max_iter: int = 10,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
-        Find step size satisfying strong Wolfe conditions. Returns (alpha, phi, grad).
+        Conduct strong Wolfe line search to find step size alpha
+        that satisfies both Armijo and curvature conditions.
+        Returns chosen alpha, new loss, and new gradient.
         """
         tol_tensor = self.state["tol_tensor"]
         alpha_prev = torch.tensor(0.0, device=wk.device)
@@ -288,6 +297,7 @@ class LSSR1_TR(Optimizer):
 
             cond1 = phi_i > phi_0 + c1 * alpha_i * dphi_0
             cond2 = (i > 0) and (phi_i >= phi_prev)
+            # If either condition triggers, enter zoom phase
             if cond1 or cond2:
                 return self._zoom(
                     wk,
@@ -304,9 +314,11 @@ class LSSR1_TR(Optimizer):
                     c2,
                 )
 
+            # If curvature condition satisfied, accept alpha_i
             if torch.abs(dphi_i) <= -c2 * dphi_0:
                 return alpha_i, phi_i, grad_i
 
+            # If derivative becomes positive, perform zoom with swapped bounds
             if dphi_i >= 0:
                 return self._zoom(
                     wk,
@@ -323,14 +335,13 @@ class LSSR1_TR(Optimizer):
                     c2,
                 )
 
+            # Update previous iterate values and double alpha_i (capped at alpha_max)
             alpha_prev, phi_prev, dphi_prev = alpha_i, phi_i, dphi_i
-            # Double step but cap at alpha_max
             alpha_i = torch.min(2 * alpha_i, torch.tensor(alpha_max, device=wk.device))
-
             if alpha_i >= alpha_max:
                 break
 
-        # Fallback to previous iterate if no step found
+        # Fallback: return best known step (alpha_prev)
         phi_fin, grad_fin, _ = self._evaluate_function_and_gradient(
             wk, p, alpha_prev.item(), closure
         )
@@ -340,8 +351,8 @@ class LSSR1_TR(Optimizer):
         self,
         wk: Tensor,
         p: Tensor,
-        phi_0: float,
-        dphi_0: float,
+        phi_0: Tensor,
+        dphi_0: Tensor,
         closure: Callable,
         alpha_0: float = 1.0,
         c1: float = 1e-4,
@@ -349,7 +360,8 @@ class LSSR1_TR(Optimizer):
         max_iter: int = 10,
     ) -> Tuple[float, float, Tensor]:
         """
-        Simple backtracking line search as fallback. Returns (alpha, φ(alpha), grad).
+        Simple backtracking line search to satisfy Armijo and curvature.
+        Returns step size alpha, new loss, and new gradient.
         """
         alpha = alpha_0
         tol_tensor = self.state["tol_tensor"]
@@ -364,14 +376,15 @@ class LSSR1_TR(Optimizer):
             alpha *= 0.5
             if alpha < tol_tensor.item():
                 break
+        # If line search fails, return zero step
         return 0.0, phi_0, self._flatten_grads()
 
     def step(self, closure: Callable[[], Tensor], **_) -> Tuple[float, float]:
         """
-        Performs a single optimisation step.
-        Returns (new_loss, flat_gradient) on all ranks (scalar loss and flat grad vector).
+        Perform a single optimisation step.
+        Returns tuple (new_loss, flat_gradient).
         """
-        # Get precomputed loss/grad or compute afresh
+        # Evaluate or retrieve precomputed loss and gradient
         loss = _["precomp_loss"] if "precomp_loss" in _ else closure(compute_grad=True)
         g = _["precomp_grad"] if "precomp_grad" in _ else self._flatten_grads()
         gn = torch.norm(g, p=self.defaults["norm_type"])
@@ -379,16 +392,17 @@ class LSSR1_TR(Optimizer):
             loss = self._avg_scalar(loss)
             dist.broadcast(g, src=0)
             gn = self._avg_scalar(gn)
+        # If gradient norm below tolerance, skip update
         if gn <= self.defaults["tol"]:
-            return loss.item(), g  # No sufficient gradient, skip update
+            return loss.item(), g
 
-        # Flatten current parameters once and reuse
+        # Flatten current parameters and preserve a copy for updates
         wk_flat = self._flatten_params()
-        wk = wk_flat.clone()  # Preserve copy for TR and memory updates
+        wk = wk_flat.clone()
         st = self.state
         sec = self.defaults["second_order"]
 
-        # Update LSR1 memory if second order is enabled
+        # Update LSR1 memory if second-order is enabled and previous gradient exists
         if sec and st["prev_grad"] is not None:
             sk = wk - st["old_wk"]
             yk = g - st["prev_grad"]
@@ -396,22 +410,25 @@ class LSSR1_TR(Optimizer):
                 self.hess.update_memory(sk, yk)
         st["old_wk"], st["prev_grad"] = wk.clone(), g.clone()
 
-        # Solve trust-region subproblem
+        # Solve trust-region subproblem: second-order if memory available, otherwise first-order
         if sec and len(self.hess._S) > 0:
-            p_star, pred = solve_tr_second_order(g, gn, self.defaults["delta"], self.hess, self.obs, self.defaults["tol"])
+            p_star, pred = solve_tr_second_order(
+                g, gn, self.defaults["delta"], self.hess, self.obs, self.defaults["tol"]
+            )
         else:
-            p_star, pred = solve_tr_first_order(g, gn, self.defaults["delta"], self.defaults["tol"])
+            p_star, pred = solve_tr_first_order(
+                g, gn, self.defaults["delta"], self.defaults["tol"]
+            )
 
-        # Momentum-like update for vk; reuse existing flat buffer
+        # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
         vk.mul_(self.defaults["mu"]).add_(wk - st["old_wk"])
-        # Bound vk to trust-region radius
         vk_norm_sq = vk.dot(vk)
         if vk_norm_sq > 0.0:
             vk_norm = vk_norm_sq.sqrt()
             scale = min(1.0, self.defaults["delta"] / vk_norm)
             vk.mul_(scale)
-        # Combine step and bound to TR radius
+        # Combine p_star and vk, then bound combined step to trust-region radius
         p_comb = p_star + vk
         p_comb_norm_sq = p_comb.dot(p_comb)
         if p_comb_norm_sq > 0.0:
@@ -420,11 +437,11 @@ class LSSR1_TR(Optimizer):
             p_comb.mul_(scale)
         st["flat_vk"] = vk.clone()  # Store updated vk for next iteration
 
-        # Prepare for line search
+        # Prepare line search with initial loss and directional derivative
         phi_0 = loss
         dphi_0 = g.dot(p_comb)
 
-        # Strong Wolfe line search (preferred)
+        # Perform strong Wolfe line search to compute step length alpha
         alpha, new_loss, new_g = self._strong_wolfe_line_search(
             wk,
             p_comb,
@@ -438,29 +455,32 @@ class LSSR1_TR(Optimizer):
             max_iter=self.defaults["max_wolfe_iter"],
         )
 
-        # Apply final step
+        # Apply final parameter update: w_new = wk + alpha * p_comb
         p_step = alpha * p_comb
         self._unflatten_update(wk + p_step)
 
-        # Update trust-region radius based on ρ = (f(new)−f(old)) / predicted
+        # Compute trust-region ratio ρ = (f(new) − f(old)) / predicted
         rho = (
             (new_loss - loss) / pred if (alpha > 0 and pred < 0) else 0.0
         )
         s_norm_sq = p_step.dot(p_step)
         s_norm = math.sqrt(s_norm_sq.item())
         delta_old = self.defaults["delta"]
+
+        # Adjust trust-region radius based on ρ and step norm
         if rho < self.defaults["tau_2"]:
-            # Shrink trust region
+            # Shrink trust region if poor agreement
             delta_new = min(
                 self.defaults["nu_1"] * delta_old,
                 self.defaults["nu_2"] * s_norm**2,
             )
         elif rho >= self.defaults["tau_3"] and s_norm >= self.defaults["nu_3"] * delta_old:
-            # Expand trust region
+            # Expand trust region if very successful
             delta_new = self.defaults["nu_4"] * delta_old
         else:
             delta_new = delta_old
-        # Clip to [min_delta, max_delta]
+
+        # Clip trust-region radius between [min_delta, max_delta]
         self.defaults["delta"] = max(
             self.defaults["min_delta"],
             min(delta_new, self.defaults["max_delta"]),

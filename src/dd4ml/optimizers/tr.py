@@ -9,33 +9,45 @@ from dd4ml.utility import get_trust_region_params, solve_tr_first_order, solve_t
 class TR(Optimizer):
     @staticmethod
     def setup_TR_args(cfg):
+        # Populate configuration with trust-region parameters
         for k, v in get_trust_region_params(cfg).items():
             setattr(cfg, k, v)
         return cfg
 
     def __init__(self, params: Iterable[torch.nn.Parameter], **kwargs) -> None:
+        # Set default learning rate to delta if not provided
         defaults = {**kwargs, 'lr': kwargs.get('delta', 0.1)}
         super().__init__(params, defaults)
+
+        # Flatten list of all parameters
         self.ps = [p for g in self.param_groups for p in g['params']]
-        # precompute shapes and offsets
+
+        # Record parameter shapes and number of elements
         self.shapes = [p.shape for p in self.ps]
         self.numels = [p.numel() for p in self.ps]
+
+        # Compute offsets to index into flat buffers
         self.offsets = torch.tensor([0] + self.numels).cumsum(0)
         total = int(self.offsets[-1])
-        # allocate reusable buffers
-        self._grad_buf = torch.zeros(total, device=self.ps[0].device)
+
+        # Allocate reusable buffers for gradients and steps
+        device = self.ps[0].device
+        self._grad_buf = torch.zeros(total, device=device)
         self._step_buf = torch.zeros_like(self._grad_buf)
 
         group = self.param_groups[0]
         if group['second_order']:
+            # Initialise LSR1 Hessian approximation if using second-order TR
             dev = self.ps[0].device
             self.hess = LSR1(1.0, int(group['mem_length']), dev, group['tol'])
             self.obs = OBS()
         else:
+            # Disable Hessian and OBS if first-order
             self.hess = None  # type: ignore
             self.obs = None  # type: ignore
 
     def _flat_grad(self) -> torch.Tensor:
+        # Construct a flat gradient vector from parameter gradients
         self._grad_buf.zero_()
         for i, p in enumerate(self.ps):
             if p.grad is not None:
@@ -44,30 +56,11 @@ class TR(Optimizer):
         return self._grad_buf
 
     def _apply_update(self, sign: float = 1.0) -> None:
+        # Apply or revert the step stored in _step_buf to model parameters
         with torch.no_grad():
             for i, p in enumerate(self.ps):
                 start, end = int(self.offsets[i]), int(self.offsets[i + 1])
                 p.add_(self._step_buf[start:end].view(self.shapes[i]) * sign)
-
-    def _solve_tr_first_order(self, g: torch.Tensor, gn: float, delta: float) -> Tuple[torch.Tensor, float]:
-        if gn <= self.defaults['tol']:
-            return torch.zeros_like(g), 0.0
-        step = -g.mul(delta / gn)
-        return step, delta * gn
-
-    def _solve_tr_second_order(self, g: torch.Tensor, gn: float, delta: float) -> Tuple[torch.Tensor, float]:
-        if gn <= self.defaults["tol"]:
-            return torch.zeros_like(g), 0.0
-        self.hess.precompute()  # type: ignore
-        step = self.obs.solve_tr_subproblem(
-            g,
-            g.new_tensor(delta),
-            self.hess.gamma,
-            self.hess.Psi,
-            self.hess.Minv,  # type: ignore
-        )
-        predicted = -(g.dot(step) + 0.5 * step.dot(self.hess.B(step)))  # type: ignore
-        return step, predicted.item()
 
     def step(self, closure, **_) -> Tuple[float, torch.Tensor]:
         group = self.param_groups[0]
@@ -82,37 +75,46 @@ class TR(Optimizer):
         norm_type = group['norm_type']
         second_order = group['second_order']
 
+        # Evaluate current loss and flatten gradient
         loss_val = _['precomp_loss'] if 'precomp_loss' in _ else closure(compute_grad=True)
         grad = _['precomp_grad'] if 'precomp_grad' in _ else self._flat_grad()
         gn = torch.norm(grad, p=norm_type).item()
+
+        # Check for convergence
         if gn <= tol:
             return loss_val.item(), grad
 
+        # Decide whether to use second-order step if memory is populated
         use_second = second_order and self.hess and len(self.hess._S) > 0  # type: ignore
         if use_second:
+            # Solve second-order subproblem
             self._step_buf, predicted = solve_tr_second_order(grad, gn, delta, self.hess, self.obs, tol)
         else:
+            # Solve first-order subproblem
             self._step_buf, predicted = solve_tr_first_order(grad, gn, delta, tol)
 
-        # apply update
+        # Apply proposed step
         self._apply_update()
         new_loss = closure(compute_grad=True)
         new_grad = self._flat_grad()
 
+        # Compute actual reduction and ratio ρ
         actual = (loss_val - new_loss).item()
         rho = actual / (predicted + 1e-12)
 
         if actual > 0 and rho >= nu_dec:
+            # Accept step: update Hessian memory if second-order
             if second_order:
                 self.hess.update_memory(
                     self._step_buf.clone(), (new_grad - grad).clone()  # type: ignore
                 )
+            # Increase trust-region radius if step was on boundary and ratio is high
             if rho >= nu_inc and self._step_buf.norm() >= 0.9 * delta:
                 group['delta'] = min(max_delta, inc_factor * delta)
                 group['lr'] = group['delta']
             return new_loss, new_grad
         else:
-            # revert
+            # Reject step: revert parameters and shrink trust-region radius
             self._apply_update(sign=-1.0)
             group['delta'] = max(min_delta, dec_factor * delta)
             group['lr'] = group['delta']
