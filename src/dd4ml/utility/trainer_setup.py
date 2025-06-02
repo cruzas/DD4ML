@@ -165,7 +165,7 @@ def get_config_model_and_trainer(args, wandb_config):
             max_local_iters=all_config.trainer.max_local_iters,
             dogleg=False,
             APTS_in_data_sync_strategy="average",
-            step_strategy="mean",
+            t_strategy="mean",
         )
     elif optimizer_name == "apts_d":
         from dd4ml.optimizers.apts_d import APTS_D

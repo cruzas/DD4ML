@@ -49,6 +49,7 @@ def get_lssr1_trust_region_params(config):
         "nu_4": 1.2,
         "tol": config.tol,
         "norm_type": config.norm_type,
+        "sync": True,
     }
 
 def get_lssr1_local_trust_region_params(config):
@@ -74,6 +75,7 @@ def get_lssr1_local_trust_region_params(config):
         "nu_4": 1.2,
         "tol": config.tol,
         "norm_type": config.norm_type,
+        "sync": False,
     }
 
 def get_trust_region_params(config):

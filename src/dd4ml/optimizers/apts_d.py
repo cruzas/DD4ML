@@ -123,6 +123,7 @@ class APTS_D(Optimizer):
             self.local_model.parameters(), **local_opt_params
         )
         self.delta = self.global_optimizer.defaults["delta"]  # will be kept in sync
+        self.batch = -1
 
     def update_pytorch_lr(self) -> None:
         """Update the learning rate in PyTorch's param_groups."""
@@ -164,9 +165,10 @@ class APTS_D(Optimizer):
         return loss
 
     # --------------------------------------------------------------------- #
-    # One optimisation step
+    # One optimization step
     # --------------------------------------------------------------------- #
     def step(self, inputs, labels):
+        self.batch += 1
         # Short-hand hyper-parameters ------------------------------------- #
         hp = self.defaults
         norm_type = hp["norm_type"]
@@ -211,11 +213,13 @@ class APTS_D(Optimizer):
                 precomp_grad=local_grad,
             )
             total_local_grad_evals_counter += 1
-            local_grad_norm = local_grad.norm(p=norm_type).item()
-            if local_grad_norm <= self.local_optimizer.defaults["tol"]:
+            
+            local_grad_norm = local_grad.norm(p=norm_type)
+            if self.nr_models > 1: # for proper synchronization
+                dist.all_reduce(local_grad_norm, op=dist.ReduceOp.MAX)
+            if local_grad_norm.item() <= self.local_optimizer.defaults["tol"]:
                 break
-        
-        dist.barrier()
+            
         if self.nr_models > 1:
             dist.all_reduce(total_local_grad_evals_counter, op=dist.ReduceOp.SUM)
             total_local_grad_evals_counter /= self.nr_models
@@ -238,6 +242,7 @@ class APTS_D(Optimizer):
             if self.nr_models > 1:
                 dist.all_reduce(step_vec, op=dist.ReduceOp.SUM)
                 dist.all_reduce(local_reduction, op=dist.ReduceOp.SUM)
+                local_reduction /= self.nr_models
                 if norm_type == math.inf:
                     step_vec /= self.nr_models
 
