@@ -85,6 +85,7 @@ class APTS_D(Optimizer):
             max_local_iters=max_local_iters,
             max_global_iters=max_global_iters,
             tol=float(tol),
+            diff_tol=1e-8,  # Default tolerance for diff comparison
             delta=float(delta),
             min_delta=float(min_delta) if min_delta is not None else 1e-3,
             lr=float(delta),
@@ -98,7 +99,7 @@ class APTS_D(Optimizer):
 
         # Basic state ------------------------------------------------------ #
         self.model = model
-        self.local_model = clone_model(model)
+        self.loc_model = clone_model(model)
         self.nr_models = nr_models
         self.device = (
             device
@@ -110,7 +111,7 @@ class APTS_D(Optimizer):
             )
         )
         self.criterion = criterion
-        self.grad_evals_counter = torch.zeros(1, device=self.device)
+        self.grad_evals = torch.tensor(0.0, device=self.device)
 
         # Buffers for flattened parameters -------------------------------- #
         sample_flat = parameters_to_vector(model.parameters())
@@ -118,11 +119,11 @@ class APTS_D(Optimizer):
         self._local_flat_buffer = torch.empty_like(sample_flat)
 
         # Inner optimisers ------------------------------------------------- #
-        self.global_optimizer = global_opt(self.model.parameters(), **global_opt_params)
-        self.local_optimizer = local_opt(
-            self.local_model.parameters(), **local_opt_params
+        self.glob_optim = global_opt(self.model.parameters(), **global_opt_params)
+        self.loc_optim = local_opt(
+            self.loc_model.parameters(), **local_opt_params
         )
-        self.delta = self.global_optimizer.defaults["delta"]  # will be kept in sync
+        self.delta = self.glob_optim.defaults["delta"]  # will be kept in sync
         self.batch = -1
 
     def update_pytorch_lr(self) -> None:
@@ -133,28 +134,28 @@ class APTS_D(Optimizer):
     # --------------------------------------------------------------------- #
     # Closure helpers
     # --------------------------------------------------------------------- #
-    def non_foc_local_closure(self, compute_grad: bool = False):
-        self.local_optimizer.zero_grad()
-        loss = self.criterion(self.local_model(self.inputs), self.labels)
+    def non_foc_loc_closure(self, compute_grad: bool = False):
+        self.loc_optim.zero_grad()
+        loss = self.criterion(self.loc_model(self.inputs), self.labels)
         if torch.is_grad_enabled() or compute_grad:
             loss.backward()
         return loss
 
-    def foc_local_closure(self, compute_grad: bool = False):
-        self.local_optimizer.zero_grad()
-        local_loss = self.non_foc_local_closure(compute_grad)
+    def foc_loc_closure(self, compute_grad: bool = False):
+        self.loc_optim.zero_grad()
+        loc_loss = self.non_foc_loc_closure(compute_grad)
 
         # Flattened parameters (global vs. local) -------------------------- #
         global_flat = flatten_params(self.model, self._flat_params_buffer)
-        local_flat = flatten_params(self.local_model, self._local_flat_buffer)
+        local_flat = flatten_params(self.loc_model, self._local_flat_buffer)
         diff = local_flat - global_flat
-        if not torch.all(torch.abs(diff) < 1e-8):
-            if self.residual.dim() == 0 and self.residual.item() == 0:
-                self.residual = torch.zeros_like(diff)
-            local_loss = local_loss + (self.residual @ diff)
-        return local_loss
+        if not torch.all(torch.abs(diff) < self.defaults["diff_tol"]):
+            if self.resid.dim() == 0 and self.resid.item() == 0:
+                self.resid = torch.zeros_like(diff)
+            loc_loss = loc_loss + (self.resid @ diff)
+        return loc_loss
 
-    def global_closure(self, compute_grad: bool = False):
+    def glob_closure(self, compute_grad: bool = False):
         self.zero_grad()
         loss = self.criterion(self.model(self.inputs), self.labels)
         if torch.is_grad_enabled() or compute_grad:
@@ -176,127 +177,142 @@ class APTS_D(Optimizer):
         # ------------------------------------------------------------------ #
         # Book-keeping and initial evaluations
         # ------------------------------------------------------------------ #
-        self.grad_evals_counter.zero_()
+        self.grad_evals.zero_()
+        loc_grad_evals = torch.tensor(0.0, device=self.device)
+        
         self.inputs, self.labels = inputs, labels
-        local_closure = (
-            self.foc_local_closure if hp["foc"] else self.non_foc_local_closure
+        loc_closure = (
+            self.foc_loc_closure if hp["foc"] else self.non_foc_loc_closure
         )
-
         with torch.no_grad():
-            initial_flat = flatten_params(self.model, self._flat_params_buffer).clone()
-
-        initial_global_loss = self.global_closure()
-        self.grad_evals_counter += 1
-
-        total_local_grad_evals_counter = torch.tensor(0.0, device=self.device)
-        initial_local_loss = local_closure()
-        total_local_grad_evals_counter += 1
-
-        global_grad = parameters_to_vector(
-            [p.grad for p in self.model.parameters()]
-        ).detach()
-        local_grad = (
-            parameters_to_vector([p.grad for p in self.local_model.parameters()])
-            .detach()
-            .clone()
-        )
-        self.residual = global_grad - local_grad
+            init_glob_flat = flatten_params(self.model, self._flat_params_buffer).clone()
+        
+        init_glob_loss = self.glob_closure(compute_grad=True)
+        with torch.no_grad():
+            self.grad_evals += 1
+        init_loc_loss = loc_closure(compute_grad=True)
+        loc_grad_evals += 1
+        
+        with torch.no_grad():
+            init_glob_grad = parameters_to_vector(
+                [p.grad for p in self.model.parameters()]
+            ).detach()
+            loc_grad = (
+                parameters_to_vector([p.grad for p in self.loc_model.parameters()])
+                .detach()
+                .clone()
+            )
+        self.resid = init_glob_grad - loc_grad
 
         # ------------------------------------------------------------------ #
         # Local steps
         # ------------------------------------------------------------------ #
-        local_loss = initial_local_loss
+        loc_loss = init_loc_loss
         for _ in range(hp["max_local_iters"]):
-            local_loss, local_grad = self.local_optimizer.step(
-                closure=local_closure,
-                precomp_loss=local_loss,
-                precomp_grad=local_grad,
+            loc_loss, loc_grad = self.loc_optim.step(
+                closure=loc_closure,
+                precomp_loss=loc_loss,
+                precomp_grad=loc_grad,
             )
-            total_local_grad_evals_counter += 1
-            
-            local_grad_norm = local_grad.norm(p=norm_type)
-            if self.nr_models > 1: # for proper synchronization
-                dist.all_reduce(local_grad_norm, op=dist.ReduceOp.MAX)
-            if local_grad_norm.item() <= self.local_optimizer.defaults["tol"]:
+            loc_grad_evals += 1
+            loc_grad_norm = loc_grad.norm(p=norm_type)
+            if self.nr_models > 1:
+                dist.all_reduce(loc_grad_norm, op=dist.ReduceOp.MAX)
+            if loc_grad_norm.item() <= self.loc_optim.defaults["tol"]:
                 break
             
         if self.nr_models > 1:
-            dist.all_reduce(total_local_grad_evals_counter, op=dist.ReduceOp.SUM)
-            total_local_grad_evals_counter /= self.nr_models
-        self.grad_evals_counter += total_local_grad_evals_counter
+            dist.all_reduce(loc_grad_evals, op=dist.ReduceOp.SUM)
+            loc_grad_evals /= self.nr_models
+        self.grad_evals += loc_grad_evals
 
-        current_flat = flatten_params(self.local_model, self._local_flat_buffer)
-        step_vec = current_flat - initial_flat
+        curr_flat = flatten_params(self.loc_model, self._local_flat_buffer)
+        step_vec = curr_flat - init_glob_flat
 
         # ------------------------------------------------------------------ #
         # Step correction / aggregation
         # ------------------------------------------------------------------ #
         with torch.no_grad():
             # Ensure tensor type for arithmetic
-            if not torch.is_tensor(local_loss):
-                local_loss = torch.tensor(local_loss, device=self.device)
+            if isinstance(loc_loss, (int, float)):
+                loc_loss = torch.tensor(loc_loss, device=self.device)
+            elif torch.is_tensor(loc_loss):
+                loc_loss = loc_loss.to(self.device)
             else:
-                local_loss = local_loss.to(self.device)
+                raise TypeError(f"Unexpected type for loc_loss: {type(loc_loss)}. Expected int, float, or torch.Tensor.")
 
-            local_reduction = initial_local_loss - local_loss.detach()
+            loc_red = init_loc_loss - loc_loss.detach()
             if self.nr_models > 1:
+                # Sum step vector and local reduction across all local models
                 dist.all_reduce(step_vec, op=dist.ReduceOp.SUM)
-                dist.all_reduce(local_reduction, op=dist.ReduceOp.SUM)
-                local_reduction /= self.nr_models
+                dist.all_reduce(loc_red, op=dist.ReduceOp.SUM)
+                loc_red /= self.nr_models
                 if norm_type == math.inf:
                     step_vec /= self.nr_models
-
-            restore_params(self.model, initial_flat + step_vec)
+            # Set the model parameters to the new values for trial evaluation
+            restore_params(self.model, init_glob_flat + step_vec)
 
         # ------------------------------------------------------------------ #
         # Global acceptance test
         # ------------------------------------------------------------------ #
-        trial_loss = self.global_closure()
+        if loc_red == 0:
+            accept_ratio = float('inf')  # Assign a large value to indicate no reduction
+        else:
+            trial_loss = self.glob_closure(compute_grad=True)
+            trial_grad = parameters_to_vector(
+                [p.grad for p in self.model.parameters()]
+            ).detach()
+            accept_ratio = (init_glob_loss - trial_loss) / loc_red
         with torch.no_grad():
-            acceptance_ratio = (initial_global_loss - trial_loss) / local_reduction
-
-            if acceptance_ratio < self.defaults["nu_dec"]:
+            if accept_ratio < self.defaults["nu_dec"]:
                 self.delta = max(self.delta * self.defaults["dec_factor"], self.defaults["min_delta"])
                 self.update_pytorch_lr()
-                
-                restore_params(self.model, initial_flat)
-                new_loss = initial_global_loss
+                restore_params(self.model, init_glob_flat)
+                new_loss = init_glob_loss
+                new_grad = init_glob_grad
             else:
-                if acceptance_ratio > self.defaults["nu_inc"]:
+                if accept_ratio > self.defaults["nu_inc"]:
                     self.delta = min(
                         self.delta * self.defaults["inc_factor"],
                         self.defaults["max_delta"],
                     )
                     self.update_pytorch_lr() 
                 new_loss = trial_loss
+                new_grad = trial_grad
 
-            self.global_optimizer.defaults["delta"] = self.delta
+            self.glob_optim.defaults["delta"] = self.delta
 
         # ------------------------------------------------------------------ #
         # Optional global pass
         # ------------------------------------------------------------------ #
         if hp["global_pass"]:
+            # Perform global optimization steps using the global optimizer.
+            # The `step` method is expected to minimize the loss function
+            # provided by the `closure` and optionally use precomputed loss
+            # or gradient values for efficiency.
             for _ in range(hp["max_global_iters"]):
                 extra_args = {"precomp_loss": new_loss}
-                if new_loss == initial_global_loss:
-                    extra_args["precomp_grad"] = global_grad
-
+                extra_args["precomp_grad"] = new_grad
+                
                 # Perform the global step
-                new_loss, new_grad_norm = self.global_optimizer.step(
-                    closure=self.global_closure, **extra_args
+                new_loss, new_grad = self.glob_optim.step(
+                    closure=self.glob_closure, **extra_args
                 )
-            self.grad_evals_counter += 1
+            self.grad_evals += 1
 
-        # ------------------------------------------------------------------ #
-        # House-keeping
         # ------------------------------------------------------------------ #
         with torch.no_grad():
-            self.delta = self.global_optimizer.defaults["delta"]
+            self.delta = self.glob_optim.defaults["delta"]
             self.update_pytorch_lr()
             
-            self.local_optimizer.delta = self.global_optimizer.defaults["delta"]
-            if norm_type != math.inf:
-                self.local_optimizer.defaults["delta"] /= self.nr_models
-            self.local_model.load_state_dict(get_state_dict(self.model))
+            self.loc_optim.delta = self.glob_optim.defaults["delta"]
+            if norm_type != math.inf and self.nr_models > 1:
+                self.loc_optim.defaults["delta"] /= self.nr_models
+            # Only update local_model if its state differs from model's state
+            if any(
+                not torch.equal(p1, p2)
+                for p1, p2 in zip(self.loc_model.parameters(), self.model.parameters())
+            ):
+                self.loc_model.load_state_dict(get_state_dict(self.model))
 
         return new_loss

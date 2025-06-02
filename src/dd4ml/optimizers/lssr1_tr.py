@@ -107,6 +107,7 @@ class LSSR1_TR(Optimizer):
         Rank-0 reduce-average and broadcast for identical bit patterns.
         Input: 0-dim tensor
         Output: 0-dim tensor (float64→float32 if needed)
+        If `self.sync` is `False`, the input tensor is returned unchanged.
         """
         if not (self.sync and self.world_size > 1):
             return value
@@ -140,7 +141,7 @@ class LSSR1_TR(Optimizer):
             return torch.zeros_like(g), 0.0
         step = -g * (delta / gn)
         predicted = delta * gn
-        return step, float(predicted)
+        return step, predicted
 
     def _solve_tr_second_order(
         self, g: Tensor, gn: float, delta: float
@@ -158,7 +159,7 @@ class LSSR1_TR(Optimizer):
         g_dot_p = torch.dot(g, step)
         p_B_p = torch.dot(step, self.hess.B(step))
         predicted = -(g_dot_p + 0.5 * p_B_p)
-        return step, float(predicted)
+        return step, predicted.item()
 
     def _evaluate_function_and_gradient(
         self,
@@ -213,8 +214,11 @@ class LSSR1_TR(Optimizer):
                 alpha_j = 0.5 * (alpha_lo + alpha_hi)
             else:
                 denom = 2 * (phi_hi - phi_lo - dphi_lo * (alpha_hi - alpha_lo))
-                cond = torch.abs(denom) > 1e-12
-                interp = alpha_lo - dphi_lo * (alpha_hi - alpha_lo) ** 2 / denom
+                if denom == 0:
+                    interp = 0.5 * (alpha_lo + alpha_hi)  # Fallback to midpoint
+                else:
+                    cond = torch.abs(denom) > 1e-12
+                    interp = alpha_lo - dphi_lo * (alpha_hi - alpha_lo) ** 2 / denom
                 safe_low = alpha_lo + 0.1 * (alpha_hi - alpha_lo)
                 safe_high = alpha_hi - 0.1 * (alpha_hi - alpha_lo)
                 alpha_j = torch.where(
@@ -261,7 +265,7 @@ class LSSR1_TR(Optimizer):
         max_iter: int = 10,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
-        Returns (alpha, phi, grad) as 0‐dim Tensors, synchronised across ranks
+        Returns (alpha, phi, grad) as 0-dim Tensors, synchronised across ranks
         if self.sync=True and world_size>1.
         """
         tol = torch.tensor(self.defaults["tol"], device=wk.device)
@@ -332,6 +336,7 @@ class LSSR1_TR(Optimizer):
         """
         alpha = alpha_0
         
+        min_alpha = 1e-6  # Define a minimum threshold for alpha
         for _ in range(max_iter):
             phi_alpha, grad_alpha, dphi_alpha = self._evaluate_function_and_gradient(wk, p, alpha, closure)
             
@@ -343,16 +348,18 @@ class LSSR1_TR(Optimizer):
                 return alpha, phi_alpha, grad_alpha
             
             alpha *= 0.5
+            if alpha < min_alpha:  # Check if alpha is below the minimum threshold
+                break
         
         # If no acceptable step found, return zero step
         return 0.0, phi_0, self._flatten_grads()
 
     def step(self, closure: Callable[[], Tensor], **_) -> Tuple[float, float]:
-        loss = float(closure(compute_grad=True))
-        g = self._flatten_grads()
+        loss = _['precomp_loss'] if 'precomp_loss' in _ else closure(compute_grad=True)
+        g = _['precomp_grad'] if 'precomp_grad' in _ else self._flatten_grads()
         gn = torch.norm(g, p=self.defaults["norm_type"]).item()
         if gn <= self.defaults["tol"]:
-            return loss, gn
+            return loss.item(), gn
 
         wk = self._flatten_params().clone()
         st = self.state
@@ -385,7 +392,7 @@ class LSSR1_TR(Optimizer):
 
         # Prepare for line search
         phi_0 = loss
-        dphi_0 = g.dot(p_comb).item()
+        dphi_0 = g.dot(p_comb)
         
         # Use strong Wolfe line search with zoom
         alpha, new_loss, new_g = self._strong_wolfe_line_search(

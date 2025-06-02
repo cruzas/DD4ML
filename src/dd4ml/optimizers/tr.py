@@ -53,7 +53,7 @@ class TR(Optimizer):
         if gn <= self.defaults['tol']:
             return torch.zeros_like(g), 0.0
         step = -g.mul(delta / gn)
-        return step, float(delta * gn)
+        return step, delta * gn
 
     def _solve_tr_second_order(self, g: torch.Tensor, gn: float, delta: float) -> Tuple[torch.Tensor, float]:
         if gn <= self.defaults["tol"]:
@@ -67,7 +67,7 @@ class TR(Optimizer):
             self.hess.Minv,  # type: ignore
         )
         predicted = -(g.dot(step) + 0.5 * step.dot(self.hess.B(step)))  # type: ignore
-        return step, float(predicted)
+        return step, predicted.item()
 
     def step(self, closure, **_) -> Tuple[float, torch.Tensor]:
         group = self.param_groups[0]
@@ -82,11 +82,11 @@ class TR(Optimizer):
         norm_type = group['norm_type']
         second_order = group['second_order']
 
-        loss_val = float(_['precomp_loss']) if 'precomp_loss' in _ else float(closure(compute_grad=True))
+        loss_val = _['precomp_loss'] if 'precomp_loss' in _ else closure(compute_grad=True)
         grad = _['precomp_grad'] if 'precomp_grad' in _ else self._flat_grad()
         gn = torch.norm(grad, p=norm_type).item()
         if gn <= tol:
-            return loss_val, grad
+            return loss_val.item(), grad
 
         use_second = second_order and self.hess and len(self.hess._S) > 0  # type: ignore
         if use_second:
@@ -96,10 +96,10 @@ class TR(Optimizer):
 
         # apply update
         self._apply_update()
-        new_loss = float(closure(compute_grad=True))
+        new_loss = closure(compute_grad=True)
         new_grad = self._flat_grad()
 
-        actual = loss_val - new_loss
+        actual = (loss_val - new_loss).item()
         rho = actual / (predicted + 1e-12)
 
         if actual > 0 and rho >= nu_dec:
