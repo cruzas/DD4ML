@@ -70,7 +70,6 @@ class APTS_D(Optimizer):
         *,
         global_pass=True,
         foc=True,
-        correct_step=True,
         norm_type=2,
         max_local_iters=3,
         max_global_iters=3,
@@ -80,7 +79,6 @@ class APTS_D(Optimizer):
         defaults = dict(
             global_pass=bool(global_pass),
             foc=bool(foc),
-            correct_step=bool(correct_step),
             norm_type=norm_type,
             max_local_iters=max_local_iters,
             max_global_iters=max_global_iters,
@@ -218,13 +216,11 @@ class APTS_D(Optimizer):
             loc_grad_norm = loc_grad.norm(p=norm_type)
             if self.nr_models > 1:
                 dist.all_reduce(loc_grad_norm, op=dist.ReduceOp.MAX)
+            # For proper synchronization, break when the norm is small enough in even one process
             if loc_grad_norm.item() <= self.loc_optim.defaults["tol"]:
                 break
             
-        if self.nr_models > 1:
-            dist.all_reduce(loc_grad_evals, op=dist.ReduceOp.SUM)
-            loc_grad_evals /= self.nr_models
-        self.grad_evals += loc_grad_evals
+        self.grad_evals += (loc_grad_evals * self.nr_models)
 
         curr_flat = flatten_params(self.loc_model, self._local_flat_buffer)
         step_vec = curr_flat - init_glob_flat
@@ -243,28 +239,30 @@ class APTS_D(Optimizer):
 
             loc_red = init_loc_loss - loc_loss.detach()
             if self.nr_models > 1:
-                # Sum step vector and local reduction across all local models
+                # To build the global step, we need to reduce the step vector.
                 dist.all_reduce(step_vec, op=dist.ReduceOp.SUM)
-                dist.all_reduce(loc_red, op=dist.ReduceOp.SUM)
-                loc_red /= self.nr_models
                 if norm_type == math.inf:
                     step_vec /= self.nr_models
+                # loc_red now becomes the sum of local losses across all models.
+                dist.all_reduce(loc_red, op=dist.ReduceOp.SUM)
+                loc_red /= self.nr_models
+                
             # Set the model parameters to the new values for trial evaluation
             restore_params(self.model, init_glob_flat + step_vec)
 
         # ------------------------------------------------------------------ #
         # Global acceptance test
         # ------------------------------------------------------------------ #
-        if loc_red == 0:
+        trial_loss = self.glob_closure(compute_grad=True)
+        trial_grad = parameters_to_vector(
+            [p.grad for p in self.model.parameters()]
+        ).detach()
+        if loc_red < self.defaults["tol"]:
             accept_ratio = float('inf')  # Assign a large value to indicate no reduction
         else:
-            trial_loss = self.glob_closure(compute_grad=True)
-            trial_grad = parameters_to_vector(
-                [p.grad for p in self.model.parameters()]
-            ).detach()
             accept_ratio = (init_glob_loss - trial_loss) / loc_red
         with torch.no_grad():
-            if accept_ratio < self.defaults["nu_dec"]:
+            if loc_red < self.defaults["tol"] or accept_ratio < self.defaults["nu_dec"]:
                 self.delta = max(self.delta * self.defaults["dec_factor"], self.defaults["min_delta"])
                 self.update_pytorch_lr()
                 restore_params(self.model, init_glob_flat)
@@ -298,7 +296,11 @@ class APTS_D(Optimizer):
                 new_loss, new_grad = self.glob_optim.step(
                     closure=self.glob_closure, **extra_args
                 )
-            self.grad_evals += 1
+                
+                # Break if the gradient norm is small enough (already synchronized because new_grad is same across all processes)
+                new_grad_norm = new_grad.norm(p=norm_type)
+                if new_grad_norm.item() <= self.glob_optim.defaults["tol"]:
+                    break
 
         # ------------------------------------------------------------------ #
         with torch.no_grad():
@@ -308,11 +310,5 @@ class APTS_D(Optimizer):
             self.loc_optim.delta = self.glob_optim.defaults["delta"]
             if norm_type != math.inf and self.nr_models > 1:
                 self.loc_optim.defaults["delta"] /= self.nr_models
-            # Only update local_model if its state differs from model's state
-            if any(
-                not torch.equal(p1, p2)
-                for p1, p2 in zip(self.loc_model.parameters(), self.model.parameters())
-            ):
-                self.loc_model.load_state_dict(get_state_dict(self.model))
-
+            self.loc_model.load_state_dict(get_state_dict(self.model))
         return new_loss

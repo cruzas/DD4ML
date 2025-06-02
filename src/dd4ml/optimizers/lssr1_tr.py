@@ -214,10 +214,10 @@ class LSSR1_TR(Optimizer):
                 alpha_j = 0.5 * (alpha_lo + alpha_hi)
             else:
                 denom = 2 * (phi_hi - phi_lo - dphi_lo * (alpha_hi - alpha_lo))
-                if denom == 0:
+                cond = torch.abs(denom) > self.defaults["tol"]
+                if not cond:
                     interp = 0.5 * (alpha_lo + alpha_hi)  # Fallback to midpoint
                 else:
-                    cond = torch.abs(denom) > 1e-12
                     interp = alpha_lo - dphi_lo * (alpha_hi - alpha_lo) ** 2 / denom
                 safe_low = alpha_lo + 0.1 * (alpha_hi - alpha_lo)
                 safe_high = alpha_hi - 0.1 * (alpha_hi - alpha_lo)
@@ -336,7 +336,7 @@ class LSSR1_TR(Optimizer):
         """
         alpha = alpha_0
         
-        min_alpha = 1e-6  # Define a minimum threshold for alpha
+        min_alpha = self.defaults["tol"]  # Define a minimum threshold for alpha
         for _ in range(max_iter):
             phi_alpha, grad_alpha, dphi_alpha = self._evaluate_function_and_gradient(wk, p, alpha, closure)
             
@@ -357,9 +357,13 @@ class LSSR1_TR(Optimizer):
     def step(self, closure: Callable[[], Tensor], **_) -> Tuple[float, float]:
         loss = _['precomp_loss'] if 'precomp_loss' in _ else closure(compute_grad=True)
         g = _['precomp_grad'] if 'precomp_grad' in _ else self._flatten_grads()
-        gn = torch.norm(g, p=self.defaults["norm_type"]).item()
+        gn = torch.norm(g, p=self.defaults["norm_type"])
+        if self.sync and self.world_size > 1:
+            loss = self._avg_scalar(loss)
+            dist.broadcast(g, src=0)
+            gn = self._avg_scalar(gn)
         if gn <= self.defaults["tol"]:
-            return loss.item(), gn
+            return loss.item(), g
 
         wk = self._flatten_params().clone()
         st = self.state
@@ -403,6 +407,13 @@ class LSSR1_TR(Optimizer):
             alpha_max=self.defaults["alpha_max"],
             max_iter=self.defaults["max_wolfe_iter"]
         )
+        # alpha, new_loss, new_g = self._backtracking_line_search(
+        #     wk, p_comb, phi_0, dphi_0, closure,
+        #     alpha_0=self.defaults["lr"],
+        #     c1=self.defaults["c1"],
+        #     c2=self.defaults["c2"],
+        #     max_iter=self.defaults["max_wolfe_iter"]
+        # )
     
         p_step = alpha * p_comb
         self._unflatten_update(wk + p_step)
