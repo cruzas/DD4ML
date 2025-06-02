@@ -9,6 +9,7 @@ import torch.distributed as dist
 
 from dd4ml.solvers.obs import OBS
 from .lsr1 import LSR1
+from dd4ml.utility.optimizer_utils import solve_tr_first_order, solve_tr_second_order
 
 
 class LSSR1_TR(Optimizer):
@@ -41,8 +42,9 @@ class LSSR1_TR(Optimizer):
     ):
         param_list = list(params)
         if not param_list:
-            raise ValueError("Optimizer got an empty parameter list")
+            raise ValueError("Optimiser got an empty parameter list")
 
+        # Store hyperparameters in defaults
         defaults = dict(
             lr=lr,
             delta=delta,
@@ -68,50 +70,58 @@ class LSSR1_TR(Optimizer):
         )
         super().__init__(param_list, defaults)
 
-        p0 = (
+        # Determine device/dtype from first parameter
+        first_param = (
             param_list[0]["params"][0]
             if isinstance(param_list[0], dict)
             else param_list[0]
         )
+        device = first_param.device
+        dtype = first_param.dtype
 
-        shapes, offsets = [], [0]
+        # Compute shapes and offsets for flattening
+        shapes: list[torch.Size] = []
+        offsets = [0]
         for p in self.param_groups[0]["params"]:
             n = p.numel()
             shapes.append(p.shape)
             offsets.append(offsets[-1] + n)
-        total = offsets[-1]
+        total_size = offsets[-1]
         self._shapes = shapes
         self._offsets = offsets
 
+        # Preallocate flat buffers for parameters, gradient, previous step
         st = self.state
-        st["flat_wk"] = torch.zeros(total, device=p0.device, dtype=p0.dtype)
+        st["flat_wk"] = torch.zeros(total_size, device=device, dtype=dtype)
         st["flat_gk"] = torch.zeros_like(st["flat_wk"])
         st["flat_vk"] = torch.zeros_like(st["flat_wk"])
         st["prev_grad"] = None
 
+        # Cache a tolerance tensor to avoid recreating it repeatedly
+        st["tol_tensor"] = torch.tensor(tol, device=device, dtype=dtype)
+
+        # OBS solver for trust-region subproblem
         self.obs = OBS()
         self.hess = LSR1(
             gamma=gamma,
             memory_length=mem_length,
-            device=p0.device,
-            dtype=p0.dtype,
+            device=device,
+            dtype=dtype,
         )
         
-        # distributed sync control
+        # Distributed synchronisation flags
         self.sync = bool(sync)
         self.rank = dist.get_rank() if dist.is_initialized() else 0
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
 
     def _avg_scalar(self, value: Tensor) -> Tensor:
         """
-        Rank-0 reduce-average and broadcast for identical bit patterns.
-        Input: 0-dim tensor
-        Output: 0-dim tensor (float64→float32 if needed)
-        If `self.sync` is `False`, the input tensor is returned unchanged.
+        Rank-0 reduce-average and broadcast for bit-exact synchronisation.
+        If `sync` is False or `world_size == 1`, return `value` unchanged.
         """
         if not (self.sync and self.world_size > 1):
             return value
-        # cast to float64 for reduction
+        # Cast to float64 once and reuse
         buf = value.detach().to(torch.float64)
         dist.reduce(buf, dst=0, op=dist.ReduceOp.SUM)
         if self.rank == 0:
@@ -120,68 +130,63 @@ class LSSR1_TR(Optimizer):
         return buf.to(value.dtype)
 
     def _flatten_params(self) -> Tensor:
+        """
+        Copy each parameter tensor into the flat buffer `flat_wk`.
+        """
         buf = self.state["flat_wk"]
-        for p, start, end in zip(self.param_groups[0]["params"], self._offsets, self._offsets[1:]):
+        for p, start, end in zip(
+            self.param_groups[0]["params"],
+            self._offsets,
+            self._offsets[1:],
+        ):
             buf[start:end].copy_(p.data.view(-1))
         return buf
 
     def _flatten_grads(self) -> Tensor:
+        """
+        Copy each gradient tensor into the flat buffer `flat_gk`.
+        """
         buf = self.state["flat_gk"]
-        for p, start, end in zip(self.param_groups[0]["params"], self._offsets, self._offsets[1:]):
+        for p, start, end in zip(
+            self.param_groups[0]["params"],
+            self._offsets,
+            self._offsets[1:],
+        ):
             buf[start:end].copy_(p.grad.view(-1))
         return buf
 
     def _unflatten_update(self, vec: Tensor) -> None:
+        """
+        Scatter the flat update vector `vec` back into each parameter tensor.
+        """
         with torch.no_grad():
-            for p, start, end in zip(self.param_groups[0]["params"], self._offsets, self._offsets[1:]):
+            for p, start, end in zip(
+                self.param_groups[0]["params"],
+                self._offsets,
+                self._offsets[1:],
+            ):
                 p.data.copy_(vec[start:end].view_as(p))
-
-    def _solve_tr_first_order(self, g: Tensor, gn: float, delta: float) -> Tuple[Tensor, float]:
-        if gn <= self.defaults["tol"]:
-            return torch.zeros_like(g), 0.0
-        step = -g * (delta / gn)
-        predicted = delta * gn
-        return step, predicted
-
-    def _solve_tr_second_order(
-        self, g: Tensor, gn: float, delta: float
-    ) -> Tuple[Tensor, float]:
-        if gn <= self.defaults["tol"]:
-            return torch.zeros_like(g), 0.0
-        self.hess.precompute()
-        step = -self.obs.solve_tr_subproblem(
-            g,
-            torch.tensor(delta, device=g.device, dtype=g.dtype),
-            self.hess.gamma,
-            self.hess.Psi,
-            self.hess.Minv,
-        )
-        g_dot_p = torch.dot(g, step)
-        p_B_p = torch.dot(step, self.hess.B(step))
-        predicted = -(g_dot_p + 0.5 * p_B_p)
-        return step, predicted.item()
 
     def _evaluate_function_and_gradient(
         self,
         wk: Tensor,
-        p:  Tensor,
+        p: Tensor,
         alpha: float,
         closure: Callable,
-    ) -> Tuple[float, Tensor, float]:
+    ) -> Tuple[Tensor, Tensor, Tensor]:
         """
-        - Move to trial point: w = wk + alpha*p
-        - Compute loss = closure() → Tensor
-        - Compute flat gradient = self._flatten_grads()
-        - Return (loss_avg, grad_broadcast, deriv_avg) as 0-dim Tensors
+        Move to trial point: w = wk + alpha * p,
+        evaluate loss and gradient, return (loss, flat_grad, directional_derivative).
+        Synchronise scalars if in distributed mode.
         """
-        # Move to trial point
+        # Update parameters to trial point
         self._unflatten_update(wk + alpha * p)
 
-        # Objective and gradient
+        # Compute loss and gradient via closure
         loss = closure(compute_grad=True)
         grad = self._flatten_grads()
         
-        # synchronize scalars & gradient for bit-exact behaviour
+        # Synchronise if needed
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
             deriv = grad.dot(p)
@@ -207,18 +212,21 @@ class LSSR1_TR(Optimizer):
         c2: float,
         max_iter: int = 20,
     ) -> Tuple[Tensor, Tensor, Tensor]:
-        tol = torch.tensor(self.defaults["tol"], device=wk.device)
-        for i in range(max_iter):
-            # candidate α_j
-            if i == 0:
+        """
+        Perform zoom phase of strong Wolfe line search, narrowing interval [alpha_lo, alpha_hi].
+        """
+        tol_tensor = self.state["tol_tensor"]
+        for _ in range(max_iter):
+            # Interpolate trial alpha
+            if _ == 0:
                 alpha_j = 0.5 * (alpha_lo + alpha_hi)
             else:
                 denom = 2 * (phi_hi - phi_lo - dphi_lo * (alpha_hi - alpha_lo))
                 cond = torch.abs(denom) > self.defaults["tol"]
                 if not cond:
-                    interp = 0.5 * (alpha_lo + alpha_hi)  # Fallback to midpoint
+                    interp = 0.5 * (alpha_lo + alpha_hi)
                 else:
-                    interp = alpha_lo - dphi_lo * (alpha_hi - alpha_lo) ** 2 / denom
+                    interp = alpha_lo - dphi_lo * (alpha_hi - alpha_lo).square() / denom
                 safe_low = alpha_lo + 0.1 * (alpha_hi - alpha_lo)
                 safe_high = alpha_hi - 0.1 * (alpha_hi - alpha_lo)
                 alpha_j = torch.where(
@@ -227,12 +235,11 @@ class LSSR1_TR(Optimizer):
                     0.5 * (alpha_lo + alpha_hi),
                 )
 
-            # trial evaluation
+            # Evaluate at candidate α_j
             phi_j, grad_j, dphi_j = self._evaluate_function_and_gradient(
                 wk, p, alpha_j, closure
             )
 
-            # update interval
             armijo = phi_j > phi_0 + c1 * alpha_j * dphi_0
             if armijo or (phi_j >= phi_lo):
                 alpha_hi, phi_hi = alpha_j, phi_j
@@ -245,10 +252,11 @@ class LSSR1_TR(Optimizer):
                     alpha_hi, phi_hi = alpha_lo, phi_lo
                 alpha_lo, phi_lo, dphi_lo = alpha_j, phi_j, dphi_j
 
-            # gap tolerance
-            if torch.abs(alpha_hi - alpha_lo) < tol:
+            # Gap tolerance check
+            if torch.abs(alpha_hi - alpha_lo) < tol_tensor:
                 break
 
+        # Return best lower bound if max_iter exceeded
         return alpha_lo, phi_lo, self._flatten_grads()
 
     def _strong_wolfe_line_search(
@@ -265,29 +273,35 @@ class LSSR1_TR(Optimizer):
         max_iter: int = 10,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
-        Returns (alpha, phi, grad) as 0-dim Tensors, synchronised across ranks
-        if self.sync=True and world_size>1.
+        Find step size satisfying strong Wolfe conditions. Returns (alpha, phi, grad).
         """
-        tol = torch.tensor(self.defaults["tol"], device=wk.device)
+        tol_tensor = self.state["tol_tensor"]
         alpha_prev = torch.tensor(0.0, device=wk.device)
-        phi_prev   = phi_0
-        dphi_prev  = dphi_0
-        alpha_i    = torch.tensor(alpha_0, device=wk.device)
+        phi_prev = phi_0
+        dphi_prev = dphi_0
+        alpha_i = torch.tensor(alpha_0, device=wk.device)
 
-        for _ in range(max_iter):
+        for i in range(max_iter):
             phi_i, grad_i, dphi_i = self._evaluate_function_and_gradient(
                 wk, p, alpha_i.item(), closure
             )
 
             cond1 = phi_i > phi_0 + c1 * alpha_i * dphi_0
-            cond2 = (_ > 0) and (phi_i >= phi_prev)
+            cond2 = (i > 0) and (phi_i >= phi_prev)
             if cond1 or cond2:
                 return self._zoom(
-                    wk, p,
-                    alpha_prev, alpha_i,
-                    phi_prev,  phi_i,
-                    dphi_prev, phi_0, dphi_0,
-                    closure, c1, c2,
+                    wk,
+                    p,
+                    alpha_prev,
+                    alpha_i,
+                    phi_prev,
+                    phi_i,
+                    dphi_prev,
+                    phi_0,
+                    dphi_0,
+                    closure,
+                    c1,
+                    c2,
                 )
 
             if torch.abs(dphi_i) <= -c2 * dphi_0:
@@ -295,20 +309,28 @@ class LSSR1_TR(Optimizer):
 
             if dphi_i >= 0:
                 return self._zoom(
-                    wk, p,
-                    alpha_i, alpha_prev,
-                    phi_i,  phi_prev,
-                    dphi_i, phi_0, dphi_0,
-                    closure, c1, c2,
+                    wk,
+                    p,
+                    alpha_i,
+                    alpha_prev,
+                    phi_i,
+                    phi_prev,
+                    dphi_i,
+                    phi_0,
+                    dphi_0,
+                    closure,
+                    c1,
+                    c2,
                 )
 
             alpha_prev, phi_prev, dphi_prev = alpha_i, phi_i, dphi_i
+            # Double step but cap at alpha_max
             alpha_i = torch.min(2 * alpha_i, torch.tensor(alpha_max, device=wk.device))
 
             if alpha_i >= alpha_max:
                 break
 
-        # fallback:
+        # Fallback to previous iterate if no step found
         phi_fin, grad_fin, _ = self._evaluate_function_and_gradient(
             wk, p, alpha_prev.item(), closure
         )
@@ -324,51 +346,49 @@ class LSSR1_TR(Optimizer):
         alpha_0: float = 1.0,
         c1: float = 1e-4,
         c2: float = 0.9,
-        max_iter: int = 10
+        max_iter: int = 10,
     ) -> Tuple[float, float, Tensor]:
         """
-        Simple backtracking line search (fallback method).
-        
-        Returns:
-            alpha: step size
-            phi_alpha: function value at alpha
-            grad_alpha: gradient at alpha
+        Simple backtracking line search as fallback. Returns (alpha, φ(alpha), grad).
         """
         alpha = alpha_0
-        
-        min_alpha = self.defaults["tol"]  # Define a minimum threshold for alpha
+        tol_tensor = self.state["tol_tensor"]
         for _ in range(max_iter):
-            phi_alpha, grad_alpha, dphi_alpha = self._evaluate_function_and_gradient(wk, p, alpha, closure)
-            
-            # Check both Wolfe conditions
-            armijo_satisfied = phi_alpha <= phi_0 + c1 * alpha * dphi_0
-            curvature_satisfied = abs(dphi_alpha) <= c2 * abs(dphi_0)
-            
-            if armijo_satisfied and curvature_satisfied:
+            phi_alpha, grad_alpha, dphi_alpha = self._evaluate_function_and_gradient(
+                wk, p, alpha, closure
+            )
+            armijo_ok = phi_alpha <= phi_0 + c1 * alpha * dphi_0
+            curvature_ok = torch.abs(dphi_alpha) <= c2 * torch.abs(dphi_0)
+            if armijo_ok and curvature_ok:
                 return alpha, phi_alpha, grad_alpha
-            
             alpha *= 0.5
-            if alpha < min_alpha:  # Check if alpha is below the minimum threshold
+            if alpha < tol_tensor.item():
                 break
-        
-        # If no acceptable step found, return zero step
         return 0.0, phi_0, self._flatten_grads()
 
     def step(self, closure: Callable[[], Tensor], **_) -> Tuple[float, float]:
-        loss = _['precomp_loss'] if 'precomp_loss' in _ else closure(compute_grad=True)
-        g = _['precomp_grad'] if 'precomp_grad' in _ else self._flatten_grads()
+        """
+        Performs a single optimisation step.
+        Returns (new_loss, flat_gradient) on all ranks (scalar loss and flat grad vector).
+        """
+        # Get precomputed loss/grad or compute afresh
+        loss = _["precomp_loss"] if "precomp_loss" in _ else closure(compute_grad=True)
+        g = _["precomp_grad"] if "precomp_grad" in _ else self._flatten_grads()
         gn = torch.norm(g, p=self.defaults["norm_type"])
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
             dist.broadcast(g, src=0)
             gn = self._avg_scalar(gn)
         if gn <= self.defaults["tol"]:
-            return loss.item(), g
+            return loss.item(), g  # No sufficient gradient, skip update
 
-        wk = self._flatten_params().clone()
+        # Flatten current parameters once and reuse
+        wk_flat = self._flatten_params()
+        wk = wk_flat.clone()  # Preserve copy for TR and memory updates
         st = self.state
         sec = self.defaults["second_order"]
 
+        # Update LSR1 memory if second order is enabled
         if sec and st["prev_grad"] is not None:
             sk = wk - st["old_wk"]
             yk = g - st["prev_grad"]
@@ -376,61 +396,71 @@ class LSSR1_TR(Optimizer):
                 self.hess.update_memory(sk, yk)
         st["old_wk"], st["prev_grad"] = wk.clone(), g.clone()
 
+        # Solve trust-region subproblem
         if sec and len(self.hess._S) > 0:
-            p_star, pred = self._solve_tr_second_order(
-                g, gn, self.defaults["delta"]
-            )
+            p_star, pred = solve_tr_second_order(g, gn, self.defaults["delta"], self.hess, self.obs, self.defaults["tol"])
         else:
-            p_star, pred = self._solve_tr_first_order(
-                g, gn, self.defaults["delta"]
-            )
+            p_star, pred = solve_tr_first_order(g, gn, self.defaults["delta"], self.defaults["tol"])
 
+        # Momentum-like update for vk; reuse existing flat buffer
         vk = st["flat_vk"]
         vk.mul_(self.defaults["mu"]).add_(wk - st["old_wk"])
-        if vk.norm() > 0:
-            vk.mul_(min(1.0, self.defaults["delta"] / vk.norm()))
+        # Bound vk to trust-region radius
+        vk_norm_sq = vk.dot(vk)
+        if vk_norm_sq > 0.0:
+            vk_norm = vk_norm_sq.sqrt()
+            scale = min(1.0, self.defaults["delta"] / vk_norm)
+            vk.mul_(scale)
+        # Combine step and bound to TR radius
         p_comb = p_star + vk
-        if p_comb.norm() > 0:
-            p_comb.mul_(min(1.0, self.defaults["delta"] / p_comb.norm()))
-        st["flat_vk"] = vk.clone()
+        p_comb_norm_sq = p_comb.dot(p_comb)
+        if p_comb_norm_sq > 0.0:
+            p_comb_norm = p_comb_norm_sq.sqrt()
+            scale = min(1.0, self.defaults["delta"] / p_comb_norm)
+            p_comb.mul_(scale)
+        st["flat_vk"] = vk.clone()  # Store updated vk for next iteration
 
         # Prepare for line search
         phi_0 = loss
         dphi_0 = g.dot(p_comb)
-        
-        # Use strong Wolfe line search with zoom
+
+        # Strong Wolfe line search (preferred)
         alpha, new_loss, new_g = self._strong_wolfe_line_search(
-            wk, p_comb, phi_0, dphi_0, closure,
+            wk,
+            p_comb,
+            phi_0,
+            dphi_0,
+            closure,
             alpha_0=self.defaults["lr"],
             c1=self.defaults["c1"],
             c2=self.defaults["c2"],
             alpha_max=self.defaults["alpha_max"],
-            max_iter=self.defaults["max_wolfe_iter"]
+            max_iter=self.defaults["max_wolfe_iter"],
         )
-        # alpha, new_loss, new_g = self._backtracking_line_search(
-        #     wk, p_comb, phi_0, dphi_0, closure,
-        #     alpha_0=self.defaults["lr"],
-        #     c1=self.defaults["c1"],
-        #     c2=self.defaults["c2"],
-        #     max_iter=self.defaults["max_wolfe_iter"]
-        # )
-    
+
+        # Apply final step
         p_step = alpha * p_comb
         self._unflatten_update(wk + p_step)
 
-        # Trust region radius update
-        rho = (new_loss - loss) / pred if (alpha > 0 and pred < 0) else 0.0
-        s_norm = p_step.norm().item()
+        # Update trust-region radius based on ρ = (f(new)−f(old)) / predicted
+        rho = (
+            (new_loss - loss) / pred if (alpha > 0 and pred < 0) else 0.0
+        )
+        s_norm_sq = p_step.dot(p_step)
+        s_norm = math.sqrt(s_norm_sq.item())
         delta_old = self.defaults["delta"]
         if rho < self.defaults["tau_2"]:
+            # Shrink trust region
             delta_new = min(
                 self.defaults["nu_1"] * delta_old,
                 self.defaults["nu_2"] * s_norm**2,
             )
         elif rho >= self.defaults["tau_3"] and s_norm >= self.defaults["nu_3"] * delta_old:
+            # Expand trust region
             delta_new = self.defaults["nu_4"] * delta_old
         else:
             delta_new = delta_old
+        # Clip to [min_delta, max_delta]
         self.defaults["delta"] = max(
             self.defaults["min_delta"],
             min(delta_new, self.defaults["max_delta"]),

@@ -1,7 +1,9 @@
 import math
 
+import torch
 import torch.distributed as dist
-
+from torch import Tensor
+from typing import Tuple
 
 class Timer:
     def __init__(self, timings, key):
@@ -118,3 +120,48 @@ def get_local_trust_region_params(config):
         "second_order": config.local_second_order,
         "tol": config.tol,
     }
+
+def solve_tr_first_order(
+    gradient: Tensor,
+    grad_norm: float,
+    trust_radius: float,
+    tol: float,
+) -> Tuple[Tensor, float]:
+    """
+    Closed-form first-order TR: step = -gradient * (trust_radius / grad_norm).
+    Predicted reduction = trust_radius * grad_norm. If grad_norm <= tol, returns zeros.
+    """
+    if grad_norm <= tol:
+        return torch.zeros_like(gradient), 0.0
+    step = -gradient * (trust_radius / grad_norm)
+    predicted = trust_radius * grad_norm
+    return step, predicted
+
+def solve_tr_second_order(
+    gradient: Tensor,
+    grad_norm: float,
+    trust_radius: float,
+    lsr1_hessian,           # an object exposing .precompute(), .gamma, .Psi, .Minv, .B(v)
+    obs_solver,             # an object exposing .solve_tr_subproblem(g, delta, γ, Ψ, Minv)
+    tol: float,
+) -> Tuple[Tensor, float]:
+    """
+    TR via LSR1+OBS:
+    - If grad_norm <= tol, returns zeros.
+    - Otherwise calls lsr1_hessian.precompute(), then obs_solver.solve_tr_subproblem(...)
+    - Computes predicted reduction = -(gᵀp + 0.5 pᵀ B p).
+    """
+    if grad_norm <= tol:
+        return torch.zeros_like(gradient), 0.0
+
+    # (Re)compute any LSR1 factors
+    lsr1_hessian.precompute()
+    delta = torch.tensor(trust_radius, device=gradient.device, dtype=gradient.dtype)
+    p = -obs_solver.solve_tr_subproblem(
+        gradient, delta, lsr1_hessian.gamma, lsr1_hessian.Psi, lsr1_hessian.Minv
+    )
+    # predicted reduction = -(gᵀp + 0.5 pᵀ B p)
+    g_dot_p = torch.dot(gradient, p)
+    p_B_p  = torch.dot(p, lsr1_hessian.B(p))
+    predicted = -(g_dot_p + 0.5 * p_B_p)
+    return p, predicted.item()

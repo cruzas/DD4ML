@@ -4,7 +4,7 @@ import torch
 from torch.optim import Optimizer
 from dd4ml.optimizers.lsr1 import LSR1
 from dd4ml.solvers.obs import OBS
-from dd4ml.utility import get_trust_region_params
+from dd4ml.utility import get_trust_region_params, solve_tr_first_order, solve_tr_second_order
 
 class TR(Optimizer):
     @staticmethod
@@ -90,9 +90,9 @@ class TR(Optimizer):
 
         use_second = second_order and self.hess and len(self.hess._S) > 0  # type: ignore
         if use_second:
-            self._step_buf, predicted = self._solve_tr_second_order(grad, gn, delta)
+            self._step_buf, predicted = solve_tr_second_order(grad, gn, delta, self.hess, self.obs, tol)
         else:
-            self._step_buf, predicted = self._solve_tr_first_order(grad, gn, delta)
+            self._step_buf, predicted = solve_tr_first_order(grad, gn, delta, tol)
 
         # apply update
         self._apply_update()
