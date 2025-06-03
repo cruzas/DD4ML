@@ -165,3 +165,13 @@ def solve_tr_second_order(
     p_B_p  = torch.dot(p, lsr1_hessian.B(p))
     predicted = -(g_dot_p + 0.5 * p_B_p)
     return p, predicted.item()
+
+def ensure_tensor(d, device):
+    if isinstance(d, (int, float)):
+        d = torch.tensor(d, device=device)
+        return d
+    elif torch.is_tensor(d):
+        d = d.to(device)
+        return d
+    else:
+        raise TypeError(f"Unexpected type for d: {type(d)}. Expected int, float, or torch.Tensor.")
