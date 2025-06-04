@@ -1,8 +1,9 @@
 from .apts_base import *
 
+
 class APTS_IP(APTS_Base):
     __name__ = "APTS_IP"
-    
+
     @staticmethod
     def setup_APTS_hparams(config):
         loc_opts = {
@@ -13,9 +14,7 @@ class APTS_IP(APTS_Base):
         try:
             config.loc_opt = loc_opts[config.loc_opt.lower()]
         except KeyError:
-            raise ValueError(
-                f"Unknown subdomain optimizer: {config.loc_opt}"
-            )
+            raise ValueError(f"Unknown subdomain optimizer: {config.loc_opt}")
 
         config.loc_opt_hparams = {"lr": config.learning_rate}
         if config.loc_opt in {torch.optim.Adam, torch.optim.AdamW}:
@@ -28,7 +27,7 @@ class APTS_IP(APTS_Base):
             if config.glob_second_order
             else (TR, get_tr_hparams(config))
         )
-        
+
         config.apts_params = get_apts_params(config)
         return config
 
@@ -51,7 +50,7 @@ class APTS_IP(APTS_Base):
         glob_pass=True,
         norm_type=2,
         max_loc_iters=0,
-        max_glob_iters=3
+        max_glob_iters=3,
         dogleg=False,
         tol=1e-6,
         APTS_in_data_sync_strategy="average",
@@ -77,7 +76,7 @@ class APTS_IP(APTS_Base):
             max_glob_iters=max_glob_iters,
             tol=tol,
         )
-        
+
         # Synchronize non-parameter attributes from the first param group.
         self._sync_attributes_from_param_group()
         self.APTS_in_data_sync_strategy = APTS_in_data_sync_strategy.lower()
@@ -95,20 +94,16 @@ class APTS_IP(APTS_Base):
             print(
                 '(WARNING) APTS in data "sum" synchronization strategy still has to be tested/verified.'
             )
-            
-        self.loc_opt = loc_opt(
-            params=model.subdomain_params(), **loc_opt_hparams
-        )
+
+        self.loc_opt = loc_opt(params=model.subdomain_params(), **loc_opt_hparams)
         if "LSSR1_TR" in str(glob_opt):
             glob_opt_hparams.update({"delta": delta})
             self.glob_opt = glob_opt(
                 params=model.subdomain_params(), **glob_opt_hparams
             )
         else:
-            self.glob_opt = glob_opt(
-                model=model, **glob_opt_hparams
-            )
-    
+            self.glob_opt = glob_opt(model=model, **glob_opt_hparams)
+
     def loc_steps(self, final_subdomain_closure=None):
         for i in range(self.max_loc_iters):
             self.loc_opt.zero_grad()
@@ -123,14 +118,14 @@ class APTS_IP(APTS_Base):
                 self.model.subdomain_backward(losses)
         self.model.sync_params(method="average")
         self._update_param_group()
-        
+
     def step(self, closure, final_subdomain_closure):
         # Reset gradient evaluation counters (as Python floats)
-        self.grad_evals, self.loc_grad_evals = 0.0, 0.0 
-        
+        self.grad_evals, self.loc_grad_evals = 0.0, 0.0
+
         # Save initial global parameters (flattened, cloned to avoid in-place)
         self.init_glob_flat = self.model.parameters(clone=True)
-        
+
         # Compute initial global/local loss and gradient
         self.init_glob_loss = closure(compute_grad=True, zero_grad=True)
         self.init_glob_grad = self.model.grad(clone=True)
@@ -138,14 +133,14 @@ class APTS_IP(APTS_Base):
 
         # Perform local steps
         self.loc_steps(final_subdomain_closure)
-        
+
         # Compute global trial step
         step = self.model.parameters(clone=False) - self.init_glob_flat
-        # Ensure step is within trust region    
+        # Ensure step is within trust region
         step = self.ensure_step_within_tr(step)
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
-        loss, grad, self.glob_opt.delta = self.control_step(step, pred)   
+        loss, grad, self.glob_opt.delta = self.control_step(step, pred)
 
         # Optional global pass
         if self.glob_pass:
@@ -153,5 +148,5 @@ class APTS_IP(APTS_Base):
 
         self.delta = self.glob_opt.delta
         self._update_param_group()
-        
+
         return new_loss

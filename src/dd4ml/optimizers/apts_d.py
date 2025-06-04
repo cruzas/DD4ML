@@ -1,8 +1,9 @@
 from .apts_base import *
 
+
 class APTS_D(APTS_Base):
     __name__ = "APTS_D"
-    
+
     @staticmethod
     def setup_APTS_hparams(config):
         return APTS_Base.setup_APTS_hparams(config)
@@ -64,21 +65,21 @@ class APTS_D(APTS_Base):
         self.loc_model = clone_model(model)
 
         # Instantiate local optimiser (trust-region or LSSR1_TR)
-        self.loc_opt = loc_opt(
-            self.loc_model.parameters(), **loc_opt_hparams
-        )
-        
+        self.loc_opt = loc_opt(self.loc_model.parameters(), **loc_opt_hparams)
+
         # Choose local closure based on first-order correction flag
         self.loc_closure = (
             self.foc_loc_closure if self.foc else self.non_foc_loc_closure
         )
-        
+
         # Print name of glob_opt and loc_opt
-        dprint(f"APTS_P global optimizer: {self.glob_opt.__name__}; local optimizer: {self.loc_opt.__name__}")
+        dprint(
+            f"APTS_P global optimizer: {self.glob_opt.__name__}; local optimizer: {self.loc_opt.__name__}"
+        )
 
     @torch.no_grad()
     def aggregate_loc_steps_and_losses(self, step, loc_red):
-        # If more than one model, global step is sum of local steps 
+        # If more than one model, global step is sum of local steps
         # and loc_red is the sum of all local reductions
         if self.nr_models > 1:
             # Coalesce step and loc_red into one tensor
@@ -92,7 +93,7 @@ class APTS_D(APTS_Base):
             if self.norm_type == math.inf:
                 step /= self.nr_models
         return step, loc_red
-        
+
     def step(self, inputs, labels):
         """
         Performs one APTS_D step: evaluate initial losses/gradients,
@@ -101,26 +102,31 @@ class APTS_D(APTS_Base):
         """
         # Store inputs and labels for closures
         self.inputs, self.labels = inputs, labels
-        
+
         # Reset gradient evaluation counters (as Python floats)
         # Note: closures will increment these
-        self.grad_evals, self.loc_grad_evals = 0.0, 0.0 
+        self.grad_evals, self.loc_grad_evals = 0.0, 0.0
 
         # Save initial global parameters (flattened, cloned to avoid in-place)
         self.init_glob_flat = self.glob_params_to_vector()
-        
+
         # Compute initial global/local loss and gradient
-        self.init_glob_loss, self.init_loc_loss = self.glob_closure(compute_grad=True), = self.loc_closure(compute_grad=True)
+        self.init_glob_loss, self.init_loc_loss = self.glob_closure(
+            compute_grad=True
+        ), self.loc_closure(compute_grad=True)
 
         # Store initial global/local gradients (flattened)
-        self.init_glob_grad, self.init_loc_grad = self.glob_grad_to_vector(), self.loc_grad_to_vector()
-            
+        self.init_glob_grad, self.init_loc_grad = (
+            self.glob_grad_to_vector(),
+            self.loc_grad_to_vector(),
+        )
+
         # Calculate residual between global and local gradients
         self.resid = self.init_glob_grad - self.init_loc_grad
-        
+
         # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)
-        
+
         # Account for local gradient evaluations across all models
         self.grad_evals += self.loc_grad_evals * self.nr_models
 
@@ -130,12 +136,12 @@ class APTS_D(APTS_Base):
             step = self.loc_params_to_vector() - self.init_glob_flat
             loc_red = self.init_loc_loss - loc_loss
         step, pred = self.aggregate_loc_steps_and_losses(step, loc_red)
-        
+
         # Ensure step is within trust region
         step = self.ensure_step_within_tr(step)
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
-        loss, grad, self.glob_opt.delta = self.control_step(step, pred)        
+        loss, grad, self.glob_opt.delta = self.control_step(step, pred)
 
         # Optional global pass
         if self.glob_pass:
@@ -143,5 +149,5 @@ class APTS_D(APTS_Base):
 
         # Synchronize global and local models and set delta accordingly
         self.sync_glob_to_loc()
-           
+
         return loss

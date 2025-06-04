@@ -158,15 +158,18 @@ def get_config_model_and_trainer(args, wandb_config):
         optimizer_obj = APTS_IP(
             params=model.parameters(),
             model=model,
-            loc_opt=all_config.trainer.loc_opt,
-            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
             glob_opt=all_config.trainer.glob_opt,
             glob_opt_hparams=all_config.trainer.glob_opt_hparams,
-            delta=all_config.trainer.delta,
+            loc_opt=all_config.trainer.loc_opt,
+            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
+            glob_pass=all_config.trainer.glob_pass,
+            norm_type=all_config.trainer.norm_type,
             max_loc_iters=all_config.trainer.max_loc_iters,
-            dogleg=False,
+            max_glob_iters=all_config.trainer.max_glob_iters,
+            tol=all_config.trainer.tol,
             APTS_in_data_sync_strategy="average",
-            t_strategy="mean",
+            step_strategy="mean",
+            **all_config.trainer.apts_params,
         )
     elif optimizer_name == "apts_d":
         from dd4ml.optimizers.apts_d import APTS_D

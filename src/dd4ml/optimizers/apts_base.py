@@ -1,6 +1,7 @@
 import copy
 import math
 import random
+import time
 
 import torch
 import torch.distributed as dist
@@ -8,30 +9,30 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
 from dd4ml.utility import (
+    Timer,
     clone_model,
+    dprint,
+    ensure_tensor,
     flatten_params,
-    get_tr_hparams,
+    get_apts_params,
+    get_device,
     get_loc_tr_hparams,
-    get_lssr1_tr_hparams,
     get_lssr1_loc_tr_hparams,
+    get_lssr1_tr_hparams,
     get_state_dict,
+    get_tr_hparams,
     mark_trainable,
     restore_params,
     trainable_params_to_vector,
-    get_apts_params,
-    ensure_tensor,
-    dprint,
-    get_device
 )
 
-import time
-from .tr import TR
 from .lssr1_tr import LSSR1_TR
-from .utils import Timer
+from .tr import TR
+
 
 class APTS_Base(Optimizer):
     __name__ = "APTS_Base"
-    
+
     @staticmethod
     def setup_APTS_hparams(config):
         """
@@ -95,16 +96,16 @@ class APTS_Base(Optimizer):
         self.max_delta = float(max_delta) if max_delta is not None else 2.0
 
         # Common state
-        self.nr_models = nr_models # number of models in the distributed environment
+        self.nr_models = nr_models  # number of models in the distributed environment
         self.device = get_device(device)
         self.criterion = criterion
-        
+
         # Instantiate global optimizer (trust-region or LSSR1_TR)
         self.model = model
         self.glob_opt = glob_opt(self.model.parameters(), **glob_opt_hparams)
 
         # To be set in subclasses
-        self.loc_model = None  
+        self.loc_model = None
         self.loc_opt = None
         self.loc_closure = None
 
@@ -113,18 +114,18 @@ class APTS_Base(Optimizer):
 
         # Buffers for flattened parameters: pre-allocate to avoid reallocations
         sample_flat = parameters_to_vector(model.parameters())
-        self._flat_params_buffer = torch.empty_like(sample_flat) # for global model
-        self._loc_flat_buffer = torch.empty_like(sample_flat) # for local models
+        self._flat_params_buffer = torch.empty_like(sample_flat)  # for global model
+        self._loc_flat_buffer = torch.empty_like(sample_flat)  # for local models
 
         # Track number of gradient evaluations as simple Python floats
         self.grad_evals = 0.0
         self.loc_grad_evals = 0.0
-    
+
     def zero_timers(self):
         self.timings = {key: 0 for key in self.timings}
         if hasattr(self.loc_opt, "zero_timers"):
-            self.loc_opt.zero_timers()    
-    
+            self.loc_opt.zero_timers()
+
     def get_timings(self):
         timings = self.timings.copy()
         if "tradam" in str(self.loc_opt).lower():
@@ -147,17 +148,17 @@ class APTS_Base(Optimizer):
         table_str = "\n".join(table)
         print(table_str)
         return table_str
-    
+
     def _update_param_group(self):
         for key in self.param_groups[0].keys():
             if key != "params":
                 self.param_groups[0][key] = getattr(self, key)
-    
+
     def _sync_attributes_from_param_group(self):
         for key, value in self.param_groups[0].items():
             if key != "params":
                 setattr(self, key, value)
-    
+
     @torch.no_grad()
     def update_pytorch_lr(self) -> None:
         """
@@ -180,7 +181,9 @@ class APTS_Base(Optimizer):
         Converts the local model's gradients to a flattened vector.
         Returns a tensor containing the gradients of the local model parameters.
         """
-        return parameters_to_vector([p.grad for p in self.loc_model.parameters()]).detach()
+        return parameters_to_vector(
+            [p.grad for p in self.loc_model.parameters()]
+        ).detach()
 
     @torch.no_grad()
     def glob_params_to_vector(self):
@@ -199,14 +202,16 @@ class APTS_Base(Optimizer):
         return flatten_params(self.loc_model, self._loc_flat_buffer).detach()
 
     @torch.no_grad()
-    def ensure_step_within_tr(self, step)
+    def ensure_step_within_tr(self, step):
         """
         Ensure the step is within the trust region delta.
         If the step norm exceeds delta, scale it down.
         """
         step_norm = step.norm(p=self.norm_type)
         if step_norm > self.delta:
-            dprint(f"Warning: step norm {step_norm:.6e} exceeds delta {self.delta:.4f}. Scaling down step.")
+            dprint(
+                f"Warning: step norm {step_norm:.6e} exceeds delta {self.delta:.4f}. Scaling down step."
+            )
             step = (self.delta / step_norm) * step
         return step
 
@@ -276,7 +281,9 @@ class APTS_Base(Optimizer):
             if closure is not None:
                 loss, grad = optim.step(closure=closure, loss=loss, grad=grad)
             else:
-                raise ValueError("Closure must be provided for global/local optimization step in APTS. To be modified in future.")
+                raise ValueError(
+                    "Closure must be provided for global/local optimization step in APTS. To be modified in future."
+                )
 
             # # Compute gradient norm for stopping criterion
             # grad_norm = grad.norm(p=self.norm_type)
@@ -296,7 +303,7 @@ class APTS_Base(Optimizer):
             max_iters=self.max_loc_iters,
             loss=loss,
             grad=grad,
-            closure=self.loc_closure
+            closure=self.loc_closure,
         )
 
     def glob_steps(self, loss, grad, closure=None):
@@ -305,15 +312,11 @@ class APTS_Base(Optimizer):
             max_iters=self.max_glob_iters,
             loss=loss,
             grad=grad,
-            closure=self.glob_closure if closure is None else closure
+            closure=self.glob_closure if closure is None else closure,
         )
 
     @torch.no_grad()
-    def control_step(
-        self,
-        step: torch.Tensor,
-        pred: torch.Tensor | None = None
-    ):
+    def control_step(self, step: torch.Tensor, pred: torch.Tensor | None = None):
         """
         Unified trust-region control:
           - If `pred` is given, use it directly (pure TR).
@@ -362,4 +365,3 @@ class APTS_Base(Optimizer):
                 self.delta = min(self.delta * self.inc_factor, self.max_delta)
                 self.update_pytorch_lr()
             return trial_loss, trial_grad, self.delta
-
