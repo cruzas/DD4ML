@@ -33,7 +33,7 @@ class APTS_D(APTS_Base):
         max_global_iters=3,
         tol=1e-6,
     ):
-        # Call base for shared defaults, buffer, device, global optimiser
+        # Call base for shared defaults (only 'lr'), buffer, device, global optimiser
         super().__init__(
             params,
             model=model,
@@ -68,6 +68,10 @@ class APTS_D(APTS_Base):
         self.loc_optim = local_opt(
             self.loc_model.parameters(), **local_opt_params
         )
+        
+        # Print name of glob_optim and loc_optim
+        dprint(f"APTS_P global optimizer: {self.glob_optim.__name__}; local optimizer: {self.loc_optim.__name__}")
+
         
     def step(self, inputs, labels):
         """
@@ -133,34 +137,35 @@ class APTS_D(APTS_Base):
                 numel = step.numel()
                 step.copy_(coalesced[:numel].view_as(step))
                 loc_red = coalesced[numel].unsqueeze(0)
-                if self.defaults["norm_type"] == math.inf:
+                if self.norm_type == math.inf:
                     step /= self.nr_models
+                loc_red /= self.nr_models
 
             # Ensure step norm is within trust region
-            # step_norm = step.norm(p=self.defaults["norm_type"])
-            # if step_norm > self.defaults["delta"]:
-            #     print(f"Warning: step norm {step_norm:.6e} exceeds delta {self.defaults['delta']:.4f}. Difference is {step_norm - self.defaults['delta']:.6e}. Scaling down step.")
-            #     step = (self.defaults["delta"] / step_norm) * step
+            # step_norm = step.norm(p=self.norm_type)
+            # if step_norm > self.delta:
+            #     print(f"Warning: step norm {step_norm:.6e} exceeds delta {self.delta:.4f}. Difference is {step_norm - self.delta:.6e}. Scaling down step.")
+            #     step = (self.delta / step_norm) * step
 
         # TR control
         loss, grad = self.apts_tr_control(step, loc_red)        
 
         # Keep global optimiser's delta in sync
-        self.glob_optim.defaults["delta"] = self.defaults["delta"]
+        self.glob_optim.delta = self.delta
 
         # Optional global pass
-        if self.defaults["global_pass"]:
+        if self.global_pass:
             loss, grad = self.glob_steps(loss, grad)
 
         # Global to local synchronisation
         with torch.no_grad():
             # Sync final delta and update local optimiser accordingly
-            self.defaults["delta"] = self.glob_optim.defaults["delta"]
+            self.delta = self.glob_optim.delta
             self.update_pytorch_lr()
 
-            self.loc_optim.defaults["delta"] = self.glob_optim.defaults["delta"]
-            if self.defaults["norm_type"] != math.inf and self.nr_models > 1:
-                self.loc_optim.defaults["delta"] /= self.nr_models
+            self.loc_optim.delta = self.glob_optim.delta
+            if self.norm_type != math.inf and self.nr_models > 1:
+                self.loc_optim.delta /= self.nr_models
 
             # Ensure local model matches global model for next iteration
             self.loc_model.load_state_dict(get_state_dict(self.model))

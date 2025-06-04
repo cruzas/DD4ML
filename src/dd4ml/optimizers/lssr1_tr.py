@@ -13,6 +13,8 @@ from dd4ml.utility.optimizer_utils import solve_tr_first_order, solve_tr_second_
 
 
 class LSSR1_TR(Optimizer):
+    __name__ = "LSSR1_TR"
+    
     def __init__(
         self,
         params,
@@ -45,31 +47,31 @@ class LSSR1_TR(Optimizer):
         if not param_list:
             raise ValueError("Optimiser got an empty parameter list")
 
-        # Store hyperparameters in defaults dictionary
-        defaults = dict(
-            lr=lr,
-            delta=delta,
-            min_delta=min_delta,
-            max_delta=max_delta,
-            gamma=gamma,
-            second_order=second_order,
-            mem_length=mem_length,
-            mu=mu,
-            tau_1=tau_1,
-            tau_2=tau_2,
-            tau_3=tau_3,
-            nu_1=nu_1,
-            nu_2=nu_2,
-            nu_3=nu_3,
-            nu_4=nu_4,
-            tol=tol,
-            norm_type=norm_type,
-            max_wolfe_iter=max_wolfe_iter,
-            c1=c1,
-            c2=c2,
-            alpha_max=alpha_max,
-        )
+        # Only lr remains in defaults
+        defaults = dict(lr=lr)
         super().__init__(param_list, defaults)
+
+        # Assign other hyperparameters as attributes
+        self.delta = delta
+        self.min_delta = min_delta
+        self.max_delta = max_delta
+        self.gamma = gamma
+        self.second_order = second_order
+        self.mem_length = mem_length
+        self.max_wolfe_iter = max_wolfe_iter
+        self.mu = mu
+        self.tau_1 = tau_1
+        self.tau_2 = tau_2
+        self.tau_3 = tau_3
+        self.nu_1 = nu_1
+        self.nu_2 = nu_2
+        self.nu_3 = nu_3
+        self.nu_4 = nu_4
+        self.tol = tol
+        self.norm_type = norm_type
+        self.c1 = c1
+        self.c2 = c2
+        self.alpha_max = alpha_max
 
         # Derive device and dtype from the first parameter tensor
         first_param = (
@@ -99,14 +101,14 @@ class LSSR1_TR(Optimizer):
         st["prev_grad"] = None
 
         # Cache tolerance as tensor to avoid recreating each time
-        st["tol_tensor"] = torch.tensor(tol, device=device, dtype=dtype)
+        st["tol_tensor"] = torch.tensor(self.tol, device=device, dtype=dtype)
 
         # Instantiate OBS solver for trust-region subproblem
         self.obs = OBS()
         # Instantiate limited-memory SR1 Hessian approximation
         self.hess = LSR1(
-            gamma=gamma,
-            memory_length=mem_length,
+            gamma=self.gamma,
+            memory_length=self.mem_length,
             device=device,
             dtype=dtype,
         )
@@ -226,7 +228,7 @@ class LSSR1_TR(Optimizer):
                 alpha_j = 0.5 * (alpha_lo + alpha_hi)
             else:
                 denom = 2 * (phi_hi - phi_lo - dphi_lo * (alpha_hi - alpha_lo))
-                cond = torch.abs(denom) > self.defaults["tol"]
+                cond = torch.abs(denom) > self.tol
                 if not cond:
                     interp = 0.5 * (alpha_lo + alpha_hi)
                 else:
@@ -387,53 +389,53 @@ class LSSR1_TR(Optimizer):
         # Evaluate or retrieve precomputed loss and gradient
         loss = _["precomp_loss"] if "precomp_loss" in _ else closure(compute_grad=True)
         g = _["precomp_grad"] if "precomp_grad" in _ else self._flatten_grads()
-        gn = torch.norm(g, p=self.defaults["norm_type"])
+        gn = torch.norm(g, p=self.norm_type)
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
             dist.broadcast(g, src=0)
             gn = self._avg_scalar(gn)
         # If gradient norm below tolerance, skip update
-        if gn <= self.defaults["tol"]:
+        if gn <= self.tol:
             return loss.item(), g
 
         # Flatten current parameters and preserve a copy for updates
         wk_flat = self._flatten_params()
         wk = wk_flat.clone()
         st = self.state
-        sec = self.defaults["second_order"]
+        sec = self.second_order
 
         # Update LSR1 memory if second-order is enabled and previous gradient exists
         if sec and st["prev_grad"] is not None:
             sk = wk - st["old_wk"]
             yk = g - st["prev_grad"]
-            if sk.norm() > self.defaults["tol"] and yk.norm() > self.defaults["tol"]:
+            if sk.norm() > self.tol and yk.norm() > self.tol:
                 self.hess.update_memory(sk, yk)
         st["old_wk"], st["prev_grad"] = wk.clone(), g.clone()
 
         # Solve trust-region subproblem: second-order if memory available, otherwise first-order
         if sec and len(self.hess._S) > 0:
             p_star, pred = solve_tr_second_order(
-                g, gn, self.defaults["delta"], self.hess, self.obs, self.defaults["tol"]
+                g, gn, self.delta, self.hess, self.obs, self.tol
             )
         else:
             p_star, pred = solve_tr_first_order(
-                g, gn, self.defaults["delta"], self.defaults["tol"]
+                g, gn, self.delta, self.tol
             )
 
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
-        vk.mul_(self.defaults["mu"]).add_(wk - st["old_wk"])
+        vk.mul_(self.mu).add_(wk - st["old_wk"])
         vk_norm_sq = vk.dot(vk)
         if vk_norm_sq > 0.0:
             vk_norm = vk_norm_sq.sqrt()
-            scale = min(1.0, self.defaults["delta"] / vk_norm)
+            scale = min(1.0, self.delta / vk_norm)
             vk.mul_(scale)
         # Combine p_star and vk, then bound combined step to trust-region radius
         p_comb = p_star + vk
         p_comb_norm_sq = p_comb.dot(p_comb)
         if p_comb_norm_sq > 0.0:
             p_comb_norm = p_comb_norm_sq.sqrt()
-            scale = min(1.0, self.defaults["delta"] / p_comb_norm)
+            scale = min(1.0, self.delta / p_comb_norm)
             p_comb.mul_(scale)
         st["flat_vk"] = vk.clone()  # Store updated vk for next iteration
 
@@ -449,10 +451,10 @@ class LSSR1_TR(Optimizer):
             dphi_0,
             closure,
             alpha_0=self.defaults["lr"],
-            c1=self.defaults["c1"],
-            c2=self.defaults["c2"],
-            alpha_max=self.defaults["alpha_max"],
-            max_iter=self.defaults["max_wolfe_iter"],
+            c1=self.c1,
+            c2=self.c2,
+            alpha_max=self.alpha_max,
+            max_iter=self.max_wolfe_iter,
         )
 
         # Apply final parameter update: w_new = wk + alpha * p_comb
@@ -465,25 +467,25 @@ class LSSR1_TR(Optimizer):
         )
         s_norm_sq = p_step.dot(p_step)
         s_norm = math.sqrt(s_norm_sq.item())
-        delta_old = self.defaults["delta"]
+        delta_old = self.delta
 
         # Adjust trust-region radius based on ρ and step norm
-        if rho < self.defaults["tau_2"]:
+        if rho < self.tau_2:
             # Shrink trust region if poor agreement
             delta_new = min(
-                self.defaults["nu_1"] * delta_old,
-                self.defaults["nu_2"] * s_norm**2,
+                self.nu_1 * delta_old,
+                self.nu_2 * s_norm**2,
             )
-        elif rho >= self.defaults["tau_3"] and s_norm >= self.defaults["nu_3"] * delta_old:
+        elif rho >= self.tau_3 and s_norm >= self.nu_3 * delta_old:
             # Expand trust region if very successful
-            delta_new = self.defaults["nu_4"] * delta_old
+            delta_new = self.nu_4 * delta_old
         else:
             delta_new = delta_old
 
         # Clip trust-region radius between [min_delta, max_delta]
-        self.defaults["delta"] = max(
-            self.defaults["min_delta"],
-            min(delta_new, self.defaults["max_delta"]),
+        self.delta = max(
+            self.min_delta,
+            min(delta_new, self.max_delta),
         )
 
         return new_loss, new_g

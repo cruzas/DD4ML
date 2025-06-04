@@ -222,14 +222,8 @@ def main(
         trainer, save_model: bool = False, save_frequency: int = 5
     ) -> None:
 
-        # Check if optimizer has "APTS" or "TR" in its class to determine if delta is available
-        delta = None
-        if hasattr(trainer.optimizer, "delta"):
-            delta = trainer.optimizer.delta
-            thing_to_print = "delta"
-        else:
-            delta = trainer.optimizer.param_groups[0]["lr"]
-            thing_to_print = "lr"
+        delta = trainer.optimizer.param_groups[0]["lr"]
+        thing_to_print = "lr"
             
         dprint(f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, {thing_to_print}: {delta:.6e}"
             )

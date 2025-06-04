@@ -1,4 +1,3 @@
-# common_imports.py (or at top of your module)
 import copy
 import math
 import random
@@ -20,7 +19,8 @@ from dd4ml.utility import (
     restore_params,
     trainable_parameters_to_vector,
     get_apts_params,
-    ensure_tensor
+    ensure_tensor,
+    dprint
 )
 from .tr import TR
 from .lssr1_tr import LSSR1_TR
@@ -71,28 +71,30 @@ class APTS_Base(Optimizer):
         max_global_iters=3,
         tol=1e-6,
     ):
-        # Register hyper‐parameters through `defaults` ----------------------- #
+        # Only 'lr' remains in defaults
         defaults = dict(
-            global_pass=bool(global_pass),       # whether to run extra global steps
-            norm_type=norm_type,                 # norm type for gradient
-            max_local_iters=max_local_iters,     # max iterations for local pass
-            max_global_iters=max_global_iters,   # max iterations for global pass
-            tol=float(tol),                      # tolerance for trust‐region test
-            diff_tol=1e-8,                       # tolerance for difference check
-            delta=float(delta),                  # initial trust‐region radius
-            min_delta=float(min_delta) if min_delta is not None else 1e-3,
-            lr=float(delta),                     # keep lr in sync with delta
-            nu_dec=float(nu_dec) if nu_dec is not None else 0.25,
-            nu_inc=float(nu_inc) if nu_inc is not None else 0.75,
-            inc_factor=float(inc_factor) if inc_factor is not None else 1.2,
-            dec_factor=float(dec_factor) if dec_factor is not None else 0.9,
-            max_delta=float(max_delta) if max_delta is not None else 2.0,
+            lr=float(delta)
         )
         super().__init__(params, defaults)
 
-        # Common state --------------------------------------------------------- #
+        # Assign hyperparameters as attributes
+        self.global_pass = bool(global_pass)
+        self.norm_type = norm_type
+        self.max_local_iters = max_local_iters
+        self.max_global_iters = max_global_iters
+        self.tol = float(tol)
+        self.diff_tol = 1e-8
+        self.delta = float(delta)
+        self.min_delta = float(min_delta) if min_delta is not None else 1e-3
+        self.nu_dec = float(nu_dec) if nu_dec is not None else 0.25
+        self.nu_inc = float(nu_inc) if nu_inc is not None else 0.75
+        self.inc_factor = float(inc_factor) if inc_factor is not None else 1.2
+        self.dec_factor = float(dec_factor) if dec_factor is not None else 0.9
+        self.max_delta = float(max_delta) if max_delta is not None else 2.0
+
+        # Common state
         self.model = model
-        self.loc_model = None # To be set in subclasses
+        self.loc_model = None  # To be set in subclasses
         self.nr_models = nr_models
         self.device = (
             device
@@ -105,30 +107,30 @@ class APTS_Base(Optimizer):
         )
         self.criterion = criterion
 
-        # Buffers for flattened parameters: pre‐allocate to avoid reallocations
+        # Buffers for flattened parameters: pre-allocate to avoid reallocations
         sample_flat = parameters_to_vector(model.parameters())
         self._flat_params_buffer = torch.empty_like(sample_flat)
         self._loc_flat_buffer = torch.empty_like(sample_flat)
 
-        # Instantiate global optimiser (trust‐region or LSSR1_TR)
+        # Instantiate global optimiser (trust-region or LSSR1_TR)
         self.glob_optim = global_opt(
             self.model.parameters(), **global_opt_params
         )
-    
+
         # Keep delta in sync with underlying global optimiser
-        self.delta = self.glob_optim.defaults["delta"]
-        
-        # Track number of gradient evaluations as a simple Python float
+        self.delta = self.glob_optim.delta
+
+        # Track number of gradient evaluations as simple Python floats
         self.grad_evals = 0.0
         self.local_grad_evals = 0.0
-        
+
     def update_pytorch_lr(self) -> None:
         """
         Synchronise PyTorch param_groups' learning rate to current delta.
         """
         for g in self.param_groups:
-            g["lr"] = self.defaults["delta"]
-        
+            g["lr"] = self.delta
+
     def non_foc_loc_closure(self, compute_grad: bool = False):
         """
         Local closure when no first-order correction is used.
@@ -154,7 +156,7 @@ class APTS_Base(Optimizer):
         diff = local_flat - global_flat
 
         # If difference above tolerance, add residual inner-product term
-        if not torch.all(torch.abs(diff) < self.defaults["diff_tol"]):
+        if not torch.all(torch.abs(diff) < self.diff_tol):
             if self.resid.dim() == 0 and self.resid.item() == 0:
                 self.resid = torch.zeros_like(diff)
             loc_loss = loc_loss + (self.resid @ diff)
@@ -173,37 +175,37 @@ class APTS_Base(Optimizer):
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
             loss /= self.nr_models
         return loss
-    
+
     def loc_steps(self, loc_loss, loc_grad, loc_closure):
-        for _ in range(self.defaults["max_local_iters"]):
+        for _ in range(self.max_local_iters):
             # Perform a local trust-region (or LSSR1) step with precomputed values
             loc_loss, loc_grad = self.loc_optim.step(
                 closure=loc_closure,
                 loss=loc_loss,
                 grad=loc_grad,
             )
-            self.loc_grad_evals += 1
+            self.local_grad_evals += 1
 
             # Compute gradient norm for stopping criterion
-            loc_grad_norm = loc_grad.norm(p=self.defaults["norm_type"])
+            loc_grad_norm = loc_grad.norm(p=self.norm_type)
             if self.nr_models > 1:
                 # Synchronise max norm across processes
                 dist.all_reduce(loc_grad_norm, op=dist.ReduceOp.MAX)
             # Stop local iterations if gradient norm below tolerance
-            if loc_grad_norm <= self.loc_optim.defaults["tol"]:
+            if loc_grad_norm <= self.loc_optim.tol:
                 break
         return loc_loss, loc_grad
-    
+
     def glob_steps(self, loss, grad):
-        for _ in range(self.defaults["max_global_iters"]):
+        for _ in range(self.max_global_iters):
             loss, grad = self.glob_optim.step(
                 closure=self.glob_closure, loss=loss, grad=grad
             )
-            # Stop local iterations if gradient norm below tolerance
-            if grad.norm(p=self.defaults["norm_type"]) <= self.glob_optim.defaults["tol"]:
+            # Stop global iterations if gradient norm below tolerance
+            if grad.norm(p=self.norm_type) <= self.glob_optim.tol:
                 break
         return loss, grad
-    
+
     @torch.no_grad()
     def glob_grad_to_vector(self):
         """
@@ -211,7 +213,7 @@ class APTS_Base(Optimizer):
         Returns a tensor containing the gradients of the global model parameters.
         """
         return parameters_to_vector([p.grad for p in self.model.parameters()])
-        
+
     @torch.no_grad()
     def loc_grad_to_vector(self):
         """
@@ -219,11 +221,12 @@ class APTS_Base(Optimizer):
         Returns a tensor containing the gradients of the local model parameters.
         """
         return parameters_to_vector([p.grad for p in self.loc_model.parameters()])
-    
+
     def apts_tr_control(
         self,
         step: torch.Tensor,
-        pred: torch.Tensor):
+        pred: torch.Tensor
+    ):
         """
         Trust-region control logic to decide whether to accept the step.
         Returns True if the step is accepted, False otherwise.
@@ -231,34 +234,30 @@ class APTS_Base(Optimizer):
         # Apply proposed step: update global model parameters temporarily
         with torch.no_grad():
             restore_params(self.model, self.init_glob_flat + step)
-        
+
         # Compute trial loss and gradient
         trial_loss = self.glob_closure(compute_grad=True)
         trial_grad = self.glob_grad_to_vector()
-        
+
         # Compute acceptance ratio; if no local reduction, force rejection
-        if pred < self.defaults["tol"]:
-            accept_ratio = float('inf')
+        if pred < self.tol:
+            accept_ratio = float("inf")
         else:
-            accept_ratio = (self.init_glob_loss - trial_loss) / pred # actual / predicted
-        
+            accept_ratio = (self.init_glob_loss - trial_loss) / pred  # actual / predicted
+
         with torch.no_grad():
-            if pred < self.defaults["tol"] or accept_ratio < self.defaults["nu_dec"]:
+            if pred < self.tol or accept_ratio < self.nu_dec:
                 # Reject step: shrink trust region, restore original params
-                self.defaults["delta"] = max(self.defaults["delta"] * self.defaults["dec_factor"], self.defaults["min_delta"])
+                self.delta = max(self.delta * self.dec_factor, self.min_delta)
                 self.update_pytorch_lr()
                 restore_params(self.model, self.init_glob_flat)
                 loss = self.init_glob_loss
                 grad = self.init_glob_grad
             else:
                 # Accept step: possibly enlarge trust region
-                if accept_ratio > self.defaults["nu_inc"]:
-                    self.defaults["delta"] = min(
-                        self.defaults["delta"] * self.defaults["inc_factor"],
-                        self.defaults["max_delta"],
-                    )
+                if accept_ratio > self.nu_inc:
+                    self.delta = min(self.delta * self.inc_factor, self.max_delta)
                     self.update_pytorch_lr()
                 loss = trial_loss
                 grad = trial_grad
         return loss, grad
-                
