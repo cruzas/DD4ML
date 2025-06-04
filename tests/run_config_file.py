@@ -128,7 +128,7 @@ def parse_cmd_args() -> argparse.Namespace:
     temp_args, _ = parser.parse_known_args()
     if "apts" in temp_args.sweep_config.lower():
         parser.add_argument(
-            "--global_optimizer",
+            "--glob_opt",
             type=str,
             default="trust_region",
             help="Global optimizer",
@@ -137,7 +137,7 @@ def parse_cmd_args() -> argparse.Namespace:
             "--subdomain_optimizer", type=str, default="sgd", help="Subdomain optimizer"
         )
         parser.add_argument(
-            "--max_local_iters",
+            "--max_loc_iters",
             type=int,
             default=3,
             help="Max iterations for subdomain optimizer",
@@ -177,10 +177,10 @@ def main(
 ) -> None:
     """Main training routine executed by each process."""
     use_wandb = WANDB_AVAILABLE
-    local_rank = int(os.environ.get("SLURM_LOCALID", 0))
+    loc_rank = int(os.environ.get("SLURM_LOCALID", 0))
     comp_env = detect_environment()
     if comp_env != "local" and torch.cuda.is_available() and not dist.is_initialized():
-        torch.cuda.set_device(local_rank)
+        torch.cuda.set_device(loc_rank)
 
     if not dist.is_initialized():
         prepare_distributed_environment(
@@ -315,10 +315,10 @@ def run_local(args: dict, sweep_config: dict) -> None:
 
 
 def run_cluster(args: dict, sweep_config: dict) -> None:
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    loc_rank = int(os.environ.get("LOCAL_RANK", 0))
     comp_env = detect_environment()
     if comp_env != "local" and torch.cuda.is_available() and not dist.is_initialized():
-        torch.cuda.set_device(local_rank)
+        torch.cuda.set_device(loc_rank)
 
     prepare_distributed_environment(
         rank=None,

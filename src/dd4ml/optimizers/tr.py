@@ -5,7 +5,7 @@ from torch.optim import Optimizer
 from dd4ml.optimizers.lsr1 import LSR1
 from dd4ml.solvers.obs import OBS
 from dd4ml.utility import (
-    get_trust_region_params,
+    get_tr_hparams,
     solve_tr_first_order,
     solve_tr_second_order,
 )
@@ -14,9 +14,9 @@ class TR(Optimizer):
     __name__ = "TR"
     
     @staticmethod
-    def setup_TR_args(cfg):
+    def setup_TR_hparams(cfg):
         # Add trust-region hyperparameters to the config
-        for k, v in get_trust_region_params(cfg).items():
+        for k, v in get_tr_hparams(cfg).items():
             setattr(cfg, k, v)
         return cfg
 

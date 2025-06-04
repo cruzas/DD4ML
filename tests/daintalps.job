@@ -3,7 +3,7 @@
 #SBATCH --output=./log_files/${job_name}.out
 #SBATCH --error=./log_files/${job_name}.err
 #SBATCH --nodes=1
-#SBATCH --time=00:30:00
+#SBATCH --time=00:10:00
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
 
@@ -13,7 +13,7 @@
 
 #SBATCH --hint=nomultithread
 #SBATCH --constraint=gpu
-#SBATCH --partition=debug
+#SBATCH --partition=normal
 #SBATCH --exclusive
 source ~/.slurm_env # You should define SLURM_ACCOUNT in this file
 #SBATCH --account=$SLURM_ACCOUNT
@@ -58,7 +58,8 @@ srun --kill-on-bad-exit /opt/cray/pe/python/3.11.5/bin/python -u "${script}" \
     --num_subdomains=${num_subd} \
     --num_replicas_per_subdomain=${num_rep} \
     --project=${optimizer}_tests \
-    --trial_num=${trial}
+    --trial_num=${trial} \
+    --use_seed
 
 echo "Test done $(date)"
 rm core_nid*

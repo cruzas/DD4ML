@@ -122,17 +122,17 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
 
 
 def decide_tensor_device(ws, backend, gpu_id):
-    local_rank = os.environ['LOCAL_RANK']
+    loc_rank = os.environ['LOCAL_RANK']
     if torch.cuda.is_available():
         if backend == 'gloo':
             if torch.cuda.device_count() < ws:
                 return f'cuda:{gpu_id}'
             else:
                 # Local rank
-                return f'cuda:{local_rank}'
+                return f'cuda:{loc_rank}'
         else:
             if gpu_id is None:
-                gpu_id = local_rank
+                gpu_id = loc_rank
             return f'cuda:{gpu_id}'
     else:
         return 'cpu'

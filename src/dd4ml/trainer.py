@@ -36,7 +36,7 @@ class Trainer:
         C.run_by_epoch = False  # if False, run by iteration instead of epochs, typically for transformer networks
         C.max_iters = 1000  
         # optimizer 
-        C.learning_rate = 5e-4
+        C.learning_rate = 1e-3
         C.betas = (0.9, 0.999)  # for Adam
         C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = 1.0
@@ -50,15 +50,15 @@ class Trainer:
         C.max_delta = 2.0
         C.data_parallel = False
         C.norm_type = 2  # for APTS_D (and possibly APTS_IP)
-        C.global_pass = False 
+        C.glob_pass = False 
         C.foc = False # for APTS_D
         C.dogleg = False  # for APTS_D
-        C.max_global_iters = 1  # for APTS*
-        C.max_local_iters = 3  # for APTS*
-        C.global_second_order = False  # for APTS*
-        C.local_second_order = False  # for APTS*
+        C.max_glob_iters = 1  # for APTS*
+        C.max_loc_iters = 3  # for APTS*
+        C.glob_second_order = False  # for APTS*
+        C.loc_second_order = False  # for APTS*
         C.max_wolfe_iter = 10  # for APTS*
-        C.subdomain_optimizer = None # for APTS*
+        C.loc_opt = None # for APTS*
         C.gradient_accumulation = True # for APTS*
         C.accumulation_steps = 1 # for APTS*
         C.mem_length = 3  # for TR methods

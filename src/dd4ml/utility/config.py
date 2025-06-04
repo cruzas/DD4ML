@@ -36,12 +36,12 @@ def make_std_config(config):
         config = remove_keys(config, keys_to_remove)
     if "apts" not in config.optimizer.lower():
         keys_to_remove = [
-            "subdomain_optimizer",
-            "subdomain_optimizer_args",
-            "global_optimizer",
-            "global_optimizer_args",
-            "max_local_iters",
-            "max_global_iters",
+            "loc_opt",
+            "loc_opt_hparams",
+            "glob_opt",
+            "glob_opt_hparams",
+            "max_loc_iters",
+            "max_glob_iters",
             "correct_step",
             "norm_type",
             "ema",
@@ -49,8 +49,8 @@ def make_std_config(config):
         config = remove_keys(config, keys_to_remove)
     if config.optimizer.lower() == "apts_d" or config.optimizer.lower() == "apts_p":
         keys_to_remove = [
-            "global_optimizer",
-            "subdomain_optimizer",
+            "glob_opt",
+            "loc_opt",
         ]  # as TR used with ema or not
         config = remove_keys(config, keys_to_remove)
     return config

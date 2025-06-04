@@ -19,19 +19,19 @@ parameters:
     value: False
   ema:
     value: False
-  global_pass:
+  glob_pass:
     value: True
   dogleg:
     value: False
-  global_second_order:
+  glob_second_order:
     value: True
-  local_second_order:
+  loc_second_order:
     value: False
   norm_type:
     value: 2
-  max_local_iters:
+  max_loc_iters:
     value: 3
-  max_global_iters:
+  max_glob_iters:
     value: 1
   epochs: 
     value: 10

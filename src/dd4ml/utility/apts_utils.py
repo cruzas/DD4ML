@@ -8,112 +8,6 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from .optimizer_utils import get_state_dict
 
 
-def fix_aggregated_local_steps_pnorm(
-    aggregated_step, global_grad, p=2.0, tol=1e-6, max_iter=50
-):
-    """
-    Projects aggregated_step onto the direction of global_grad under the p-norm.
-
-    Cases:
-      - p = 2: Uses closed-form projection.
-      - p = 1: Uses weighted median of ratios a_i/g_i.
-      - p = float('inf'): Minimizes f(alpha)=max_i|a_i - alpha*g_i| via ternary search.
-      - Otherwise (p > 1, p ≠ 2): Finds optimal alpha via derivative-based bisection.
-    """
-    # Return zero if global_grad is zero.
-    if torch.norm(global_grad) == 0:
-        return torch.zeros_like(global_grad)
-
-    # Special case: p = 2
-    if abs(p - 2.0) < tol:
-        norm_global_sq = torch.dot(global_grad, global_grad)
-        alpha = (
-            torch.dot(aggregated_step, global_grad) / norm_global_sq
-            if norm_global_sq > 0
-            else 0.0
-        )
-        return alpha * global_grad
-
-    # Special case: p = 1 (minimize L1 norm)
-    elif abs(p - 1.0) < tol:
-        valid = global_grad != 0
-        if valid.sum() == 0:
-            return torch.zeros_like(global_grad)
-        # Compute ratios and weights for indices with nonzero global_grad.
-        ratios = (aggregated_step[valid] / global_grad[valid]).detach().cpu().numpy()
-        weights = torch.abs(global_grad[valid]).detach().cpu().numpy()
-        sorted_indices = ratios.argsort()
-        ratios_sorted = ratios[sorted_indices]
-        weights_sorted = weights[sorted_indices]
-        total_weight = weights_sorted.sum()
-        cumulative = 0.0
-        for r, w in zip(ratios_sorted, weights_sorted):
-            cumulative += w
-            if cumulative >= total_weight / 2:
-                alpha = r
-                break
-        return alpha * global_grad
-
-    # Special case: p = infinity (minimize L-inf norm)
-    elif p == float("inf"):
-        valid = global_grad != 0
-        if valid.sum() == 0:
-            return torch.zeros_like(global_grad)
-        # Use ratios from valid indices to bracket the optimum.
-        ratios = (aggregated_step[valid] / global_grad[valid]).detach().cpu().numpy()
-        L, R = ratios.min(), ratios.max()
-
-        def f(alpha):
-            diff = aggregated_step - alpha * global_grad
-            return torch.max(torch.abs(diff)).item()
-
-        for _ in range(max_iter):
-            m1 = L + (R - L) / 3
-            m2 = R - (R - L) / 3
-            if f(m1) > f(m2):
-                L = m1
-            else:
-                R = m2
-        alpha = (L + R) / 2
-        return alpha * global_grad
-
-    # General case: p > 1 (and not 1,2,inf)
-    else:
-
-        def derivative(alpha):
-            diff = aggregated_step - alpha * global_grad
-            # Derivative of f(alpha)=||aggregated_step-alpha*global_grad||_p^p (up to constant factor)
-            return torch.sum(
-                global_grad * torch.sign(diff) * torch.abs(diff) ** (p - 1)
-            )
-
-        d0 = derivative(0.0)
-        if abs(d0) < tol:
-            return torch.zeros_like(global_grad)
-
-        if d0 > 0:
-            alpha_high = 0.0
-            alpha_low = -1.0
-            while derivative(alpha_low) > 0 and abs(alpha_low) < 1e6:
-                alpha_low *= 2.0
-        else:
-            alpha_low = 0.0
-            alpha_high = 1.0
-            while derivative(alpha_high) < 0 and abs(alpha_high) < 1e6:
-                alpha_high *= 2.0
-
-        for _ in range(max_iter):
-            alpha_mid = (alpha_low + alpha_high) / 2.0
-            d_mid = derivative(alpha_mid)
-            if abs(d_mid) < tol:
-                return alpha_mid * global_grad
-            if d_mid > 0:
-                alpha_high = alpha_mid
-            else:
-                alpha_low = alpha_mid
-        return ((alpha_low + alpha_high) / 2.0) * global_grad
-
-
 def flatten_params(model, out=None):
     if out is None:
         return parameters_to_vector(model.parameters())
@@ -178,12 +72,12 @@ def mark_trainable(model: nn.Module):
     # All ranks must take part in the broadcast so still call it unconditionally
     perm = broadcast_shuffle(num_layers=num_layers, rank=rank, world_size=world_size)
 
-    local_indices = split_indices(perm=perm, rank=rank, world_size=world_size)
+    loc_indices = split_indices(perm=perm, rank=rank, world_size=world_size)
 
     # Store and apply
-    model._trainable_indices = local_indices
+    model._trainable_indices = loc_indices
     for i, p in enumerate(params):
-        p.requires_grad = i in local_indices
+        p.requires_grad = i in loc_indices
     return model
 
 

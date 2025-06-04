@@ -98,12 +98,12 @@ def get_config_model_and_trainer(args, wandb_config):
             and dist.is_initialized()
             and dist.get_world_size() > 1
         ):
-            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            loc_rank = int(os.environ.get("LOCAL_RANK", 0))
             print(
-                f"Rank {dist.get_rank()}, local rank {local_rank}, cuda available: {torch.cuda.is_available()}"
+                f"Rank {dist.get_rank()}, local rank {loc_rank}, cuda available: {torch.cuda.is_available()}"
             )
             model = DDP(
-                model, device_ids=[local_rank] if torch.cuda.is_available() else None
+                model, device_ids=[loc_rank] if torch.cuda.is_available() else None
             )
     criterion_key = (
         wandb_config["criterion"] if wandb_config is not None else args["criterion"]
@@ -125,10 +125,10 @@ def get_config_model_and_trainer(args, wandb_config):
         optimizer_obj = optimizer_factory.create(optimizer_name, model, lr)
         # Remove any unused attributes.
         for attr in [
-            "local_optimizer",
-            "local_optimizer_args",
-            "global_optimizer",
-            "global_optimizer_args",
+            "loc_opt",
+            "loc_opt_hparams",
+            "glob_opt",
+            "glob_opt_hparams",
             # TODO: probably need to update this
         ]:
             if hasattr(all_config.trainer, attr):
@@ -136,9 +136,9 @@ def get_config_model_and_trainer(args, wandb_config):
     elif optimizer_name == "tr":
         from dd4ml.optimizers.tr import TR
 
-        all_config.trainer = TR.setup_TR_args(all_config.trainer)
+        all_config.trainer = TR.setup_TR_hparams(all_config.trainer)
         optimizer_obj = TR(
-            model=model,
+            params=model.parameters(),
             delta=all_config.trainer.delta,
             max_delta=all_config.trainer.max_delta,
             min_delta=all_config.trainer.min_delta,
@@ -153,16 +153,17 @@ def get_config_model_and_trainer(args, wandb_config):
     elif optimizer_name == "apts_ip":
         from dd4ml.optimizers.apts_ip import APTS_IP
 
-        all_config.trainer = APTS_IP.setup_APTS_args(all_config.trainer)
+        all_config.trainer = APTS_IP.setup_APTS_hparams(all_config.trainer)
 
         optimizer_obj = APTS_IP(
+            params=model.parameters(),
             model=model,
-            local_optimizer=all_config.trainer.local_optimizer,
-            local_optimizer_defaults=all_config.trainer.local_optimizer_args,
-            global_optimizer=all_config.trainer.global_optimizer,
-            global_optimizer_defaults=all_config.trainer.global_optimizer_args,
+            loc_opt=all_config.trainer.loc_opt,
+            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
+            glob_opt=all_config.trainer.glob_opt,
+            glob_opt_hparams=all_config.trainer.glob_opt_hparams,
             delta=all_config.trainer.delta,
-            max_local_iters=all_config.trainer.max_local_iters,
+            max_loc_iters=all_config.trainer.max_loc_iters,
             dogleg=False,
             APTS_in_data_sync_strategy="average",
             t_strategy="mean",
@@ -172,9 +173,9 @@ def get_config_model_and_trainer(args, wandb_config):
 
         all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
 
-        all_config.trainer = APTS_D.setup_APTS_args(all_config.trainer)
+        all_config.trainer = APTS_D.setup_APTS_hparams(all_config.trainer)
         all_config.trainer.apts_d = True
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        loc_rank = int(os.environ.get("LOCAL_RANK", 0))
         device = (
             f"cuda:{torch.cuda.current_device()}"
             if dist.get_backend() != "gloo"
@@ -187,15 +188,15 @@ def get_config_model_and_trainer(args, wandb_config):
             criterion=criterion,
             device=device,
             nr_models=all_config.model.num_subdomains,
-            global_opt=all_config.trainer.global_optimizer,
-            global_opt_params=all_config.trainer.global_optimizer_args,
-            local_opt=all_config.trainer.local_optimizer,
-            local_opt_params=all_config.trainer.local_optimizer_args,
-            global_pass=all_config.trainer.global_pass,
+            glob_opt=all_config.trainer.glob_opt,
+            glob_opt_hparams=all_config.trainer.glob_opt_hparams,
+            loc_opt=all_config.trainer.loc_opt,
+            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
+            glob_pass=all_config.trainer.glob_pass,
             foc=all_config.trainer.foc,
             norm_type=all_config.trainer.norm_type,
-            max_local_iters=all_config.trainer.max_local_iters,
-            max_global_iters=all_config.trainer.max_global_iters,
+            max_loc_iters=all_config.trainer.max_loc_iters,
+            max_glob_iters=all_config.trainer.max_glob_iters,
             tol=all_config.trainer.tol,
             **all_config.trainer.apts_params,
         )
@@ -204,8 +205,8 @@ def get_config_model_and_trainer(args, wandb_config):
 
         all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
 
-        all_config.trainer = APTS_P.setup_APTS_args(all_config.trainer)
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        all_config.trainer = APTS_P.setup_APTS_hparams(all_config.trainer)
+        loc_rank = int(os.environ.get("LOCAL_RANK", 0))
         device = (
             f"cuda:{torch.cuda.current_device()}"
             if dist.get_backend() != "gloo"
@@ -219,11 +220,11 @@ def get_config_model_and_trainer(args, wandb_config):
             criterion=criterion,
             device=device,
             nr_models=all_config.model.num_subdomains,
-            global_opt=all_config.trainer.global_optimizer,
-            global_opt_params=all_config.trainer.global_optimizer_args,
-            local_opt=all_config.trainer.local_optimizer,
-            local_opt_params=all_config.trainer.local_optimizer_args,
-            global_pass=all_config.trainer.global_pass,
+            glob_opt=all_config.trainer.glob_opt,
+            glob_opt_hparams=all_config.trainer.glob_opt_hparams,
+            loc_opt=all_config.trainer.loc_opt,
+            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
+            glob_pass=all_config.trainer.glob_pass,
             norm_type=all_config.trainer.norm_type,
             dogleg=all_config.trainer.dogleg,
         )

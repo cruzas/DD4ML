@@ -7,7 +7,7 @@ script="run_config_file.py" # Python script to run
 # --- General parameter settings ---#
 optimizer="apts_d"
 dataset="mnist"
-batch_sizes=(2500)
+batch_sizes=(10000)
 model="simple_cnn"
 criterion="cross_entropy"
 epochs=20
@@ -33,7 +33,7 @@ fi
 
 # Check if optimizer is apts_d
 if [[ "$optimizer" == "apts_d" ]]; then
-    global_pass="True"
+    glob_pass="True"
     foc="False"
 fi
 
@@ -122,7 +122,7 @@ for num_stages in "${num_stages_arr[@]:-1}"; do
                     fi
 
                     if [[ "$optimizer" == "apts_d" ]]; then
-                        update_config "global_pass" "${global_pass}"
+                        update_config "glob_pass" "${glob_pass}"
                         update_config "foc" "${foc}"
                     fi
 

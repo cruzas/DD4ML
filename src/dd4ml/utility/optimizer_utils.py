@@ -32,13 +32,13 @@ def get_apts_params(config):
         "max_delta": config.max_delta,
     }
 
-def get_lssr1_trust_region_params(config):
+def get_lssr1_tr_hparams(config):
     return {
         "delta": config.delta,
         "min_delta": config.min_delta,
         "max_delta": config.max_delta,
         "gamma": 1e-3,
-        "second_order": config.global_second_order,
+        "second_order": config.glob_second_order,
         "mem_length": config.mem_length,
         "max_wolfe_iter": config.max_wolfe_iter,
         "mu": 0.9,
@@ -54,7 +54,7 @@ def get_lssr1_trust_region_params(config):
         "sync": True,
     }
 
-def get_lssr1_local_trust_region_params(config):
+def get_lssr1_loc_tr_hparams(config):
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     norm_type = config.norm_type
     delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
@@ -64,7 +64,7 @@ def get_lssr1_local_trust_region_params(config):
         "min_delta": config.min_delta,
         "max_delta": config.max_delta,  # Lower maximum for local updates
         "gamma": 1e-3,
-        "second_order": config.local_second_order,
+        "second_order": config.loc_second_order,
         "mem_length": config.mem_length,
         "max_wolfe_iter": config.max_wolfe_iter,
         "mu": 0.9,
@@ -80,7 +80,7 @@ def get_lssr1_local_trust_region_params(config):
         "sync": False,
     }
 
-def get_trust_region_params(config):
+def get_tr_hparams(config):
     return {
         "delta": config.delta,
         "max_delta": config.max_delta,
@@ -92,12 +92,12 @@ def get_trust_region_params(config):
         "nu_inc": 0.75,
         "mem_length": 5,
         "norm_type": config.norm_type,
-        "second_order": config.global_second_order,
+        "second_order": config.glob_second_order,
         "tol": config.tol,
     }
 
 
-def get_local_trust_region_params(config):
+def get_loc_tr_hparams(config):
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     norm_type = config.norm_type
     delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
@@ -117,7 +117,7 @@ def get_local_trust_region_params(config):
         "nu_inc": 0.7 if norm_type != math.inf else 0.75,
         "mem_length": 5,
         "norm_type": config.norm_type,
-        "second_order": config.local_second_order,
+        "second_order": config.loc_second_order,
         "tol": config.tol,
     }
 

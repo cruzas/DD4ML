@@ -4,8 +4,8 @@ class APTS_D(APTS_Base):
     __name__ = "APTS_D"
     
     @staticmethod
-    def setup_APTS_args(config):
-        return APTS_Base.setup_APTS_args(config)
+    def setup_APTS_hparams(config):
+        return APTS_Base.setup_APTS_hparams(config)
 
     def __init__(
         self,
@@ -21,19 +21,18 @@ class APTS_D(APTS_Base):
         criterion=None,
         device=None,
         nr_models=None,
-        global_opt=None,
-        global_opt_params=None,
-        local_opt=None,
-        local_opt_params=None,
+        glob_opt=None,
+        glob_opt_hparams=None,
+        loc_opt=None,
+        loc_opt_hparams=None,
         *,
-        global_pass=True,
+        glob_pass=True,
         foc=True,
         norm_type=2,
-        max_local_iters=3,
-        max_global_iters=3,
+        max_loc_iters=3,
+        max_glob_iters=3,
         tol=1e-6,
     ):
-        # Call base for shared defaults (only 'lr'), buffer, device, global optimiser
         super().__init__(
             params,
             model=model,
@@ -47,14 +46,14 @@ class APTS_D(APTS_Base):
             criterion=criterion,
             device=device,
             nr_models=nr_models,
-            global_opt=global_opt,
-            global_opt_params=global_opt_params,
-            local_opt=local_opt,
-            local_opt_params=local_opt_params,
-            global_pass=global_pass,
+            glob_opt=glob_opt,
+            glob_opt_hparams=glob_opt_hparams,
+            loc_opt=loc_opt,
+            loc_opt_hparams=loc_opt_hparams,
+            glob_pass=glob_pass,
             norm_type=norm_type,
-            max_local_iters=max_local_iters,
-            max_global_iters=max_global_iters,
+            max_loc_iters=max_loc_iters,
+            max_glob_iters=max_glob_iters,
             tol=tol,
         )
 
@@ -65,8 +64,8 @@ class APTS_D(APTS_Base):
         self.loc_model = clone_model(model)
 
         # Instantiate local optimiser (trust-region or LSSR1_TR)
-        self.loc_optim = local_opt(
-            self.loc_model.parameters(), **local_opt_params
+        self.loc_opt = loc_opt(
+            self.loc_model.parameters(), **loc_opt_hparams
         )
         
         # Choose local closure based on first-order correction flag
@@ -74,8 +73,8 @@ class APTS_D(APTS_Base):
             self.foc_loc_closure if self.foc else self.non_foc_loc_closure
         )
         
-        # Print name of glob_optim and loc_optim
-        dprint(f"APTS_P global optimizer: {self.glob_optim.__name__}; local optimizer: {self.loc_optim.__name__}")
+        # Print name of glob_opt and loc_opt
+        dprint(f"APTS_P global optimizer: {self.glob_opt.__name__}; local optimizer: {self.loc_opt.__name__}")
 
     @torch.no_grad()
     def aggregate_loc_steps_and_losses(self, step, loc_red):
@@ -136,10 +135,10 @@ class APTS_D(APTS_Base):
         step = self.ensure_step_within_tr(step)
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
-        loss, grad, self.glob_optim.delta = self.control_step(step, pred)        
+        loss, grad, self.glob_opt.delta = self.control_step(step, pred)        
 
         # Optional global pass
-        if self.global_pass:
+        if self.glob_pass:
             loss, grad = self.glob_steps(loss, grad)
 
         # Synchronize global and local models and set delta accordingly
