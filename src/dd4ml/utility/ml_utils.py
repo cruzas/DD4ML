@@ -8,6 +8,15 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
+def get_device(device, backend="cuda"):
+    if device is not None:
+        return device
+    else:
+        return (
+            f"cuda:{torch.cuda.current_device()}"
+            if backend != "gloo"
+            else "cpu"
+        )
 
 def cross_entropy_transformers(logits, targets):
     return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)

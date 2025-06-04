@@ -195,7 +195,7 @@ def print_params_norm(model: nn.Module):
         print(norm.item())
 
 
-def trainable_parameters_to_vector(model: nn.Module) -> torch.Tensor:
+def trainable_params_to_vector(model: nn.Module) -> torch.Tensor:
     """
     Returns a vector containing only the trainable parameters of the model.
     """

@@ -17,7 +17,7 @@ from dd4ml.utility import (
     get_state_dict,
     mark_trainable,
     restore_params,
-    trainable_parameters_to_vector,
+    trainable_params_to_vector,
     get_apts_params,
     ensure_tensor,
     dprint,
@@ -118,12 +118,70 @@ class APTS_Base(Optimizer):
         self.grad_evals = 0.0
         self.local_grad_evals = 0.0
     
+    @torch.no_grad()
     def update_pytorch_lr(self) -> None:
         """
         Synchronize PyTorch param_groups' learning rate to current delta.
         """
         for g in self.param_groups:
             g["lr"] = self.delta
+
+    @torch.no_grad()
+    def glob_grad_to_vector(self):
+        """
+        Converts the global model's gradients to a flattened vector.
+        Returns a tensor containing the gradients of the global model parameters.
+        """
+        return parameters_to_vector([p.grad for p in self.model.parameters()]).detach()
+
+    @torch.no_grad()
+    def loc_grad_to_vector(self):
+        """
+        Converts the local model's gradients to a flattened vector.
+        Returns a tensor containing the gradients of the local model parameters.
+        """
+        return parameters_to_vector([p.grad for p in self.loc_model.parameters()]).detach()
+
+    @torch.no_grad()
+    def glob_params_to_vector(self):
+        """
+        Converts the global model's parameters to a flattened vector.
+        Returns a tensor containing the parameters of the global model.
+        """
+        return flatten_params(self.model, self._flat_params_buffer).detach()
+
+    @torch.no_grad()
+    def loc_params_to_vector(self):
+        """
+        Converts the local model's parameters to a flattened vector.
+        Returns a tensor containing the parameters of the local model.
+        """
+        return flatten_params(self.loc_model, self._loc_flat_buffer).detach()
+
+    @torch.no_grad()
+    def ensure_step_within_tr(self, step)
+        """
+        Ensure the step is within the trust region delta.
+        If the step norm exceeds delta, scale it down.
+        """
+        step_norm = step.norm(p=self.norm_type)
+        if step_norm > self.delta:
+            dprint(f"Warning: step norm {step_norm:.6e} exceeds delta {self.delta:.4f}. Scaling down step.")
+            step = (self.delta / step_norm) * step
+        return step
+
+    @torch.no_grad()
+    def sync_glob_to_loc(self):
+        self.delta = self.glob_optim.delta
+        self.update_pytorch_lr()
+
+        self.loc_optim.delta = self.glob_optim.delta
+        if self.norm_type != math.inf and self.nr_models > 1:
+            self.loc_optim.delta /= self.nr_models
+        self.loc_optim.update_pytorch_lr()
+
+        # Ensure local model matches global model for next iteration
+        self.loc_model.load_state_dict(get_state_dict(self.model))
 
     def non_foc_loc_closure(self, compute_grad: bool = False):
         """
@@ -174,7 +232,7 @@ class APTS_Base(Optimizer):
 
     def _step_loop(self, optim, max_iters, loss, grad, closure=None):
         for _ in range(max_iters):
-            # Perform an optimization step (trust‐region or LSSR1) with precomputed values
+            # Perform an optimization step (trust-region or LSSR1) with precomputed values
             if closure is not None:
                 loss, grad = optim.step(closure=closure, loss=loss, grad=grad)
             else:
@@ -211,88 +269,56 @@ class APTS_Base(Optimizer):
         )
 
     @torch.no_grad()
-    def glob_grad_to_vector(self):
-        """
-        Converts the global model's gradients to a flattened vector.
-        Returns a tensor containing the gradients of the global model parameters.
-        """
-        return parameters_to_vector([p.grad for p in self.model.parameters()]).detach()
-
-    @torch.no_grad()
-    def loc_grad_to_vector(self):
-        """
-        Converts the local model's gradients to a flattened vector.
-        Returns a tensor containing the gradients of the local model parameters.
-        """
-        return parameters_to_vector([p.grad for p in self.loc_model.parameters()]).detach()
-
-    @torch.no_grad()
-    def glob_params_to_vector(self):
-        """
-        Converts the global model's parameters to a flattened vector.
-        Returns a tensor containing the parameters of the global model.
-        """
-        return flatten_params(self.model, self._flat_params_buffer).detach()
-
-    @torch.no_grad()
-    def loc_params_to_vector(self):
-        """
-        Converts the local model's parameters to a flattened vector.
-        Returns a tensor containing the parameters of the local model.
-        """
-        return flatten_params(self.loc_model, self._loc_flat_buffer).detach()
-
-    @torch.no_grad()
-    def ensure_step_within_tr(self, step)
-        """
-        Ensure the step is within the trust region delta.
-        If the step norm exceeds delta, scale it down.
-        """
-        step_norm = step.norm(p=self.norm_type)
-        if step_norm > self.delta:
-            dprint(f"Warning: step norm {step_norm:.6e} exceeds delta {self.delta:.4f}. Scaling down step.")
-            step = (self.delta / step_norm) * step
-        return step
-
-    def tr_control(
+    def control_step(
         self,
         step: torch.Tensor,
-        pred: torch.Tensor
+        pred: torch.Tensor | None = None
     ):
         """
-        Trust-region control logic to decide whether to accept the step.
-        Returns True if the step is accepted, False otherwise.
+        Unified trust-region control:
+          - If `pred` is given, use it directly (pure TR).
+          - Otherwise compute a Dogleg prediction:
+              • First-order fallback (pred = -gᵀp) when no SR1 memory.
+              • Full (gᵀp + 0.5·pᵀBp) if `hess._S` is nonempty.
         """
-        # Apply proposed step: update global model parameters temporarily
-        with torch.no_grad():
-            restore_params(self.model, self.init_glob_flat + step)
 
-        # Compute trial loss and gradient
+        # Tentatively apply the step
+        restore_params(self.model, self.init_glob_flat + step)
+
+        # Evaluate trial loss & gradient
         trial_loss = self.glob_closure(compute_grad=True)
         trial_grad = self.glob_grad_to_vector()
 
-        # Compute acceptance ratio; if no local reduction, force rejection
-        if pred < self.tol:
-            accept_ratio = float("inf")
+        # Compute or use supplied `pred`
+        if pred is None:
+            # Dogleg-style prediction
+            g = self.init_glob_grad
+            # linear part
+            pred_val = -g.dot(step)
+            # add quadratic term if SR1 info exists
+            if len(self.glob_optim.hess._S) > 0:
+                self.glob_optim.hess.precompute()
+                Bp = self.glob_optim.hess.B(step)
+                pred_val -= 0.5 * step.dot(Bp)
         else:
-            # rho = actual / predicted
-            accept_ratio = (self.init_glob_loss - trial_loss) / pred  
+            pred_val = pred
 
-        with torch.no_grad():
-            if pred < self.tol or accept_ratio < self.nu_dec:
-                # Reject step: shrink trust region, restore original params
-                self.delta = max(self.delta * self.dec_factor, self.min_delta)
+        # Compute rho = (f(init) − f(trial)) / pred
+        if pred_val.abs() < self.tol:
+            rho = float("inf")
+        else:
+            rho = (self.init_glob_loss - trial_loss) / pred_val
+
+        # Accept/reject + adjust trust region
+        if pred_val < self.tol or rho < self.nu_dec:
+            # Reject: shrink trust region and restore original params
+            self.delta = max(self.delta * self.dec_factor, self.min_delta)
+            self.update_pytorch_lr()
+            restore_params(self.model, self.init_glob_flat)
+            return self.init_glob_loss, self.init_glob_grad, self.delta
+        else:
+            # Accept: possibly enlarge trust region
+            if rho > self.nu_inc:
+                self.delta = min(self.delta * self.inc_factor, self.max_delta)
                 self.update_pytorch_lr()
-                restore_params(self.model, self.init_glob_flat)
-                loss = self.init_glob_loss
-                grad = self.init_glob_grad
-            else:
-                # Accept step: possibly enlarge trust region
-                if accept_ratio > self.nu_inc:
-                    self.delta = min(self.delta * self.inc_factor, self.max_delta)
-                    self.update_pytorch_lr()
-                loss = trial_loss
-                grad = trial_grad
-        return loss, grad, self.delta
-
-    
+            return trial_loss, trial_grad, self.delta

@@ -94,20 +94,6 @@ class APTS_D(APTS_Base):
                 step /= self.nr_models
         return step, loc_red
         
-    @torch.no_grad()
-    def synchronize_global_and_local(self):
-        self.delta = self.glob_optim.delta
-        self.update_pytorch_lr()
-
-        self.loc_optim.delta = self.glob_optim.delta
-        self.loc_optim.update_pytorch_lr()
-        
-        if self.norm_type != math.inf and self.nr_models > 1:
-            self.loc_optim.delta /= self.nr_models
-
-        # Ensure local model matches global model for next iteration
-        self.loc_model.load_state_dict(get_state_dict(self.model))
-        
     def step(self, inputs, labels):
         """
         Performs one APTS_D step: evaluate initial losses/gradients,
@@ -133,7 +119,7 @@ class APTS_D(APTS_Base):
         # Calculate residual between global and local gradients
         self.resid = self.init_glob_grad - self.init_loc_grad
         
-        # Perform local optimisation steps
+        # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)
         
         # Account for local gradient evaluations across all models
@@ -150,13 +136,13 @@ class APTS_D(APTS_Base):
         step = self.ensure_step_within_tr(step)
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
-        loss, grad, self.glob_optim.delta = self.tr_control(step, pred)        
+        loss, grad, self.glob_optim.delta = self.control_step(step, pred)        
 
         # Optional global pass
         if self.global_pass:
             loss, grad = self.glob_steps(loss, grad)
 
         # Synchronize global and local models and set delta accordingly
-        self.synchronize_global_and_local()
+        self.sync_glob_to_loc()
            
         return loss

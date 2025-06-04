@@ -387,8 +387,8 @@ class LSSR1_TR(Optimizer):
         Returns tuple (new_loss, flat_gradient).
         """
         # Evaluate or retrieve precomputed loss and gradient
-        loss = _["precomp_loss"] if "precomp_loss" in _ else closure(compute_grad=True)
-        g = _["precomp_grad"] if "precomp_grad" in _ else self._flatten_grads()
+        loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
+        g = _["grad"] if "grad" in _ else self._flatten_grads()
         gn = torch.norm(g, p=self.norm_type)
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
