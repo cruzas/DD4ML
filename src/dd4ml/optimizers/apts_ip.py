@@ -104,6 +104,11 @@ class APTS_IP(APTS_Base):
         else:
             self.glob_opt = glob_opt(model=model, **glob_opt_hparams)
 
+        # Print name of glob_opt and loc_opt
+        dprint(
+            f"APTS_IP global optimizer: {self.glob_opt.__name__}; local optimizer: {self.loc_opt.__name__}"
+        )
+
     def loc_steps(self, final_subdomain_closure=None):
         for i in range(self.max_loc_iters):
             self.loc_opt.zero_grad()

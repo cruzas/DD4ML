@@ -4,11 +4,11 @@ Model handler takes care of the parallelized model logic. This is why this is sl
 """
 
 import inspect
+import math
 import os
 import time
 from collections import defaultdict
 
-import math
 import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader
@@ -32,16 +32,16 @@ class Trainer:
         # data loader workers
         C.num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
         # training schedule
-        C.epochs = 3  
+        C.epochs = 3
         C.run_by_epoch = False  # if False, run by iteration instead of epochs, typically for transformer networks
-        C.max_iters = 1000  
-        # optimizer 
+        C.max_iters = 1000
+        # optimizer
         C.learning_rate = 1e-3
         C.betas = (0.9, 0.999)  # for Adam
         C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = 1.0
         # initial batch size and adaptive params
-        C.batch_size = 128 # max batch size is lenght of dataset
+        C.batch_size = 128  # max batch size is lenght of dataset
         C.batch_inc_factor = 1  # factor to increase batch size
         C.loss_tol = 1e-3  # loss tolerance for adaptive batch size
         # APTS and TR
@@ -50,17 +50,16 @@ class Trainer:
         C.max_delta = 2.0
         C.data_parallel = False
         C.norm_type = 2  # for APTS_D (and possibly APTS_IP)
-        C.glob_pass = False 
-        C.foc = False # for APTS_D
+        C.glob_pass = False
+        C.foc = False  # for APTS_D
         C.dogleg = False  # for APTS_D
         C.max_glob_iters = 1  # for APTS*
         C.max_loc_iters = 3  # for APTS*
         C.glob_second_order = False  # for APTS*
         C.loc_second_order = False  # for APTS*
-        C.max_wolfe_iter = 10  # for APTS*
-        C.loc_opt = None # for APTS*
-        C.gradient_accumulation = True # for APTS*
-        C.accumulation_steps = 1 # for APTS*
+        C.max_wolfe_iters = 10  # for APTS*
+        C.gradient_accumulation = True  # for APTS*
+        C.accumulation_steps = 1  # for APTS*
         C.mem_length = 3  # for TR methods
         # For pipelining via pwm library
         C.data_chunks_amount = 1
@@ -103,7 +102,7 @@ class Trainer:
         # adaptive-batch state
         self.current_batch_size = config.batch_size
         self.last_loss = float("inf")
-    
+
         # timing
         self.total_start_time = 0.0  # for computing the total running time
         if config.run_by_epoch:
@@ -148,7 +147,7 @@ class Trainer:
         else:
             world_size = dist.get_world_size() if dist.is_initialized() else 1
             rank = dist.get_rank() if dist.is_initialized() else 0
-    
+
             # Per-process batch size
             pp_bs = bs // world_size
 
@@ -202,14 +201,19 @@ class Trainer:
         """Increase batch size when current loss is greater than previous loss."""
         cfg = self.config
         if cfg.batch_inc_factor == 1:
-            return # no batch size adjustment
-        
+            return  # no batch size adjustment
+
         if loss > self.last_loss - cfg.loss_tol:
-            new_bs = min(int(math.floor(self.current_batch_size * cfg.batch_inc_factor)), len(self.train_dataset))
-            dprint(f"Current loss ({loss:.4f}) is greater than previous loss - tolerance ({(self.last_loss-cfg.loss_tol):.4f}). Increasing batch size from {self.current_batch_size} to {new_bs}.")
+            new_bs = min(
+                int(math.floor(self.current_batch_size * cfg.batch_inc_factor)),
+                len(self.train_dataset),
+            )
+            dprint(
+                f"Current loss ({loss:.4f}) is greater than previous loss - tolerance ({(self.last_loss-cfg.loss_tol):.4f}). Increasing batch size from {self.current_batch_size} to {new_bs}."
+            )
             self.current_batch_size = new_bs
         self.last_loss = loss
-            
+
     def run(self):
         self.setup_data_loaders()
         if self.config.run_by_epoch:
@@ -250,11 +254,21 @@ class Trainer:
                 sig = inspect.signature(self.optimizer.step).parameters
                 # Check if final_subdomain_closure is part of self.optimizer arguments
                 if "final_subdomain_closure" in sig:
+
                     def final_subdomain_closure(outputs, y=y):
                         y_chunks = y.chunk(len(outputs))
-                        return [self.criterion(o, yc) for o, yc in zip(outputs, y_chunks)]
-                    step_args = {"closure": general_closure, "final_subdomain_closure": final_subdomain_closure}
-                elif any(k in self.optimizer.__class__.__name__.lower() for k in ("apts_d", "apts_p")):
+                        return [
+                            self.criterion(o, yc) for o, yc in zip(outputs, y_chunks)
+                        ]
+
+                    step_args = {
+                        "closure": general_closure,
+                        "final_subdomain_closure": final_subdomain_closure,
+                    }
+                elif any(
+                    k in self.optimizer.__class__.__name__.lower()
+                    for k in ("apts_d", "apts_p")
+                ):
                     step_args = {"inputs": x, "labels": y}
                 else:
                     step_args = {"closure": general_closure}

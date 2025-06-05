@@ -25,9 +25,13 @@ def make_std_config(config):
     """
     Standardize configuration by removing unnecessary keys.
     """
+    keys_to_remove = []
+
     use_pmw = getattr(config.trainer, "use_pmw", False)
     if not use_pmw:
-        keys_to_remove = ["num_stages", "num_replicas_per_subdomain", "model_handler"]
+        keys_to_remove.extend(
+            ["num_stages", "num_replicas_per_subdomain", "model_handler"]
+        )
         if (
             "apts_d" not in config.optimizer.lower()
             and not "apts_p" in config.optimizer.lower()
@@ -42,16 +46,24 @@ def make_std_config(config):
             "glob_opt_hparams",
             "max_loc_iters",
             "max_glob_iters",
-            "correct_step",
             "norm_type",
-            "ema",
+            "delta",
+            "min_delta",
+            "max_delta",
+            "norm_type",
+            "glob_pass",
+            "foc",
+            "dogleg" "glob_second_order",
+            "loc_second_order",
+            "max_wolfe_iters",
+            "mem_length",
         ]
         config = remove_keys(config, keys_to_remove)
     if config.optimizer.lower() == "apts_d" or config.optimizer.lower() == "apts_p":
         keys_to_remove = [
             "glob_opt",
             "loc_opt",
-        ]  # as TR used with ema or not
+        ]
         config = remove_keys(config, keys_to_remove)
     return config
 

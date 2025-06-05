@@ -1,20 +1,22 @@
 from __future__ import annotations
+
 import math
-from typing import Callable, Iterable, Tuple, Optional
+from typing import Callable, Iterable, Optional, Tuple
 
 import torch
+import torch.distributed as dist
 from torch import Tensor
 from torch.optim.optimizer import Optimizer
-import torch.distributed as dist
 
 from dd4ml.solvers.obs import OBS
-from .lsr1 import LSR1
 from dd4ml.utility.optimizer_utils import solve_tr_first_order, solve_tr_second_order
+
+from .lsr1 import LSR1
 
 
 class LSSR1_TR(Optimizer):
     __name__ = "LSSR1_TR"
-    
+
     def __init__(
         self,
         params,
@@ -26,7 +28,7 @@ class LSSR1_TR(Optimizer):
         gamma: float = 1e-3,
         second_order: bool = True,
         mem_length: int = 10,
-        max_wolfe_iter: int = 10,
+        max_wolfe_iters: int = 10,
         mu: float = 0.9,
         tau_1: float = 0.1,
         tau_2: float = 0.25,
@@ -58,7 +60,7 @@ class LSSR1_TR(Optimizer):
         self.gamma = gamma
         self.second_order = second_order
         self.mem_length = mem_length
-        self.max_wolfe_iter = max_wolfe_iter
+        self.max_wolfe_iters = max_wolfe_iters
         self.mu = mu
         self.tau_1 = tau_1
         self.tau_2 = tau_2
@@ -112,7 +114,7 @@ class LSSR1_TR(Optimizer):
             device=device,
             dtype=dtype,
         )
-        
+
         # Flags for distributed synchronisation
         self.sync = bool(sync)
         self.rank = dist.get_rank() if dist.is_initialized() else 0
@@ -189,7 +191,7 @@ class LSSR1_TR(Optimizer):
         # Compute loss and gradients via closure
         loss = closure(compute_grad=True)
         grad = self._flatten_grads()
-        
+
         # Synchronise loss and gradient if needed
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
@@ -418,9 +420,7 @@ class LSSR1_TR(Optimizer):
                 g, gn, self.delta, self.hess, self.obs, self.tol
             )
         else:
-            p_star, pred = solve_tr_first_order(
-                g, gn, self.delta, self.tol
-            )
+            p_star, pred = solve_tr_first_order(g, gn, self.delta, self.tol)
 
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
@@ -454,7 +454,7 @@ class LSSR1_TR(Optimizer):
             c1=self.c1,
             c2=self.c2,
             alpha_max=self.alpha_max,
-            max_iter=self.max_wolfe_iter,
+            max_iter=self.max_wolfe_iters,
         )
 
         # Apply final parameter update: w_new = wk + alpha * p_comb
@@ -462,9 +462,7 @@ class LSSR1_TR(Optimizer):
         self._unflatten_update(wk + p_step)
 
         # Compute trust-region ratio ρ = (f(new) − f(old)) / predicted
-        rho = (
-            (new_loss - loss) / pred if (alpha > 0 and pred < 0) else 0.0
-        )
+        rho = (new_loss - loss) / pred if (alpha > 0 and pred < 0) else 0.0
         s_norm_sq = p_step.dot(p_step)
         s_norm = math.sqrt(s_norm_sq.item())
         delta_old = self.delta

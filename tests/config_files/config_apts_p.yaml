@@ -15,10 +15,6 @@ parameters:
     value: 2
   num_replicas_per_subdomain:
     value: 1
-  correct_step:
-    value: False
-  ema:
-    value: False
   glob_pass:
     value: True
   dogleg:

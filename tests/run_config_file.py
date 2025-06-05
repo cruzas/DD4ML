@@ -130,17 +130,17 @@ def parse_cmd_args() -> argparse.Namespace:
         parser.add_argument(
             "--glob_opt",
             type=str,
-            default="trust_region",
+            default="TR",
             help="Global optimizer",
         )
         parser.add_argument(
-            "--subdomain_optimizer", type=str, default="sgd", help="Subdomain optimizer"
+            "--loc_opt", type=str, default="SGD", help="Local optimizer"
         )
         parser.add_argument(
             "--max_loc_iters",
             type=int,
             default=3,
-            help="Max iterations for subdomain optimizer",
+            help="Max iterations for local optimizer",
         )
 
     return parser.parse_args()
@@ -224,10 +224,11 @@ def main(
 
         delta = trainer.optimizer.param_groups[0]["lr"]
         thing_to_print = "lr"
-            
-        dprint(f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, {thing_to_print}: {delta:.6e}"
-            )
-            
+
+        dprint(
+            f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, {thing_to_print}: {delta:.6e}"
+        )
+
         if rank == 0 and use_wandb:
             log_fn(
                 {

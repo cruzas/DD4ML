@@ -69,6 +69,11 @@ class APTS_P(APTS_Base):
 
         self.loc_closure = self.non_foc_loc_closure
 
+        # Print name of glob_opt and loc_opt
+        dprint(
+            f"APTS_P global optimizer: {self.glob_opt.__name__}; local optimizer: {self.loc_opt.__name__}"
+        )
+
     @torch.no_grad()
     def sync_loc_to_glob(self) -> None:
         """

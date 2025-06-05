@@ -1,9 +1,10 @@
 import math
+from typing import Tuple
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
-from typing import Tuple
+
 
 class Timer:
     def __init__(self, timings, key):
@@ -32,6 +33,7 @@ def get_apts_params(config):
         "max_delta": config.max_delta,
     }
 
+
 def get_lssr1_tr_hparams(config):
     return {
         "delta": config.delta,
@@ -40,7 +42,7 @@ def get_lssr1_tr_hparams(config):
         "gamma": 1e-3,
         "second_order": config.glob_second_order,
         "mem_length": config.mem_length,
-        "max_wolfe_iter": config.max_wolfe_iter,
+        "max_wolfe_iters": config.max_wolfe_iters,
         "mu": 0.9,
         "tau_1": 0.1,
         "tau_2": 0.25,
@@ -54,6 +56,7 @@ def get_lssr1_tr_hparams(config):
         "sync": True,
     }
 
+
 def get_lssr1_loc_tr_hparams(config):
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     norm_type = config.norm_type
@@ -66,7 +69,7 @@ def get_lssr1_loc_tr_hparams(config):
         "gamma": 1e-3,
         "second_order": config.loc_second_order,
         "mem_length": config.mem_length,
-        "max_wolfe_iter": config.max_wolfe_iter,
+        "max_wolfe_iters": config.max_wolfe_iters,
         "mu": 0.9,
         "tau_1": 0.1,
         "tau_2": 0.25,
@@ -79,6 +82,7 @@ def get_lssr1_loc_tr_hparams(config):
         "norm_type": config.norm_type,
         "sync": False,
     }
+
 
 def get_tr_hparams(config):
     return {
@@ -121,6 +125,7 @@ def get_loc_tr_hparams(config):
         "tol": config.tol,
     }
 
+
 def solve_tr_first_order(
     gradient: Tensor,
     grad_norm: float,
@@ -137,12 +142,13 @@ def solve_tr_first_order(
     predicted = trust_radius * grad_norm
     return step, predicted
 
+
 def solve_tr_second_order(
     gradient: Tensor,
     grad_norm: float,
     trust_radius: float,
-    lsr1_hessian,           # an object exposing .precompute(), .gamma, .Psi, .Minv, .B(v)
-    obs_solver,             # an object exposing .solve_tr_subproblem(g, delta, γ, Ψ, Minv)
+    lsr1_hessian,  # an object exposing .precompute(), .gamma, .Psi, .Minv, .B(v)
+    obs_solver,  # an object exposing .solve_tr_subproblem(g, delta, γ, Ψ, Minv)
     tol: float,
 ) -> Tuple[Tensor, float]:
     """
@@ -162,9 +168,10 @@ def solve_tr_second_order(
     )
     # predicted reduction = -(gᵀp + 0.5 pᵀ B p)
     g_dot_p = torch.dot(gradient, p)
-    p_B_p  = torch.dot(p, lsr1_hessian.B(p))
+    p_B_p = torch.dot(p, lsr1_hessian.B(p))
     predicted = -(g_dot_p + 0.5 * p_B_p)
     return p, predicted.item()
+
 
 def ensure_tensor(d, device):
     if isinstance(d, (int, float)):
@@ -174,4 +181,6 @@ def ensure_tensor(d, device):
         d = d.to(device)
         return d
     else:
-        raise TypeError(f"Unexpected type for d: {type(d)}. Expected int, float, or torch.Tensor.")
+        raise TypeError(
+            f"Unexpected type for d: {type(d)}. Expected int, float, or torch.Tensor."
+        )
