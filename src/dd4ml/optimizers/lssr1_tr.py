@@ -398,7 +398,7 @@ class LSSR1_TR(Optimizer):
             gn = self._avg_scalar(gn)
         # If gradient norm below tolerance, skip update
         if gn <= self.tol:
-            return loss.item(), g
+            return loss, g
 
         # Flatten current parameters and preserve a copy for updates
         wk_flat = self._flatten_params()

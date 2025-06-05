@@ -4,11 +4,11 @@ metric:
   goal: minimize
 parameters:
   optimizer: 
-    value: "apts_p"
+    value: "apts_p" 
   batch_size:
-    value: 10000
+    value: 5000
   effective_batch_size:
-    value: 10000
+    value: 5000
   num_stages:
     value: 1
   num_subdomains:
@@ -24,26 +24,38 @@ parameters:
   loc_second_order:
     value: False
   norm_type:
-    value: 2
+    value: inf
   max_loc_iters:
     value: 3
   max_glob_iters:
     value: 1
+  max_iters:
+    value: 10 # for Transformers
   epochs: 
     value: 10
-  max_iters:
-    value: 20
   delta: 
     value: 0.1
+  min_delta: 
+    value: 0.001
+  max_delta:
+    value: 2.0
   dataset_name: 
-    value: "cifar10" 
+    value: "mnist" 
   model_name: 
-    value: "simple_resnet"
+    value: "simple_cnn"
   criterion:
     value: "cross_entropy"
   gradient_accumulation:
-    value: False
+    value: True
   accumulation_steps:
     value: 1
   seed:
     values: [42]
+  tol:
+    value: 1e-6
+  batch_inc_factor:
+    value: 2.0
+  mem_length:
+    value: 3
+  max_wolfe_iters:
+    value: 10

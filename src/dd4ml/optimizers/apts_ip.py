@@ -96,17 +96,17 @@ class APTS_IP(APTS_Base):
             )
 
         self.loc_opt = loc_opt(params=model.subdomain_params(), **loc_opt_hparams)
-        if "LSSR1_TR" in str(glob_opt):
-            glob_opt_hparams.update({"delta": delta})
-            self.glob_opt = glob_opt(
-                params=model.subdomain_params(), **glob_opt_hparams
-            )
-        else:
-            self.glob_opt = glob_opt(model=model, **glob_opt_hparams)
+        # if "LSSR1_TR" in str(glob_opt):
+        #     glob_opt_hparams.update({"delta": delta})
+        self.glob_opt = glob_opt(
+            params=list(model.parameters()), **glob_opt_hparams
+        )
+        # else:
+        #     self.glob_opt = glob_opt(model=model, **glob_opt_hparams)
 
         # Print name of glob_opt and loc_opt
         dprint(
-            f"APTS_IP global optimizer: {self.glob_opt.__name__}; local optimizer: {self.loc_opt.__name__}"
+            f"{self.__name__} global optimizer: {type(self.glob_opt).__name__}; local optimizer: {type(self.loc_opt).__name__}"
         )
 
     def loc_steps(self, final_subdomain_closure=None):
@@ -143,7 +143,7 @@ class APTS_IP(APTS_Base):
         step = self.model.parameters(clone=False) - self.init_glob_flat
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
-        loss, grad, self.glob_opt.delta = self.control_step(step, pred)
+        loss, grad, self.glob_opt.delta = self.control_step(step, closure=closure)
 
         # Optional global pass
         if self.glob_pass:

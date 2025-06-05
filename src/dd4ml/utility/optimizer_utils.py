@@ -170,7 +170,7 @@ def solve_tr_second_order(
     g_dot_p = torch.dot(gradient, p)
     p_B_p = torch.dot(p, lsr1_hessian.B(p))
     predicted = -(g_dot_p + 0.5 * p_B_p)
-    return p, predicted.item()
+    return p, predicted
 
 
 def ensure_tensor(d, device):

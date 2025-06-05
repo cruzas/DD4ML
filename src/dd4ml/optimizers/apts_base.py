@@ -24,6 +24,7 @@ from dd4ml.utility import (
     mark_trainable,
     restore_params,
     trainable_params_to_vector,
+    apts_ip_restore_params,
 )
 
 from .lssr1_tr import LSSR1_TR
@@ -310,7 +311,7 @@ class APTS_Base(Optimizer):
             closure=self.glob_closure if closure is None else closure,
         )
 
-    def control_step(self, step: torch.Tensor, pred: torch.Tensor | None = None):
+    def control_step(self, step: torch.Tensor, pred: torch.Tensor | None = None, closure=None):
         """
         Unified trust-region control:
           - If `pred` is given, use it directly (pure TR).
@@ -320,11 +321,13 @@ class APTS_Base(Optimizer):
         """
 
         # Tentatively apply the step
-        restore_params(self.model, self.init_glob_flat + step)
+        restore_fn = restore_params if closure is None else apts_ip_restore_params
+        
+        restore_fn(self.model, self.init_glob_flat + step)
 
         # Evaluate trial loss & gradient
-        trial_loss = self.glob_closure(compute_grad=True)
-        trial_grad = self.glob_grad_to_vector()
+        trial_loss = self.glob_closure(compute_grad=True) if closure is None else closure(compute_grad=True, zero_grad=True)
+        trial_grad = self.glob_grad_to_vector() if closure is None else self.model.grad(clone=True)
 
         # Compute or use supplied `pred`
         if pred is None:
@@ -333,7 +336,8 @@ class APTS_Base(Optimizer):
             # linear part
             pred_val = -g.dot(step)
             # add quadratic term if SR1 info exists
-            if len(self.glob_opt.hess._S) > 0:
+            if self.glob_opt.hess._S is not None and len(self.glob_opt.hess._S) > 0:
+                dprint("Using second-order prediction in APTS control step.")
                 self.glob_opt.hess.precompute()
                 Bp = self.glob_opt.hess.B(step)
                 pred_val -= 0.5 * step.dot(Bp)
@@ -341,7 +345,7 @@ class APTS_Base(Optimizer):
             pred_val = pred
 
         # Compute rho = (f(init) − f(trial)) / pred
-        if pred_val.abs() < self.tol:
+        if torch.abs(pred_val) < self.tol:
             rho = float("inf")
         else:
             rho = (self.init_glob_loss - trial_loss) / pred_val
@@ -351,7 +355,7 @@ class APTS_Base(Optimizer):
             # Reject: shrink trust region and restore original params
             self.delta = max(self.delta * self.dec_factor, self.min_delta)
             self.update_pytorch_lr()
-            restore_params(self.model, self.init_glob_flat)
+            restore_fn(self.model, self.init_glob_flat)
             return self.init_glob_loss, self.init_glob_grad, self.delta
         else:
             # Accept: possibly enlarge trust region

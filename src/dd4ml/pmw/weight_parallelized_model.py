@@ -66,7 +66,7 @@ class WeightParallelizedModel(BasePMWModel):
     def subdomain_grad_norm(self, p=2):
         return torch.norm(
             torch.cat([param.grad.flatten() for param in self.parameters()], dim=0), p=p
-        ).item()
+        )
 
     def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):
         # flag to avoid storing the tensors needed to compute the gradients

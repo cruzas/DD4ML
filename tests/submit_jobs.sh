@@ -5,24 +5,24 @@ current_dir=$(pwd)
 script="run_config_file.py" # Python script to run
 
 # --- General parameter settings ---#
-optimizer="apts_d"
+optimizer="apts_ip"
 dataset="mnist"
 batch_sizes=(10000)
 model="simple_cnn"
 criterion="cross_entropy"
 epochs=20
 trials=1
-num_subd_arr=(2) # For data-parallel executions
+num_subd_arr=(1) # For data-parallel executions
 batch_inc_factor=1.25
 
 # --- Optimizer-specific settings ---#
 use_pmw="false"
-if [[ "$optimizer" == "apts" ]]; then
+if [[ "$optimizer" == "apts_ip" ]]; then
     use_pmw="true"
 fi
 
 if [[ "$use_pmw" == "true" ]]; then
-    num_stages_arr=(1)
+    num_stages_arr=(2)
     num_rep_arr=(1)
 fi
 

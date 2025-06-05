@@ -59,6 +59,7 @@ def get_config_model_and_trainer(args, wandb_config):
         all_config.model.block_size = dataset.get_block_size()
 
     all_config = make_std_config(all_config)
+    all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
 
     # Model instantiation (with optional parallelization).
     if getattr(all_config.trainer, "use_pmw", False) and hasattr(
@@ -130,6 +131,7 @@ def get_config_model_and_trainer(args, wandb_config):
         from dd4ml.optimizers.tr import TR
 
         all_config.trainer = TR.setup_TR_hparams(all_config.trainer)
+        
         optimizer_obj = TR(
             params=model.parameters(),
             delta=all_config.trainer.delta,

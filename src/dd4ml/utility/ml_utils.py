@@ -76,7 +76,7 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
         if has_model_handler and model.model_handler.is_last_stage():
             for i, out in enumerate(outputs):
                 losses[i] = criterion(out, targets[i].to(out.device))
-            loss = torch.tensor((sum(losses) / len(losses)).item(), device=model.tensor_device)
+            loss = torch.tensor((sum(losses) / len(losses)), device=model.tensor_device)
         elif not has_model_handler:
             loss = criterion(outputs, targets.to(outputs.device))
 
@@ -114,9 +114,9 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
             loss_broadcast.wait()
 
         if return_output:
-            return loss.item(), [output for output in outputs] if has_model_handler else outputs
+            return loss, [output for output in outputs] if has_model_handler else outputs
 
-        return loss.item()
+        return loss
 
     return closure2
 

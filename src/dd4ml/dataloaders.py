@@ -218,7 +218,6 @@ class GeneralizedDistributedDataLoader(DataLoader):
                     drop_last=True,
                     **kwargs,
                 )
-            self.sampler = base_sampler
         # rank in the middle does not require any real data
         elif rank not in first_layer_ranks + last_layer_ranks:
             # Make a mock dataset with the same amount of batches as the original dataset (this is needed to keep iterations consistent across all ranks)
@@ -272,7 +271,6 @@ class GeneralizedDistributedDataLoader(DataLoader):
                     drop_last=True,
                     **kwargs,
                 )
-            self.sampler = base_sampler
         else:
             dataset = MockDataset(dataset, len(dataset), device=device, first=False)
             base_sampler = GeneralizedDistributedSampler(
@@ -310,7 +308,6 @@ class GeneralizedDistributedDataLoader(DataLoader):
                     drop_last=True,
                     **kwargs,
                 )
-            self.sampler = base_sampler
 
 
 class GeneralizedDistributedSampler(DistributedSampler):

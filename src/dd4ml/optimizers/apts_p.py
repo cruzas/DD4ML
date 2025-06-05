@@ -71,7 +71,7 @@ class APTS_P(APTS_Base):
 
         # Print name of glob_opt and loc_opt
         dprint(
-            f"APTS_P global optimizer: {self.glob_opt.__name__}; local optimizer: {self.loc_opt.__name__}"
+            f"{self.__name__} global optimizer: {type(self.glob_opt).__name__}; local optimizer: {type(self.loc_opt).__name__}"
         )
 
     @torch.no_grad()

@@ -64,6 +64,7 @@ class Trainer:
         # For pipelining via pwm library
         C.data_chunks_amount = 1
         C.use_pmw = False
+        C.loc_opt = None
         return C
 
     def __init__(
@@ -128,8 +129,10 @@ class Trainer:
         """(Re)create train and test loaders using current_batch_size"""
         cfg, ds_train, ds_test = self.config, self.train_dataset, self.test_dataset
         bs = self.current_batch_size
+        overlap = cfg.overlap if hasattr(cfg, "overlap") else 0 # Overlap between consecutive batches
+        world_size = dist.get_world_size() if dist.is_initialized() else 1
+        rank = dist.get_rank() if dist.is_initialized() else 0
         if cfg.use_pmw:
-            overlap = cfg.overlap if hasattr(cfg, "overlap") else 0
             self.train_loader = GeneralizedDistributedDataLoader(
                 model_handler=cfg.model_handler,
                 dataset=ds_train,
@@ -140,35 +143,14 @@ class Trainer:
                 pin_memory=True,
             )
 
-            world_size = dist.get_world_size() if dist.is_initialized() else 1
-            rank = dist.get_rank() if dist.is_initialized() else 0
-            pp_bs = bs // world_size
-
-            base_test_sampler = DistributedSampler(
-                ds_test,
-                num_replicas=world_size,
-                rank=rank,
-                shuffle=False,
-                drop_last=False,
-            )
-
-            test_sampler = OverlapBatchSampler(
-                base_sampler=base_test_sampler,
-                batch_size=pp_bs,
-                overlap=overlap,
-                drop_last=False,
-            )
-
             self.test_loader = DataLoader(
                 ds_test,
-                batch_sampler=test_sampler,
+                batch_size=bs,
+                shuffle=False,
                 num_workers=cfg.num_workers,
                 pin_memory=True,
             )
         else:
-            world_size = dist.get_world_size() if dist.is_initialized() else 1
-            rank = dist.get_rank() if dist.is_initialized() else 0
-
             # Per-process batch size
             pp_bs = bs // world_size
 
@@ -186,9 +168,6 @@ class Trainer:
                 shuffle=False,
                 drop_last=False,
             )
-
-            # Overlap between consecutive batches
-            overlap = cfg.overlap if hasattr(cfg, "overlap") else 0
 
             train_sampler = OverlapBatchSampler(
                 base_sampler=base_train_sampler,
@@ -275,7 +254,6 @@ class Trainer:
                 sig = inspect.signature(self.optimizer.step).parameters
                 # Check if final_subdomain_closure is part of self.optimizer arguments
                 if "final_subdomain_closure" in sig:
-
                     def final_subdomain_closure(outputs, y=y):
                         y_chunks = y.chunk(len(outputs))
                         return [

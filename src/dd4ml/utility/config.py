@@ -50,7 +50,6 @@ def make_std_config(config):
             "delta",
             "min_delta",
             "max_delta",
-            "norm_type",
             "glob_pass",
             "foc",
             "dogleg" "glob_second_order",

@@ -88,11 +88,11 @@ class TR(Optimizer):
         # Evaluate loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
         grad = _["grad"] if "grad" in _ else self._flat_grad()
-        gn = torch.norm(grad, p=self.norm_type).item()
+        gn = torch.norm(grad, p=self.norm_type)
 
         # Convergence test
         if gn <= self.tol:
-            return loss.item(), grad
+            return loss, grad
 
         # First- or second-order TR step
         use_second = (
@@ -120,7 +120,7 @@ class TR(Optimizer):
         trial_grad = self._flat_grad()
 
         # Acceptance ratio ρ
-        actual = (loss - trial_loss).item()
+        actual = (loss - trial_loss)
         rho = actual / (predicted + 1e-12)
 
         if actual > 0 and rho >= self.nu_dec:
