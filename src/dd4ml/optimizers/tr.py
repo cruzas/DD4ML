@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Iterable, Tuple
 import torch
 from torch.optim import Optimizer
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.optimizers.lsr1 import LSR1
 from dd4ml.solvers.obs import OBS
 from dd4ml.utility import (
@@ -88,6 +89,8 @@ class TR(Optimizer):
         # Evaluate loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
         grad = _["grad"] if "grad" in _ else self._flat_grad()
+        if isinstance(grad, WeightParallelizedTensor):
+            grad = grad.detach()
         gn = torch.norm(grad, p=self.norm_type)
 
         # Convergence test

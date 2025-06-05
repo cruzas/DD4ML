@@ -5,6 +5,8 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
+
 
 class Timer:
     def __init__(self, timings, key):
@@ -136,9 +138,12 @@ def solve_tr_first_order(
     Closed-form first-order TR: step = -gradient * (trust_radius / grad_norm).
     Predicted reduction = trust_radius * grad_norm. If grad_norm <= tol, returns zeros.
     """
+    grad_tensor = gradient.detach() if isinstance(gradient, WeightParallelizedTensor) else gradient
+
     if grad_norm <= tol:
-        return torch.zeros_like(gradient), 0.0
-    step = -gradient * (trust_radius / grad_norm)
+        return torch.zeros_like(grad_tensor), 0.0
+
+    step = -grad_tensor * (trust_radius / grad_norm)
     predicted = trust_radius * grad_norm
     return step, predicted
 
@@ -157,17 +162,21 @@ def solve_tr_second_order(
     - Otherwise calls lsr1_hessian.precompute(), then obs_solver.solve_tr_subproblem(...)
     - Computes predicted reduction = -(gᵀp + 0.5 pᵀ B p).
     """
+    grad_tensor = gradient.detach() if isinstance(gradient, WeightParallelizedTensor) else gradient
+
     if grad_norm <= tol:
-        return torch.zeros_like(gradient), 0.0
+        return torch.zeros_like(grad_tensor), 0.0
 
     # (Re)compute any LSR1 factors
     lsr1_hessian.precompute()
-    delta = torch.tensor(trust_radius, device=gradient.device, dtype=gradient.dtype)
+    device = grad_tensor.device
+    dtype = grad_tensor.dtype
+    delta = torch.tensor(trust_radius, device=device, dtype=dtype)
     p = -obs_solver.solve_tr_subproblem(
-        gradient, delta, lsr1_hessian.gamma, lsr1_hessian.Psi, lsr1_hessian.Minv
+        grad_tensor, delta, lsr1_hessian.gamma, lsr1_hessian.Psi, lsr1_hessian.Minv
     )
     # predicted reduction = -(gᵀp + 0.5 pᵀ B p)
-    g_dot_p = torch.dot(gradient, p)
+    g_dot_p = torch.dot(grad_tensor, p)
     p_B_p = torch.dot(p, lsr1_hessian.B(p))
     predicted = -(g_dot_p + 0.5 * p_B_p)
     return p, predicted

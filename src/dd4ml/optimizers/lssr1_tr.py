@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 from torch.optim.optimizer import Optimizer
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 from dd4ml.solvers.obs import OBS
 from dd4ml.utility.optimizer_utils import solve_tr_first_order, solve_tr_second_order
@@ -391,6 +392,8 @@ class LSSR1_TR(Optimizer):
         # Evaluate or retrieve precomputed loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
         g = _["grad"] if "grad" in _ else self._flatten_grads()
+        if isinstance(g, WeightParallelizedTensor):
+            g = g.detach()
         gn = torch.norm(g, p=self.norm_type)
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
