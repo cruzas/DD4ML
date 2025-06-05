@@ -8,13 +8,13 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
-def get_device(device, backend="cuda"):
+def get_device(device=None):    
     if device is not None:
         return device
     else:
         return (
             f"cuda:{torch.cuda.current_device()}"
-            if backend != "gloo"
+            if dist.get_backend() != "gloo"
             else "cpu"
         )
 

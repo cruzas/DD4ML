@@ -6,14 +6,11 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from .apts_utils import mark_trainable, print_params_norm
 from .config import get_config, make_std_config
-from .dist_utils import dprint
-from .factory import criterion_factory, dataset_factory, optimizer_factory
+from dd4ml.utility import mark_trainable, print_params_norm, dprint, criterion_factory, dataset_factory, optimizer_factory, get_device
 
 # You can now add new components dynamically at runtime by calling, e.g.:
 # dataset_factory.register("new_dataset", "dd4ml.datasets.new_dataset", "NewDatasetClass")
-
 
 def parse_norm(norm_value):
     if norm_value in ("inf", "Inf", "INF"):
@@ -86,11 +83,7 @@ def get_config_model_and_trainer(args, wandb_config):
         model = ParallelizedModel(model_handler, sample=sample_input)
     else:
         model = all_config.model.model_class(all_config.model)
-        device = (
-            f"cuda:{torch.cuda.current_device()}"
-            if dist.get_backend() != "gloo"
-            else "cpu"
-        )
+        device = get_device()
         model.to(device)
 
         if (
@@ -179,11 +172,7 @@ def get_config_model_and_trainer(args, wandb_config):
         all_config.trainer = APTS_D.setup_APTS_hparams(all_config.trainer)
         all_config.trainer.apts_d = True
         loc_rank = int(os.environ.get("LOCAL_RANK", 0))
-        device = (
-            f"cuda:{torch.cuda.current_device()}"
-            if dist.get_backend() != "gloo"
-            else "cpu"
-        )
+        device = get_device()
         model.to(device)
         optimizer_obj = APTS_D(
             params=model.parameters(),
@@ -210,11 +199,7 @@ def get_config_model_and_trainer(args, wandb_config):
 
         all_config.trainer = APTS_P.setup_APTS_hparams(all_config.trainer)
         loc_rank = int(os.environ.get("LOCAL_RANK", 0))
-        device = (
-            f"cuda:{torch.cuda.current_device()}"
-            if dist.get_backend() != "gloo"
-            else "cpu"
-        )
+        device = get_device()
 
         model.to(device)
         optimizer_obj = APTS_P(
@@ -228,8 +213,12 @@ def get_config_model_and_trainer(args, wandb_config):
             loc_opt=all_config.trainer.loc_opt,
             loc_opt_hparams=all_config.trainer.loc_opt_hparams,
             glob_pass=all_config.trainer.glob_pass,
-            norm_type=all_config.trainer.norm_type,
             dogleg=all_config.trainer.dogleg,
+            norm_type=all_config.trainer.norm_type,
+            max_loc_iters=all_config.trainer.max_loc_iters,
+            max_glob_iters=all_config.trainer.max_glob_iters,
+            tol=all_config.trainer.tol,
+            **all_config.trainer.apts_params,
         )
 
     else:
