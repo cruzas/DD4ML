@@ -136,8 +136,6 @@ class APTS_IP(APTS_Base):
 
         # Compute global trial step
         step = self.model.parameters(clone=False) - self.init_glob_flat
-        # Ensure step is within trust region
-        step = self.ensure_step_within_tr(step)
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
         loss, grad, self.glob_opt.delta = self.control_step(step, pred)

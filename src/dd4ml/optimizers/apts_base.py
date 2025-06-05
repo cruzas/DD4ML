@@ -285,13 +285,8 @@ class APTS_Base(Optimizer):
                     "Closure must be provided for global/local optimization step in APTS. To be modified in future."
                 )
 
-            # # Compute gradient norm for stopping criterion
-            # grad_norm = grad.norm(p=self.norm_type)
-            # if self.nr_models > 1:
-            #     # Synchronize max norm across processes
-            #     dist.all_reduce(grad_norm, op=dist.ReduceOp.MAX)
-
             # Stop iterations if gradient norm is below tolerance
+            grad_norm = grad.norm(p=self.norm_type)
             if grad_norm <= optim.tol:
                 break
 
@@ -315,7 +310,6 @@ class APTS_Base(Optimizer):
             closure=self.glob_closure if closure is None else closure,
         )
 
-    @torch.no_grad()
     def control_step(self, step: torch.Tensor, pred: torch.Tensor | None = None):
         """
         Unified trust-region control:

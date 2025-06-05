@@ -141,7 +141,6 @@ class APTS_P(APTS_Base):
 
         # Compute trial step and ensure it is within trust region
         step = self.glob_params_to_vector() - self.init_glob_flat
-        step = self.ensure_step_within_tr(step)
 
         pred = None
         if not self.dogleg:

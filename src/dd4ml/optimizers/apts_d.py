@@ -137,9 +137,6 @@ class APTS_D(APTS_Base):
             loc_red = self.init_loc_loss - loc_loss
         step, pred = self.aggregate_loc_steps_and_losses(step, loc_red)
 
-        # Ensure step is within trust region
-        step = self.ensure_step_within_tr(step)
-
         # APTS trust-region control: possibly modifies self.delta and global model parameters
         loss, grad, self.glob_opt.delta = self.control_step(step, pred)
 
