@@ -12,7 +12,7 @@ model="simple_cnn"
 criterion="cross_entropy"
 epochs=20
 trials=1
-num_subd_arr=(1) # For data-parallel executions
+num_subd_arr=(2) # For data-parallel executions
 batch_inc_factor=1.25
 
 # --- Optimizer-specific settings ---#
@@ -22,6 +22,7 @@ if [[ "$optimizer" == "apts_ip" ]]; then
 fi
 
 if [[ "$use_pmw" == "true" ]]; then
+    num_subd_arr=(1) # For data-parallel executions
     num_stages_arr=(2)
     num_rep_arr=(1)
 fi

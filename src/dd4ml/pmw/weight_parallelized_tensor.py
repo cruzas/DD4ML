@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
 from .base_pmw_model import BasePMWModel
-from dd4ml.utility import get_device
+from dd4ml.utility.ml_utils import get_device
 
 
 class WeightParallelizedTensor(BasePMWModel):

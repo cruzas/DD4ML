@@ -159,7 +159,10 @@ class LSSR1_TR(Optimizer):
             self._offsets,
             self._offsets[1:],
         ):
-            buf[start:end].copy_(p.grad.view(-1))
+            g = p.grad
+            if isinstance(g, WeightParallelizedTensor):
+                g = g.detach()
+            buf[start:end].copy_(g.view(-1))
         return buf
 
     def _unflatten_update(self, vec: Tensor) -> None:
@@ -392,8 +395,6 @@ class LSSR1_TR(Optimizer):
         # Evaluate or retrieve precomputed loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
         g = _["grad"] if "grad" in _ else self._flatten_grads()
-        if isinstance(g, WeightParallelizedTensor):
-            g = g.detach()
         gn = torch.norm(g, p=self.norm_type)
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)

@@ -27,7 +27,9 @@ class APTS_IP(APTS_Base):
             if config.glob_second_order
             else (TR, get_tr_hparams(config))
         )
-
+        # Disable gradient broadcast in the global optimizer as each rank
+        # holds only a shard of the model when running APTS_IP.
+        config.glob_opt_hparams["sync"] = False
         config.apts_params = get_apts_params(config)
         return config
 
@@ -152,4 +154,4 @@ class APTS_IP(APTS_Base):
         self.delta = self.glob_opt.delta
         self._update_param_group()
 
-        return new_loss
+        return loss

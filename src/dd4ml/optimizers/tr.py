@@ -70,7 +70,10 @@ class TR(Optimizer):
         for i, p in enumerate(self.ps):
             if p.grad is not None:
                 s, e = int(self.offsets[i]), int(self.offsets[i + 1])
-                self._grad_buf[s:e].copy_(p.grad.view(-1))
+                g = p.grad
+                if isinstance(g, WeightParallelizedTensor):
+                    g = g.detach()
+                self._grad_buf[s:e].copy_(g.view(-1))
         return self._grad_buf
 
     def _apply_update(self, sign: float = 1.0) -> None:
