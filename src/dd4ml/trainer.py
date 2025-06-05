@@ -129,18 +129,39 @@ class Trainer:
         cfg, ds_train, ds_test = self.config, self.train_dataset, self.test_dataset
         bs = self.current_batch_size
         if cfg.use_pmw:
-            train_loader = GeneralizedDistributedDataLoader(
+            overlap = cfg.overlap if hasattr(cfg, "overlap") else 0
+            self.train_loader = GeneralizedDistributedDataLoader(
                 model_handler=cfg.model_handler,
                 dataset=ds_train,
                 batch_size=bs,
                 shuffle=False,
+                overlap=overlap,
                 num_workers=cfg.num_workers,
                 pin_memory=True,
             )
-            test_loader = DataLoader(
+
+            world_size = dist.get_world_size() if dist.is_initialized() else 1
+            rank = dist.get_rank() if dist.is_initialized() else 0
+            pp_bs = bs // world_size
+
+            base_test_sampler = DistributedSampler(
                 ds_test,
-                batch_size=bs,
+                num_replicas=world_size,
+                rank=rank,
                 shuffle=False,
+                drop_last=False,
+            )
+
+            test_sampler = OverlapBatchSampler(
+                base_sampler=base_test_sampler,
+                batch_size=pp_bs,
+                overlap=overlap,
+                drop_last=False,
+            )
+
+            self.test_loader = DataLoader(
+                ds_test,
+                batch_sampler=test_sampler,
                 num_workers=cfg.num_workers,
                 pin_memory=True,
             )

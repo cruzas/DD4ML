@@ -134,6 +134,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
         dataset,
         batch_size,
         shuffle,
+        overlap: float | int = 0.0,
         device="cpu" if not torch.cuda.is_available() else "cuda",
         num_workers=0,
         pin_memory=False,
@@ -172,7 +173,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
 
         tot_replicas = model_handler.tot_replicas
         num_stages = model_handler.num_stages
-
+        
         first_layer_ranks = model_handler.get_stage_ranks(
             stage_name="first", mode="global"
         )
@@ -182,7 +183,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
 
         rank = dist.get_rank()
         if num_stages == 1:
-            self.sampler = GeneralizedDistributedSampler(
+            base_sampler = GeneralizedDistributedSampler(
                 layer_ranks=first_layer_ranks,
                 dataset=dataset,
                 num_replicas=tot_replicas,
@@ -192,16 +193,32 @@ class GeneralizedDistributedDataLoader(DataLoader):
                 seed=seed,
                 **kwargs,
             )
-            super(GeneralizedDistributedDataLoader, self).__init__(
-                dataset=dataset,
-                batch_size=batch_size // tot_replicas,
-                shuffle=False,
-                sampler=self.sampler,
-                num_workers=num_workers,
-                pin_memory=pin_memory,
-                drop_last=True,
-                **kwargs,
-            )
+            if overlap:
+                batch_sampler = OverlapBatchSampler(
+                    base_sampler=base_sampler,
+                    batch_size=batch_size // tot_replicas,
+                    overlap=overlap,
+                    drop_last=True,
+                )
+                super(GeneralizedDistributedDataLoader, self).__init__(
+                    dataset=dataset,
+                    batch_sampler=batch_sampler,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    **kwargs,
+                )
+            else:
+                super(GeneralizedDistributedDataLoader, self).__init__(
+                    dataset=dataset,
+                    batch_size=batch_size // tot_replicas,
+                    shuffle=False,
+                    sampler=base_sampler,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    drop_last=True,
+                    **kwargs,
+                )
+            self.sampler = base_sampler
         # rank in the middle does not require any real data
         elif rank not in first_layer_ranks + last_layer_ranks:
             # Make a mock dataset with the same amount of batches as the original dataset (this is needed to keep iterations consistent across all ranks)
@@ -220,7 +237,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
             )
         elif rank in first_layer_ranks:
             dataset = MockDataset(dataset, len(dataset), device=device, first=True)
-            self.sampler = GeneralizedDistributedSampler(
+            base_sampler = GeneralizedDistributedSampler(
                 layer_ranks=first_layer_ranks,
                 dataset=dataset,
                 num_replicas=tot_replicas,
@@ -230,19 +247,35 @@ class GeneralizedDistributedDataLoader(DataLoader):
                 seed=seed,
                 **kwargs,
             )
-            super(GeneralizedDistributedDataLoader, self).__init__(
-                dataset=dataset,
-                batch_size=batch_size // tot_replicas,
-                shuffle=False,
-                sampler=self.sampler,
-                num_workers=num_workers,
-                pin_memory=pin_memory,
-                drop_last=True,
-                **kwargs,
-            )
+            if overlap:
+                batch_sampler = OverlapBatchSampler(
+                    base_sampler=base_sampler,
+                    batch_size=batch_size // tot_replicas,
+                    overlap=overlap,
+                    drop_last=True,
+                )
+                super(GeneralizedDistributedDataLoader, self).__init__(
+                    dataset=dataset,
+                    batch_sampler=batch_sampler,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    **kwargs,
+                )
+            else:
+                super(GeneralizedDistributedDataLoader, self).__init__(
+                    dataset=dataset,
+                    batch_size=batch_size // tot_replicas,
+                    shuffle=False,
+                    sampler=base_sampler,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    drop_last=True,
+                    **kwargs,
+                )
+            self.sampler = base_sampler
         else:
             dataset = MockDataset(dataset, len(dataset), device=device, first=False)
-            self.sampler = GeneralizedDistributedSampler(
+            base_sampler = GeneralizedDistributedSampler(
                 layer_ranks=last_layer_ranks,
                 dataset=dataset,
                 num_replicas=tot_replicas,
@@ -252,16 +285,32 @@ class GeneralizedDistributedDataLoader(DataLoader):
                 seed=seed,
                 **kwargs,
             )
-            super(GeneralizedDistributedDataLoader, self).__init__(
-                dataset=dataset,
-                batch_size=batch_size // tot_replicas,
-                shuffle=False,
-                sampler=self.sampler,
-                num_workers=num_workers,
-                pin_memory=pin_memory,
-                drop_last=True,
-                **kwargs,
-            )
+            if overlap:
+                batch_sampler = OverlapBatchSampler(
+                    base_sampler=base_sampler,
+                    batch_size=batch_size // tot_replicas,
+                    overlap=overlap,
+                    drop_last=True,
+                )
+                super(GeneralizedDistributedDataLoader, self).__init__(
+                    dataset=dataset,
+                    batch_sampler=batch_sampler,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    **kwargs,
+                )
+            else:
+                super(GeneralizedDistributedDataLoader, self).__init__(
+                    dataset=dataset,
+                    batch_size=batch_size // tot_replicas,
+                    shuffle=False,
+                    sampler=base_sampler,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    drop_last=True,
+                    **kwargs,
+                )
+            self.sampler = base_sampler
 
 
 class GeneralizedDistributedSampler(DistributedSampler):
