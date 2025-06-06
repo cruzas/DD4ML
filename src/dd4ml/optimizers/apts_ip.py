@@ -99,6 +99,7 @@ class APTS_IP(APTS_Base):
 
         self.loc_opt = loc_opt(params=model.subdomain_params(), **loc_opt_hparams)
         
+        glob_opt_hparams["flat_params"] = self.model.parameters()
         self.glob_opt = glob_opt(
             params=list(model.parameters()), **glob_opt_hparams
         )

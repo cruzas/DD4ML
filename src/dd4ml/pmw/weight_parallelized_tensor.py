@@ -23,6 +23,10 @@ class WeightParallelizedTensor(BasePMWModel):
         # Intercept torch.norm
         if func is torch.norm and isinstance(args[0], cls):
             return args[0].norm(**kwargs)
+        elif func is torch.zeros_like and isinstance(args[0], cls):
+            like = args[0]
+            zeros = [torch.zeros_like(t) for t in like.tensor]
+            return cls(zeros, like.backend, like.master_group, like.rank)
 
         # Fallback: detach any WPTs and delegate to PyTorch
         new_args = tuple(x.detach() if isinstance(x, cls) else x for x in args)
@@ -218,3 +222,71 @@ class WeightParallelizedTensor(BasePMWModel):
         local_sum = sum(p.sum() for p in self.tensor).to(get_device())
         dist.all_reduce(local_sum, group=self.master_group, op=dist.ReduceOp.SUM)
         return local_sum
+
+    def mul_(self, other):
+        """
+        In-place element-wise multiplication.
+
+        * If ``other`` is another WeightParallelizedTensor, multiply shard-wise.
+        * If ``other`` is a scalar or ``torch.Tensor``, broadcast-multiply every shard.
+        """
+        if isinstance(other, WeightParallelizedTensor):
+            for p, q in zip(self.tensor, other.tensor):
+                p.mul_(q)
+            return self
+
+        if isinstance(other, (int, float, torch.Tensor)):
+            for p in self.tensor:
+                p.mul_(other)
+            return self
+
+        return NotImplemented
+
+    def add_(self, other, alpha: float = 1.0):
+        """
+        In-place element-wise addition.
+
+        * If ``other`` is another WeightParallelizedTensor, add shard-wise.
+        * If ``other`` is a scalar or ``torch.Tensor``, broadcast-add every shard.
+
+        The ``alpha`` parameter matches ``torch.Tensor.add_``.
+        """
+        if isinstance(other, WeightParallelizedTensor):
+            for p, q in zip(self.tensor, other.tensor):
+                p.add_(q, alpha=alpha)
+            return self
+
+        if isinstance(other, (int, float, torch.Tensor)):
+            for p in self.tensor:
+                p.add_(other, alpha=alpha)
+            return self
+
+        return NotImplemented
+    
+    @property
+    def dtype(self):
+        return self.tensor[0].dtype if self.tensor else torch.float32
+    
+    def clone(self):
+        """
+        Create a deep copy of this WeightParallelizedTensor, preserving:
+        - each shard's values, dtype, and device
+        - the backend, master_group, and rank metadata
+        """
+        # Clone each local shard (shard.clone() preserves dtype & device)
+        cloned_shards = [p.clone() for p in self.tensor]
+
+        # Construct a new WPT with the same metadata
+        new_wpt = WeightParallelizedTensor(
+            cloned_shards,
+            backend=self.backend,
+            master_group=self.master_group,
+            rank=self.rank,
+        )
+
+        # If you'd rather store device as an explicit attribute instead of using property(),
+        #    you can set new_wpt._device here; however, since `device` is now a @property
+        #    that inspects each shard, no further action is required. :contentReference[oaicite:0]{index=0}
+
+        new_wpt.device = self.device  # Ensure the device is set correctly
+        return new_wpt

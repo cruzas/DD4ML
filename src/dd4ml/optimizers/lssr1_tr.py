@@ -45,7 +45,8 @@ class LSSR1_TR(Optimizer):
         alpha_max: float = 10.0,
         sync: bool = False,
         flat_grads_fn = None,
-        flat_params_fn = None
+        flat_params_fn = None,
+        flat_params = None, # only passed by APTS_IP
     ):
         # Ensure at least one parameter is provided
         param_list = list(params)
@@ -99,9 +100,26 @@ class LSSR1_TR(Optimizer):
 
         # Preallocate flat buffers in optimizer state for parameters, gradients, and momentum-like term
         st = self.state
-        st["flat_wk"] = torch.zeros(total_size, device=device, dtype=dtype)
-        st["flat_gk"] = torch.zeros_like(st["flat_wk"])
-        st["flat_vk"] = torch.zeros_like(st["flat_wk"])
+        if flat_params is not None:
+            # If flat_params is provided, use it directly
+            st["flat_wk"] = WeightParallelizedTensor(
+                [torch.zeros_like(t) for t in flat_params.tensor],
+                flat_params.backend, flat_params.master_group, flat_params.rank
+            )
+            st["flat_gk"] = WeightParallelizedTensor(
+                [torch.zeros_like(t) for t in flat_params.tensor],
+                flat_params.backend, flat_params.master_group, flat_params.rank
+            )
+            st["flat_vk"] = WeightParallelizedTensor(
+                [torch.zeros_like(t) for t in flat_params.tensor],
+                flat_params.backend, flat_params.master_group, flat_params.rank
+            )
+        else:
+            st["flat_wk"] = torch.zeros(total_size, device=device, dtype=dtype)
+            st["flat_gk"] = torch.zeros_like(st["flat_wk"])
+            st["flat_vk"] = torch.zeros_like(st["flat_wk"])
+        print(f"Rank {dist.get_rank()}. Type of flat_gk: {type(st['flat_gk'])}")
+        print(f"Rank {dist.get_rank()}. Type of flat_wk: {type(st['flat_wk'])}")
         st["prev_grad"] = None
 
         # Cache tolerance as tensor to avoid recreating each time
@@ -171,12 +189,16 @@ class LSSR1_TR(Optimizer):
         Scatter the flat update vector `vec` back into each parameter tensor.
         """
         with torch.no_grad():
-            for p, start, end in zip(
-                self.param_groups[0]["params"],
-                self._offsets,
-                self._offsets[1:],
-            ):
-                p.data.copy_(vec[start:end].view_as(p))
+            if isinstance(vec, WeightParallelizedTensor):
+                for p, shard in zip(self.param_groups[0]["params"], vec.tensor):
+                    p.data.copy_(shard.view_as(p))
+            else:
+                for p, start, end in zip(
+                    self.param_groups[0]["params"],
+                    self._offsets,
+                    self._offsets[1:],
+                ):
+                    p.data.copy_(vec[start:end].view_as(p))
 
     def _evaluate_function_and_gradient(
         self,
@@ -437,6 +459,7 @@ class LSSR1_TR(Optimizer):
             scale = min(1.0, self.delta / vk_norm)
             vk.mul_(scale)
         # Combine p_star and vk, then bound combined step to trust-region radius
+        print(f"Rank {self.rank}. Before p_comb. p_star is of type {type(p_star)}")
         p_comb = p_star + vk
         p_comb_norm_sq = p_comb.dot(p_comb)
         if p_comb_norm_sq > 0.0:
