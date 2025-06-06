@@ -43,6 +43,34 @@ class WeightParallelizedTensor(BasePMWModel):
             return torch.norm(self.detach(), p=p)
         raise NotImplementedError("Only L-2 and L-∞ norms are implemented.")
 
+    def shape(self):
+        """
+        Return the full tensor shape across all ranks.
+
+        Assumes shards are split along dimension 0, and that each shard
+        on every rank shares identical trailing dimensions.
+        """
+        # Compute local size along dim 0 (sum over all local shards)
+        local_dim0 = sum(p.size(0) for p in self.tensor)
+        dim0_tensor = torch.tensor(local_dim0, device=get_device())
+
+        # Gather all local_dim0 values from every rank
+        world_size = dist.get_world_size(self.master_group)
+        gathered = [torch.zeros_like(dim0_tensor) for _ in range(world_size)]
+        dist.all_gather(gathered, dim0_tensor, group=self.master_group)
+
+        # Sum to get global size along dim 0
+        global_dim0 = sum(int(x.item()) for x in gathered)
+
+        # The remaining dimensions are the same on all shards
+        rest = list(self.tensor[0].shape[1:])
+        return tuple([global_dim0] + rest)
+
+    def dim(self):
+        """
+        Return the number of dimensions of the full tensor.
+        """
+        return len(self.shape())
 
     def numel(self):
         return sum(p.numel() for p in self.tensor)
@@ -83,8 +111,7 @@ class WeightParallelizedTensor(BasePMWModel):
         If `other` is scalar or torch.Tensor, scale each local shard by `other`.
         """
         if isinstance(other, WeightParallelizedTensor):
-            local_dp = torch.dot(self.detach(), other.detach()).to(get_device())    
-            # Reduce to a single scalar across ranks
+            local_dp = torch.dot(self.detach(), other.detach()).to(get_device())
             dist.all_reduce(local_dp, group=self.master_group, op=dist.ReduceOp.SUM)
             return local_dp
 
@@ -107,15 +134,11 @@ class WeightParallelizedTensor(BasePMWModel):
         If `other` is a scalar (int/float) or torch.Tensor, scale each local shard.
         """
         if isinstance(other, WeightParallelizedTensor):
-            # Local dot between flattened shards
             local_dp = torch.dot(self.detach(), other.detach()).to(get_device())
-
-            # All-reduce (SUM) across ranks
             dist.all_reduce(local_dp, group=self.master_group, op=dist.ReduceOp.SUM)
             return local_dp
 
         elif isinstance(other, (int, float, torch.Tensor)):
-            # Scaling: multiply each local shard by `other`
             return WeightParallelizedTensor(
                 [p * other for p in self.tensor],
                 backend=self.backend,

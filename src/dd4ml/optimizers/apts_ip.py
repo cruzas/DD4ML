@@ -98,13 +98,11 @@ class APTS_IP(APTS_Base):
             )
 
         self.loc_opt = loc_opt(params=model.subdomain_params(), **loc_opt_hparams)
-        # if "LSSR1_TR" in str(glob_opt):
-        #     glob_opt_hparams.update({"delta": delta})
+        
         self.glob_opt = glob_opt(
             params=list(model.parameters()), **glob_opt_hparams
         )
-        # else:
-        #     self.glob_opt = glob_opt(model=model, **glob_opt_hparams)
+        self.glob_opt._flat_grads_fn = self.model.grad
 
         # Print name of glob_opt and loc_opt
         dprint(
@@ -136,6 +134,10 @@ class APTS_IP(APTS_Base):
         # Compute initial global/local loss and gradient
         self.init_glob_loss = closure(compute_grad=True, zero_grad=True)
         self.init_glob_grad = self.model.grad(clone=True)
+        
+        print(f"Rank {dist.get_rank()}. Initial global rank dimension: {self.init_glob_grad.dim()}")
+        print(f"Rank {dist.get_rank()}. Detached initial global grad shape: {self.init_glob_grad.detach().shape}")
+        
         self.grad_evals += 1
 
         # Perform local steps
@@ -145,6 +147,7 @@ class APTS_IP(APTS_Base):
         step = self.model.parameters(clone=False) - self.init_glob_flat
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
+        flat_grads_fn = self.model.grad
         loss, grad, self.glob_opt.delta = self.control_step(step, closure=closure)
 
         # Optional global pass

@@ -44,6 +44,7 @@ class LSSR1_TR(Optimizer):
         c2: float = 0.9,
         alpha_max: float = 10.0,
         sync: bool = False,
+        flat_grads_fn = None,
     ):
         # Ensure at least one parameter is provided
         param_list = list(params)
@@ -51,8 +52,7 @@ class LSSR1_TR(Optimizer):
             raise ValueError("Optimiser got an empty parameter list")
 
         # Only lr remains in defaults
-        defaults = dict(lr=lr)
-        super().__init__(param_list, defaults)
+        super().__init__(param_list, {'lr': lr})
 
         # Assign other hyperparameters as attributes
         self.delta = delta
@@ -120,6 +120,8 @@ class LSSR1_TR(Optimizer):
         self.sync = bool(sync)
         self.rank = dist.get_rank() if dist.is_initialized() else 0
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
+        
+        self._flat_grads_fn = flat_grads_fn if flat_grads_fn is not None else self._flatten_grads
 
     def _avg_scalar(self, value: Tensor) -> Tensor:
         """
@@ -159,10 +161,7 @@ class LSSR1_TR(Optimizer):
             self._offsets,
             self._offsets[1:],
         ):
-            g = p.grad
-            if isinstance(g, WeightParallelizedTensor):
-                g = g.detach()
-            buf[start:end].copy_(g.view(-1))
+            buf[start:end].copy_(p.grad.view(-1))
         return buf
 
     def _unflatten_update(self, vec: Tensor) -> None:
@@ -194,7 +193,7 @@ class LSSR1_TR(Optimizer):
 
         # Compute loss and gradients via closure
         loss = closure(compute_grad=True)
-        grad = self._flatten_grads()
+        grad = self._flat_grads_fn()
 
         # Synchronise loss and gradient if needed
         if self.sync and self.world_size > 1:
@@ -272,7 +271,7 @@ class LSSR1_TR(Optimizer):
                 break
 
         # If maximum iterations exceeded, return best lower bound
-        return alpha_lo, phi_lo, self._flatten_grads()
+        return alpha_lo, phi_lo, self._flat_grads_fn()
 
     def _strong_wolfe_line_search(
         self,
@@ -385,7 +384,7 @@ class LSSR1_TR(Optimizer):
             if alpha < tol_tensor.item():
                 break
         # If line search fails, return zero step
-        return 0.0, phi_0, self._flatten_grads()
+        return 0.0, phi_0, self._flat_grads_fn()
 
     def step(self, closure: Callable[[], Tensor], **_) -> Tuple[float, float]:
         """
@@ -394,7 +393,8 @@ class LSSR1_TR(Optimizer):
         """
         # Evaluate or retrieve precomputed loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
-        g = _["grad"] if "grad" in _ else self._flatten_grads()
+        g = _["grad"] if "grad" in _ else self._flat_grads_fn()
+        
         gn = torch.norm(g, p=self.norm_type)
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
