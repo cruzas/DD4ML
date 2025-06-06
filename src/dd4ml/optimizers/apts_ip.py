@@ -106,7 +106,6 @@ class APTS_IP(APTS_Base):
         self.glob_opt._flat_grads_fn = self.model.grad
         self.glob_opt._flat_params_fn = self.model.parameters
 
-        # Print name of glob_opt and loc_opt
         dprint(
             f"{self.__name__} global optimizer: {type(self.glob_opt).__name__}; local optimizer: {type(self.loc_opt).__name__}"
         )
@@ -136,10 +135,6 @@ class APTS_IP(APTS_Base):
         # Compute initial global/local loss and gradient
         self.init_glob_loss = closure(compute_grad=True, zero_grad=True)
         self.init_glob_grad = self.model.grad(clone=True)
-        
-        print(f"Rank {dist.get_rank()}. Initial global rank dimension: {self.init_glob_grad.dim()}")
-        print(f"Rank {dist.get_rank()}. Detached initial global grad shape: {self.init_glob_grad.detach().shape}")
-        
         self.grad_evals += 1
 
         # Perform local steps

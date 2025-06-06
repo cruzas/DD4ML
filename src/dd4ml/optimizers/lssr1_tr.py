@@ -118,8 +118,6 @@ class LSSR1_TR(Optimizer):
             st["flat_wk"] = torch.zeros(total_size, device=device, dtype=dtype)
             st["flat_gk"] = torch.zeros_like(st["flat_wk"])
             st["flat_vk"] = torch.zeros_like(st["flat_wk"])
-        print(f"Rank {dist.get_rank()}. Type of flat_gk: {type(st['flat_gk'])}")
-        print(f"Rank {dist.get_rank()}. Type of flat_wk: {type(st['flat_wk'])}")
         st["prev_grad"] = None
 
         # Cache tolerance as tensor to avoid recreating each time
@@ -459,7 +457,6 @@ class LSSR1_TR(Optimizer):
             scale = min(1.0, self.delta / vk_norm)
             vk.mul_(scale)
         # Combine p_star and vk, then bound combined step to trust-region radius
-        print(f"Rank {self.rank}. Before p_comb. p_star is of type {type(p_star)}")
         p_comb = p_star + vk
         p_comb_norm_sq = p_comb.dot(p_comb)
         if p_comb_norm_sq > 0.0:
@@ -470,7 +467,6 @@ class LSSR1_TR(Optimizer):
 
         # Prepare line search with initial loss and directional derivative
         phi_0 = loss
-        print(f"Rank {self.rank}. Before dphi_0. g is of type {type(g)} with shape {g.shape} and p_comb is of type {type(p_comb)} with shape {p_comb.shape}")
         dphi_0 = g.dot(p_comb)
 
         # Perform strong Wolfe line search to compute step length alpha

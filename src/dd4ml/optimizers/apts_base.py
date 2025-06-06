@@ -337,7 +337,6 @@ class APTS_Base(Optimizer):
             pred_val = -g.dot(step)
             # add quadratic term if SR1 info exists
             if self.glob_opt.hess._S is not None and len(self.glob_opt.hess._S) > 0:
-                dprint("Using second-order prediction in APTS control step.")
                 self.glob_opt.hess.precompute()
                 Bp = self.glob_opt.hess.B(step)
                 pred_val -= 0.5 * step.dot(Bp)
