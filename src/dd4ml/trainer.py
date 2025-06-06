@@ -19,6 +19,7 @@ from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure, dprint
 
 from .dataloaders import GeneralizedDistributedDataLoader, OverlapBatchSampler
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 
 class Trainer:
@@ -212,6 +213,12 @@ class Trainer:
                 f"Current loss ({loss:.4f}) is greater than previous loss - tolerance ({(self.last_loss-cfg.loss_tol):.4f}). Increasing batch size from {self.current_batch_size} to {new_bs}."
             )
             self.current_batch_size = new_bs
+            # Rebuild data loaders to reflect the new batch size
+            self.setup_data_loaders()
+            # Invalidate cached shapes for any WeightParallelizedTensor parameters
+            for p in self.model.parameters():
+                if isinstance(p, WeightParallelizedTensor):
+                    p.invalidate_shape_cache()
         self.last_loss = loss
 
     def run(self):
