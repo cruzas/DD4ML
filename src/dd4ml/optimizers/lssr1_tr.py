@@ -257,7 +257,7 @@ class LSSR1_TR(Optimizer):
                 alpha_j = 0.5 * (alpha_lo + alpha_hi)
             else:
                 denom = 2 * (phi_hi - phi_lo - dphi_lo * (alpha_hi - alpha_lo))
-                cond = torch.abs(denom) > self.tol
+                cond = abs(denom) > self.tol
                 if not cond:
                     interp = 0.5 * (alpha_lo + alpha_hi)
                 else:
@@ -281,7 +281,7 @@ class LSSR1_TR(Optimizer):
                 alpha_hi, phi_hi = alpha_j, phi_j
             else:
                 # Check strong Wolfe curvature condition
-                strong_wolfe = torch.abs(dphi_j) <= -c2 * dphi_0
+                strong_wolfe = abs(dphi_j) <= -c2 * dphi_0
                 if strong_wolfe:
                     return alpha_j, phi_j, grad_j
                 switch = dphi_j * (alpha_hi - alpha_lo) >= 0
@@ -291,7 +291,7 @@ class LSSR1_TR(Optimizer):
                 alpha_lo, phi_lo, dphi_lo = alpha_j, phi_j, dphi_j
 
             # Terminate if interval is sufficiently small
-            if torch.abs(alpha_hi - alpha_lo) < tol_tensor:
+            if abs(alpha_hi - alpha_lo) < tol_tensor:
                 break
 
         # If maximum iterations exceeded, return best lower bound
@@ -346,7 +346,7 @@ class LSSR1_TR(Optimizer):
                 )
 
             # If curvature condition satisfied, accept alpha_i
-            if torch.abs(dphi_i) <= -c2 * dphi_0:
+            if abs(dphi_i) <= -c2 * dphi_0:
                 return alpha_i, phi_i, grad_i
 
             # If derivative becomes positive, perform zoom with swapped bounds
@@ -401,7 +401,7 @@ class LSSR1_TR(Optimizer):
                 wk, p, alpha, closure
             )
             armijo_ok = phi_alpha <= phi_0 + c1 * alpha * dphi_0
-            curvature_ok = torch.abs(dphi_alpha) <= c2 * torch.abs(dphi_0)
+            curvature_ok = abs(dphi_alpha) <= c2 * abs(dphi_0)
             if armijo_ok and curvature_ok:
                 return alpha, phi_alpha, grad_alpha
             alpha *= 0.5
@@ -455,7 +455,7 @@ class LSSR1_TR(Optimizer):
         vk.mul_(self.mu).add_(wk - st["old_wk"])
         vk_norm_sq = vk.dot(vk)
         if vk_norm_sq > 0.0:
-            vk_norm = vk_norm_sq.sqrt()
+            vk_norm = math.sqrt(float(vk_norm_sq))
             scale = min(1.0, self.delta / vk_norm)
             vk.mul_(scale)
         # Combine p_star and vk, then bound combined step to trust-region radius
@@ -463,7 +463,7 @@ class LSSR1_TR(Optimizer):
         p_comb = p_star + vk
         p_comb_norm_sq = p_comb.dot(p_comb)
         if p_comb_norm_sq > 0.0:
-            p_comb_norm = p_comb_norm_sq.sqrt()
+            p_comb_norm = math.sqrt(float(p_comb_norm_sq))
             scale = min(1.0, self.delta / p_comb_norm)
             p_comb.mul_(scale)
         st["flat_vk"] = vk.clone()  # Store updated vk for next iteration
@@ -494,7 +494,7 @@ class LSSR1_TR(Optimizer):
         # Compute trust-region ratio ρ = (f(new) − f(old)) / predicted
         rho = (new_loss - loss) / pred if (alpha > 0 and pred < 0) else 0.0
         s_norm_sq = p_step.dot(p_step)
-        s_norm = math.sqrt(s_norm_sq.item())
+        s_norm = math.sqrt(float(s_norm_sq))
         delta_old = self.delta
 
         # Adjust trust-region radius based on ρ and step norm

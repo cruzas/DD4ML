@@ -345,7 +345,7 @@ class APTS_Base(Optimizer):
             pred_val = pred
 
         # Compute rho = (f(init) − f(trial)) / pred
-        if torch.abs(pred_val) < self.tol:
+        if abs(float(pred_val)) < self.tol:
             rho = float("inf")
         else:
             rho = (self.init_glob_loss - trial_loss) / pred_val

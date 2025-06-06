@@ -118,10 +118,7 @@ class WeightParallelizedTensor(BasePMWModel):
         If `other` is scalar or torch.Tensor, scale each local shard by `other`.
         """
         if isinstance(other, WeightParallelizedTensor):
-            local_dp = torch.dot(self.detach(), other.detach()).to(get_device())
-            dist.all_reduce(local_dp, group=self.master_group, op=dist.ReduceOp.SUM)
-            return local_dp
-
+            return self.dot(other)
         elif isinstance(other, (int, float, torch.Tensor)):
             return WeightParallelizedTensor(
                 [p * other for p in self.tensor],
@@ -135,25 +132,30 @@ class WeightParallelizedTensor(BasePMWModel):
     __rmatmul__ = __mul__
     __rmul__ = __mul__
 
-    def dot(self, other):
-        """
-        If `other` is a WeightParallelizedTensor, perform a distributed dot-product.
-        If `other` is a scalar (int/float) or torch.Tensor, scale each local shard.
-        """
+    def dot(self, other: "WeightParallelizedTensor | torch.Tensor"):
+        """Return global dot product."""
         if isinstance(other, WeightParallelizedTensor):
-            local_dp = torch.dot(self.detach(), other.detach()).to(get_device())
-            dist.all_reduce(local_dp, group=self.master_group, op=dist.ReduceOp.SUM)
-            return local_dp
-
-        elif isinstance(other, (int, float, torch.Tensor)):
-            return WeightParallelizedTensor(
-                [p * other for p in self.tensor],
-                backend=self.backend,
-                master_group=self.master_group,
-                rank=self.rank,
+            if self.numel() != other.numel() or len(self.tensor) != len(other.tensor):
+                raise ValueError("Tensors must have the same shape")
+            local_dp = sum(
+                torch.dot(p.flatten(), q.flatten()) for p, q in zip(self.tensor, other.tensor)
             )
+        elif isinstance(other, torch.Tensor):
+            flat_other = other.flatten()
+            if flat_other.numel() != self.numel():
+                raise ValueError("Tensor sizes do not match")
+            local_dp = torch.dot(self.detach(), flat_other.to(self.device))
+        else:
+            raise TypeError("Unsupported tensor type")
 
-        return NotImplemented
+        device = (
+            torch.device(f"cuda:{torch.cuda.current_device()}")
+            if self.backend != "gloo"
+            else torch.device("cpu")
+        )
+        local_dp = local_dp.to(device)
+        dist.all_reduce(local_dp, group=self.master_group, op=dist.ReduceOp.SUM)
+        return local_dp.item()
 
     def __add__(self, other):
         if isinstance(other, WeightParallelizedTensor):
