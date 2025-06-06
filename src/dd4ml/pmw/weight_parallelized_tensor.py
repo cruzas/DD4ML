@@ -12,6 +12,9 @@ class WeightParallelizedTensor(BasePMWModel):
         self.master_group = master_group
         self.rank = rank
         self.device = self.default_device
+        # Cache for the global shape of the tensor. This will be computed on
+        # demand and invalidated whenever a relevant attribute changes.
+        self._cached_shape = None
 
     def detach(self):
         return torch.cat([p.detach().view(-1) for p in self.tensor])
@@ -55,6 +58,10 @@ class WeightParallelizedTensor(BasePMWModel):
         Assumes shards are split along dimension 0, and that each shard
         on every rank shares identical trailing dimensions.
         """
+        # Return cached shape if available
+        if self._cached_shape is not None:
+            return self._cached_shape
+
         # Compute local size along dim 0 (sum over all local shards)
         local_dim0 = sum(p.size(0) for p in self.tensor)
         dim0_tensor = torch.tensor(local_dim0, device=get_device())
@@ -69,7 +76,8 @@ class WeightParallelizedTensor(BasePMWModel):
 
         # The remaining dimensions are the same on all shards
         rest = list(self.tensor[0].shape[1:])
-        return tuple([global_dim0] + rest)
+        self._cached_shape = tuple([global_dim0] + rest)
+        return self._cached_shape
 
     def dim(self):
         """
@@ -81,12 +89,14 @@ class WeightParallelizedTensor(BasePMWModel):
         return sum(p.numel() for p in self.tensor)
 
     def clone(self):
-        return WeightParallelizedTensor(
+        new_wpt = WeightParallelizedTensor(
             [p.clone() for p in self.tensor],
             backend=self.backend,
             master_group=self.master_group,
             rank=self.rank,
         )
+        new_wpt._cached_shape = self._cached_shape
+        return new_wpt
 
     def to_device(self, device):
         """
@@ -271,6 +281,10 @@ class WeightParallelizedTensor(BasePMWModel):
     @property
     def dtype(self):
         return self.tensor[0].dtype if self.tensor else torch.float32
+
+    def invalidate_shape_cache(self):
+        """Clear the cached global shape."""
+        self._cached_shape = None
     
     def clone(self):
         """
@@ -288,6 +302,8 @@ class WeightParallelizedTensor(BasePMWModel):
             master_group=self.master_group,
             rank=self.rank,
         )
+
+        new_wpt._cached_shape = self._cached_shape
 
         # If you'd rather store device as an explicit attribute instead of using property(),
         #    you can set new_wpt._device here; however, since `device` is now a @property
