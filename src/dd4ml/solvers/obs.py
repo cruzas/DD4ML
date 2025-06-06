@@ -65,8 +65,8 @@ class OBS:
         PsiTg = torch.matmul(Psi.transpose(0, 1), g)
         g_parallel = torch.matmul(RinvU.transpose(0, 1), PsiTg)
 
-        gg = torch.dot(g, g)
-        gpgp = torch.dot(g_parallel, g_parallel)
+        gg = g.dot(g)
+        gpgp = g_parallel.dot(g_parallel)
 
         diff = gg - gpgp
         a_kp2 = torch.sqrt(torch.clamp(diff, min=0.0))
@@ -93,7 +93,7 @@ class OBS:
                 pStar = term1 + term2 - term3
 
             if lambda_min < 0:
-                alpha_sq = delta**2 - torch.dot(pStar, pStar)
+                alpha_sq = delta**2 - pStar.dot(pStar)
                 alpha = torch.sqrt(torch.clamp(alpha_sq, min=0.0))
                 pHatStar = pStar
 
