@@ -120,6 +120,11 @@ class APTS_D(APTS_Base):
             self.glob_grad_to_vector(),
             self.loc_grad_to_vector(),
         )
+        
+        # Print init glob_grad shape
+        dprint(
+            f"Rank {dist.get_rank()}. Initial global grad shape: {self.init_glob_grad.shape}"
+        )
 
         # Calculate residual between global and local gradients
         self.resid = self.init_glob_grad - self.init_loc_grad

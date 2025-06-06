@@ -45,6 +45,7 @@ class LSSR1_TR(Optimizer):
         alpha_max: float = 10.0,
         sync: bool = False,
         flat_grads_fn = None,
+        flat_params_fn = None
     ):
         # Ensure at least one parameter is provided
         param_list = list(params)
@@ -122,6 +123,7 @@ class LSSR1_TR(Optimizer):
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
         
         self._flat_grads_fn = flat_grads_fn if flat_grads_fn is not None else self._flatten_grads
+        self._flat_params_fn = flat_params_fn if flat_params_fn is not None else self._flatten_params
 
     def _avg_scalar(self, value: Tensor) -> Tensor:
         """
@@ -405,7 +407,7 @@ class LSSR1_TR(Optimizer):
             return loss, g
 
         # Flatten current parameters and preserve a copy for updates
-        wk_flat = self._flatten_params()
+        wk_flat = self._flat_params_fn() #self._flatten_params()
         wk = wk_flat.clone()
         st = self.state
         sec = self.second_order
@@ -445,6 +447,7 @@ class LSSR1_TR(Optimizer):
 
         # Prepare line search with initial loss and directional derivative
         phi_0 = loss
+        print(f"Rank {self.rank}. Before dphi_0. g is of type {type(g)} and p_comb is of type {type(p_comb)}")
         dphi_0 = g.dot(p_comb)
 
         # Perform strong Wolfe line search to compute step length alpha

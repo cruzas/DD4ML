@@ -103,6 +103,7 @@ class APTS_IP(APTS_Base):
             params=list(model.parameters()), **glob_opt_hparams
         )
         self.glob_opt._flat_grads_fn = self.model.grad
+        self.glob_opt._flat_params_fn = self.model.parameters
 
         # Print name of glob_opt and loc_opt
         dprint(
