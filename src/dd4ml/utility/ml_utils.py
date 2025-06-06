@@ -8,6 +8,15 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
+def get_device(device=None):    
+    if device is not None:
+        return device
+    else:
+        return (
+            f"cuda:{torch.cuda.current_device()}"
+            if dist.get_backend() != "gloo"
+            else "cpu"
+        )
 
 def cross_entropy_transformers(logits, targets):
     return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
@@ -67,8 +76,7 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
         if has_model_handler and model.model_handler.is_last_stage():
             for i, out in enumerate(outputs):
                 losses[i] = criterion(out, targets[i].to(out.device))
-            loss = torch.tensor((sum(losses) / len(losses)).item(), device=model.tensor_device)
-
+            loss = torch.tensor((sum(losses) / len(losses)), device=model.tensor_device)
         elif not has_model_handler:
             loss = criterion(outputs, targets.to(outputs.device))
 
@@ -88,6 +96,9 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
                 if len(last_stage_ranks) > 1:
                     raise ValueError('Tensor sharding not implemented yet.')
                 loss_broadcast = dist.broadcast(loss.detach(), src=last_stage_ranks[0], group=model.model_handler.get_sd_group(), async_op=True)
+        elif not has_model_handler and dist.is_initialized() and dist.get_world_size() > 1:
+            dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+            loss /= dist.get_world_size() # gradient averaging taken care of by DDP, assuming model is wrapped by DDP
 
         # Compute gradients
         if compute_grad and torch.is_grad_enabled():
@@ -103,25 +114,25 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
             loss_broadcast.wait()
 
         if return_output:
-            return loss.item(), [output for output in outputs] if has_model_handler else outputs
+            return loss, [output for output in outputs] if has_model_handler else outputs
 
-        return loss.item()
+        return loss
 
     return closure2
 
 
 def decide_tensor_device(ws, backend, gpu_id):
-    local_rank = os.environ['LOCAL_RANK']
+    loc_rank = os.environ['LOCAL_RANK']
     if torch.cuda.is_available():
         if backend == 'gloo':
             if torch.cuda.device_count() < ws:
                 return f'cuda:{gpu_id}'
             else:
                 # Local rank
-                return f'cuda:{local_rank}'
+                return f'cuda:{loc_rank}'
         else:
             if gpu_id is None:
-                gpu_id = local_rank
+                gpu_id = loc_rank
             return f'cuda:{gpu_id}'
     else:
         return 'cpu'

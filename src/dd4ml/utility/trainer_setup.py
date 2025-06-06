@@ -1,17 +1,27 @@
 import copy
+import math
 import os
-import pprint
 
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .config import get_config, make_std_config
-from .factory import criterion_factory, dataset_factory, optimizer_factory
-from .dist_utils import dprint
+from dd4ml.utility import mark_trainable, print_params_norm, dprint, criterion_factory, dataset_factory, optimizer_factory, get_device
 
 # You can now add new components dynamically at runtime by calling, e.g.:
 # dataset_factory.register("new_dataset", "dd4ml.datasets.new_dataset", "NewDatasetClass")
+
+def parse_norm(norm_value):
+    if norm_value in ("inf", "Inf", "INF"):
+        return float(math.inf)
+    elif norm_value in ("-inf", "-Inf", "-INF"):
+        return float(-math.inf)
+    try:
+        val = float(norm_value)
+        return val
+    except (ValueError, TypeError):
+        raise ValueError(f"Unsupported norm value: {norm_value}")
 
 
 def get_config_model_and_trainer(args, wandb_config):
@@ -49,6 +59,7 @@ def get_config_model_and_trainer(args, wandb_config):
         all_config.model.block_size = dataset.get_block_size()
 
     all_config = make_std_config(all_config)
+    all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
 
     # Model instantiation (with optional parallelization).
     if getattr(all_config.trainer, "use_pmw", False) and hasattr(
@@ -73,8 +84,21 @@ def get_config_model_and_trainer(args, wandb_config):
         model = ParallelizedModel(model_handler, sample=sample_input)
     else:
         model = all_config.model.model_class(all_config.model)
+        device = get_device()
+        model.to(device)
 
-    # Criterion selection.
+        if (
+            all_config.trainer.data_parallel
+            and dist.is_initialized()
+            and dist.get_world_size() > 1
+        ):
+            loc_rank = int(os.environ.get("LOCAL_RANK", 0))
+            print(
+                f"Rank {dist.get_rank()}, local rank {loc_rank}, cuda available: {torch.cuda.is_available()}"
+            )
+            model = DDP(
+                model, device_ids=[loc_rank] if torch.cuda.is_available() else None
+            )
     criterion_key = (
         wandb_config["criterion"] if wandb_config is not None else args["criterion"]
     )
@@ -85,31 +109,34 @@ def get_config_model_and_trainer(args, wandb_config):
     )
 
     # Optimizer selection.
-    lr = (
-        wandb_config["learning_rate"]
-        if wandb_config is not None
-        else args["learning_rate"]
-    )
     if optimizer_name in optimizer_factory.mapping:
+        lr = (
+            wandb_config["learning_rate"]
+            if wandb_config is not None
+            else args["learning_rate"]
+        )
+
         optimizer_obj = optimizer_factory.create(optimizer_name, model, lr)
         # Remove any unused attributes.
         for attr in [
-            "subdomain_optimizer",
-            "subdomain_optimizer_args",
-            "global_optimizer",
-            "global_optimizer_args",
+            "loc_opt",
+            "loc_opt_hparams",
+            "glob_opt",
+            "glob_opt_hparams",
+            # TODO: probably need to update this
         ]:
             if hasattr(all_config.trainer, attr):
                 delattr(all_config.trainer, attr)
-    elif optimizer_name == "trust_region":
-        from dd4ml.optimizers.trust_region import TrustRegion
+    elif optimizer_name == "tr":
+        from dd4ml.optimizers.tr import TR
 
-        all_config.trainer = TrustRegion.setup_TR_args(all_config.trainer)
-        optimizer_obj = TrustRegion(
-            model=model,
-            lr=all_config.trainer.learning_rate,
-            max_lr=all_config.trainer.max_lr,
-            min_lr=all_config.trainer.min_lr,
+        all_config.trainer = TR.setup_TR_hparams(all_config.trainer)
+        
+        optimizer_obj = TR(
+            params=model.parameters(),
+            delta=all_config.trainer.delta,
+            max_delta=all_config.trainer.max_delta,
+            min_delta=all_config.trainer.min_delta,
             nu=all_config.trainer.nu,
             inc_factor=all_config.trainer.inc_factor,
             dec_factor=all_config.trainer.dec_factor,
@@ -118,51 +145,84 @@ def get_config_model_and_trainer(args, wandb_config):
             max_iter=all_config.trainer.max_iter,
             norm_type=all_config.trainer.norm_type,
         )
-    elif optimizer_name == "apts":
-        from dd4ml.optimizers.apts import APTS
+    elif optimizer_name == "apts_ip":
+        from dd4ml.optimizers.apts_ip import APTS_IP
 
-        all_config.trainer = APTS.setup_APTS_args(all_config.trainer)
-        optimizer_obj = APTS(
+        all_config.trainer = APTS_IP.setup_APTS_hparams(all_config.trainer)
+
+        optimizer_obj = APTS_IP(
+            params=model.parameters(),
             model=model,
-            subdomain_optimizer=all_config.trainer.subdomain_optimizer,
-            subdomain_optimizer_defaults=all_config.trainer.subdomain_optimizer_args,
-            global_optimizer=all_config.trainer.global_optimizer,
-            global_optimizer_defaults=all_config.trainer.global_optimizer_args,
-            lr=all_config.trainer.learning_rate,
-            max_subdomain_iter=all_config.trainer.max_subdomain_iters,
-            dogleg=True,
+            glob_opt=all_config.trainer.glob_opt,
+            glob_opt_hparams=all_config.trainer.glob_opt_hparams,
+            loc_opt=all_config.trainer.loc_opt,
+            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
+            glob_pass=all_config.trainer.glob_pass,
+            norm_type=all_config.trainer.norm_type,
+            max_loc_iters=all_config.trainer.max_loc_iters,
+            max_glob_iters=all_config.trainer.max_glob_iters,
+            tol=all_config.trainer.tol,
             APTS_in_data_sync_strategy="average",
             step_strategy="mean",
+            **all_config.trainer.apts_params,
         )
     elif optimizer_name == "apts_d":
         from dd4ml.optimizers.apts_d import APTS_D
 
-        all_config.trainer = APTS_D.setup_APTS_args(all_config.trainer)
+        all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
+
+        all_config.trainer = APTS_D.setup_APTS_hparams(all_config.trainer)
         all_config.trainer.apts_d = True
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        device = (
-            f"cuda:{torch.cuda.current_device()}"
-            if dist.get_backend() != "gloo"
-            else "cpu"
-        )
+        loc_rank = int(os.environ.get("LOCAL_RANK", 0))
+        device = get_device()
         model.to(device)
-        model = DDP(
-            model, device_ids=[local_rank] if torch.cuda.is_available() else None
-        )
         optimizer_obj = APTS_D(
             params=model.parameters(),
             model=model,
             criterion=criterion,
             device=device,
-            max_iter=3,
             nr_models=all_config.model.num_subdomains,
-            global_opt=all_config.trainer.global_optimizer,
-            global_opt_params=all_config.trainer.global_optimizer_args,
-            local_opt=all_config.trainer.subdomain_optimizer,
-            local_opt_params=all_config.trainer.subdomain_optimizer_args,
-            global_pass=True,
-            foc=True,
+            glob_opt=all_config.trainer.glob_opt,
+            glob_opt_hparams=all_config.trainer.glob_opt_hparams,
+            loc_opt=all_config.trainer.loc_opt,
+            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
+            glob_pass=all_config.trainer.glob_pass,
+            foc=all_config.trainer.foc,
+            norm_type=all_config.trainer.norm_type,
+            max_loc_iters=all_config.trainer.max_loc_iters,
+            max_glob_iters=all_config.trainer.max_glob_iters,
+            tol=all_config.trainer.tol,
+            **all_config.trainer.apts_params,
         )
+    elif optimizer_name == "apts_p":
+        from dd4ml.optimizers.apts_p import APTS_P
+
+        all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
+
+        all_config.trainer = APTS_P.setup_APTS_hparams(all_config.trainer)
+        loc_rank = int(os.environ.get("LOCAL_RANK", 0))
+        device = get_device()
+
+        model.to(device)
+        optimizer_obj = APTS_P(
+            params=model.parameters(),
+            model=model,
+            criterion=criterion,
+            device=device,
+            nr_models=all_config.model.num_subdomains,
+            glob_opt=all_config.trainer.glob_opt,
+            glob_opt_hparams=all_config.trainer.glob_opt_hparams,
+            loc_opt=all_config.trainer.loc_opt,
+            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
+            glob_pass=all_config.trainer.glob_pass,
+            dogleg=all_config.trainer.dogleg,
+            norm_type=all_config.trainer.norm_type,
+            max_loc_iters=all_config.trainer.max_loc_iters,
+            max_glob_iters=all_config.trainer.max_glob_iters,
+            tol=all_config.trainer.tol,
+            **all_config.trainer.apts_params,
+        )
+
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -203,9 +263,15 @@ def generic_run(
         wandb_config = {}
 
     # Adjust args for apts_d optimizer.
-    if "apts_d" in wandb_config.get("optimizer", "").lower():
+    if (
+        "apts" in wandb_config.get("optimizer", "").lower()
+        and not "apts_ip" == wandb_config.get("optimizer", "").lower()
+    ):
         args["use_pmw"] = False
         args["num_subdomains"] = dist.get_world_size() if dist.is_initialized() else 1
+
+    if "apts_d" in wandb_config.get("optimizer", "").lower():
+        pass
 
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)

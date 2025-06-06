@@ -465,4 +465,4 @@ class WeightParallelizedSubdomain(BasePMWModel):
                 dim=0,
             ),
             p=2,
-        ).item()
+        )

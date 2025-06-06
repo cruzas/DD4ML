@@ -25,18 +25,43 @@ def make_std_config(config):
     """
     Standardize configuration by removing unnecessary keys.
     """
+    keys_to_remove = []
+
     use_pmw = getattr(config.trainer, "use_pmw", False)
     if not use_pmw:
-        keys_to_remove = ["num_stages", "num_replicas_per_subdomain", "model_handler"]
-        if "apts_d" not in config.optimizer.lower():
+        keys_to_remove.extend(
+            ["num_stages", "num_replicas_per_subdomain", "model_handler"]
+        )
+        if (
+            "apts_d" not in config.optimizer.lower()
+            and not "apts_p" in config.optimizer.lower()
+        ):
             keys_to_remove.append("num_subdomains")
         config = remove_keys(config, keys_to_remove)
-    if config.optimizer != "apts":
+    if "apts" not in config.optimizer.lower():
         keys_to_remove = [
-            "subdomain_optimizer",
-            "subdomain_optimizer_args",
-            "global_optimizer",
-            "global_optimizer_args",
+            "loc_opt",
+            "loc_opt_hparams",
+            "glob_opt",
+            "glob_opt_hparams",
+            "max_loc_iters",
+            "max_glob_iters",
+            "norm_type",
+            "delta",
+            "min_delta",
+            "max_delta",
+            "glob_pass",
+            "foc",
+            "dogleg" "glob_second_order",
+            "loc_second_order",
+            "max_wolfe_iters",
+            "mem_length",
+        ]
+        config = remove_keys(config, keys_to_remove)
+    if config.optimizer.lower() == "apts_d" or config.optimizer.lower() == "apts_p":
+        keys_to_remove = [
+            "glob_opt",
+            "loc_opt",
         ]
         config = remove_keys(config, keys_to_remove)
     return config

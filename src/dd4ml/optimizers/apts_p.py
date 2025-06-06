@@ -1,8 +1,8 @@
 from .apts_base import *
 
 
-class APTS_D(APTS_Base):
-    __name__ = "APTS_D"
+class APTS_P(APTS_Base):
+    __name__ = "APTS_P"
 
     @staticmethod
     def setup_APTS_hparams(config):
@@ -28,7 +28,7 @@ class APTS_D(APTS_Base):
         loc_opt_hparams=None,
         *,
         glob_pass=True,
-        foc=True,
+        dogleg=False,
         norm_type=2,
         max_loc_iters=3,
         max_glob_iters=3,
@@ -58,19 +58,16 @@ class APTS_D(APTS_Base):
             tol=tol,
         )
 
-        # Subclass-specific state
-        self.foc = bool(foc)
+        # Subclass‐specific state
+        self.dogleg = bool(dogleg)
 
         # Clone model for local updates; avoids overwriting global params
-        self.loc_model = clone_model(model)
+        self.loc_model = mark_trainable(clone_model(model))
 
-        # Instantiate local optimiser (trust-region or LSSR1_TR)
+        # Instantiate local optimizer (trust‐region or LSSR1_TR)
         self.loc_opt = loc_opt(self.loc_model.parameters(), **loc_opt_hparams)
 
-        # Choose local closure based on first-order correction flag
-        self.loc_closure = (
-            self.foc_loc_closure if self.foc else self.non_foc_loc_closure
-        )
+        self.loc_closure = self.non_foc_loc_closure
 
         # Print name of glob_opt and loc_opt
         dprint(
@@ -78,34 +75,51 @@ class APTS_D(APTS_Base):
         )
 
     @torch.no_grad()
-    def aggregate_loc_steps_and_losses(self, step, loc_red):
-        # If more than one model, global step is sum of local steps
-        # and loc_red is the sum of all local reductions
-        if self.nr_models > 1:
-            # Coalesce step and loc_red into one tensor
-            coalesced = torch.cat([step.view(-1), loc_red.view(1)])
-            # Single all_reduce on that combined tensor
-            dist.all_reduce(coalesced, op=dist.ReduceOp.SUM)
-            # Split back into step and loc_red
-            numel = step.numel()
-            step.copy_(coalesced[:numel].view_as(step))
-            loc_red = coalesced[numel].unsqueeze(0)
-            if self.norm_type == math.inf:
-                step /= self.nr_models
-        return step, loc_red
+    def sync_loc_to_glob(self) -> None:
+        """
+        Make the global model identical on every rank by merging the
+        sub-domain (trainable) updates held in `self.loc_model`.
+
+        Assumption: `mark_trainable` assigned disjoint index sets, i.e.
+        each parameter tensor is owned by exactly one rank.
+        """
+        # -------- single-process fallback ------------------------------------
+        if (
+            not (dist.is_available() and dist.is_initialized())
+            or dist.get_world_size() == 1
+        ):
+            with torch.no_grad():
+                for pg, pl in zip(self.model.parameters(), self.loc_model.parameters()):
+                    if pl.requires_grad:  # this rank owns it
+                        pg.copy_(pl.data)
+            self.loc_model.load_state_dict(self.model.state_dict())
+            return
+
+        # -------- multi-process merge ----------------------------------------
+        with torch.no_grad():
+            # 1. Copy owned slices; zero the others
+            for pg, pl in zip(self.model.parameters(), self.loc_model.parameters()):
+                if pl.requires_grad:
+                    pg.copy_(pl.data)  # owner rank writes its update
+                else:
+                    pg.zero_()  # non-owners write zeros
+
+            # 2. Sum across all ranks – only the owner contributes a non-zero value
+            for pg in self.model.parameters():
+                dist.all_reduce(pg.data, op=dist.ReduceOp.SUM)
+
+    @torch.no_grad()
+    def loc_grad_to_vector(self):
+        return trainable_params_to_vector(self.loc_model)
 
     def step(self, inputs, labels):
-        """
-        Performs one APTS_D step: evaluate initial losses/gradients,
-        run local iterations, propose a step, test acceptance, and possibly
-        run additional global iterations.
-        """
         # Store inputs and labels for closures
         self.inputs, self.labels = inputs, labels
 
         # Reset gradient evaluation counters (as Python floats)
         # Note: closures will increment these
-        self.grad_evals, self.loc_grad_evals = 0.0, 0.0
+        self.grad_evals = 0.0
+        self.loc_grad_evals = 0.0  # track local grad evals as Python int
 
         # Save initial global parameters (flattened, cloned to avoid in-place)
         self.init_glob_flat = self.glob_params_to_vector()
@@ -120,14 +134,6 @@ class APTS_D(APTS_Base):
             self.glob_grad_to_vector(),
             self.loc_grad_to_vector(),
         )
-        
-        # Print init glob_grad shape
-        dprint(
-            f"Rank {dist.get_rank()}. Initial global grad shape: {self.init_glob_grad.shape}"
-        )
-
-        # Calculate residual between global and local gradients
-        self.resid = self.init_glob_grad - self.init_loc_grad
 
         # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)
@@ -135,14 +141,20 @@ class APTS_D(APTS_Base):
         # Account for local gradient evaluations across all models
         self.grad_evals += self.loc_grad_evals * self.nr_models
 
-        # Compute local step and reduction, then aggregate across all models:
-        # step becomes global trial step
-        with torch.no_grad():
-            step = self.loc_params_to_vector() - self.init_glob_flat
-            loc_red = self.init_loc_loss - loc_loss
-        step, pred = self.aggregate_loc_steps_and_losses(step, loc_red)
+        # Synchronize parameters from local models to global model
+        self.sync_loc_to_glob()
 
-        # APTS trust-region control: possibly modifies self.delta and global model parameters
+        # Compute trial step and ensure it is within trust region
+        step = self.glob_params_to_vector() - self.init_glob_flat
+
+        pred = None
+        if not self.dogleg:
+            # Aggregate local losses
+            pred = loc_loss - self.init_loc_loss
+            if self.nr_models > 1:
+                dist.all_reduce(pred, op=dist.ReduceOp.SUM)
+
+        # Else, pred will be computed as second-order approximation
         loss, grad, self.glob_opt.delta = self.control_step(step, pred)
 
         # Optional global pass
