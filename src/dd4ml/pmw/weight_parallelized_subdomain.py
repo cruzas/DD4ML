@@ -1,10 +1,50 @@
 import copy
 from collections import OrderedDict
+import time
 
 import torch
 import torch.distributed as dist
+import torch.distributed.rpc as rpc
 
 import dd4ml.utility as utils
+
+_RPC_SUBDOMAIN = None
+
+
+def register_rpc_subdomain(subdomain):
+    """Register the current subdomain for RPC helpers."""
+    global _RPC_SUBDOMAIN
+    _RPC_SUBDOMAIN = subdomain
+
+
+def _rpc_store_input(key, chunk_id, tensor, num_chunks):
+    """Store a received tensor in the inputs dictionary."""
+    sd = _RPC_SUBDOMAIN
+    sd._ensure_list(sd.inputs, key, num_chunks)
+    sd.inputs[key][chunk_id] = tensor.to(sd.tensor_device)
+
+
+def _rpc_store_grad(key, chunk_id, tensor, num_chunks):
+    """Store a received tensor in the grad_outputs dictionary."""
+    sd = _RPC_SUBDOMAIN
+    sd._ensure_list(sd.grad_outputs, key, num_chunks)
+    sd.grad_outputs[key][chunk_id] = tensor.to(sd.tensor_device)
+
+
+def _rpc_get_output(key, chunk_id):
+    """Retrieve an output tensor waiting until it's available."""
+    sd = _RPC_SUBDOMAIN
+    while key not in sd.outputs or sd.outputs[key][chunk_id] is None:
+        time.sleep(0.001)
+    return sd.outputs[key][chunk_id].cpu()
+
+
+def _rpc_get_grad(key, chunk_id):
+    """Retrieve a gradient tensor waiting until it's available."""
+    sd = _RPC_SUBDOMAIN
+    while key not in sd.grad_outputs or sd.grad_outputs[key][chunk_id] is None:
+        time.sleep(0.001)
+    return sd.grad_outputs[key][chunk_id].cpu()
 
 from .base_pmw_model import BasePMWModel
 from .sharded_layer import ShardedLayer
@@ -36,6 +76,16 @@ class WeightParallelizedSubdomain(BasePMWModel):
              for name in self.stage_data["layers"]]
             if self.rank in self.stage_data["ranks"] else []
         )
+
+        if not rpc.is_initialized():
+            options = rpc.TensorPipeRpcBackendOptions(num_worker_threads=16)
+            rpc.init_rpc(
+                name=f"worker{self.rank}",
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=options,
+            )
+        register_rpc_subdomain(self)
 
     def _key(self, a, b):
         return f"{a}{self.connector_symbol}{b}"
@@ -143,33 +193,14 @@ class WeightParallelizedSubdomain(BasePMWModel):
                 if current_layer_stage != src_layer_stage:
                     src_ranks = self.model_handler.layer_name_to_ranks(src_name)
                     src_rank = src_ranks[0]
-                    if self.setup_phase:
-                        if self.DEBUG:
-                            print(
-                                f"(FWD rank={self.rank}) Layer {layer_name} waiting to receive from rank {src_rank} a tensor"
-                            )
-                        rcv_shape = utils.receive_shape(
-                            src=src_rank, device=backend_dev
-                        )
-                        self.shapes[key] = (
-                            lambda z, temp_shape=copy.deepcopy(
-                                list(rcv_shape)[1:]
-                            ): [z]
-                            + temp_shape
-                        )
-                        if self.DEBUG:
-                            print(
-                                f"(FWD rank={self.rank}) Layer {layer_name} received a tensor from rank {src_rank} with shape {rcv_shape}"
-                            )
-                    temp = torch.empty(
-                        self.shapes[key](num_samples_in_chunk),
-                        device=backend_dev,
-                        requires_grad=True,
+                    temp = rpc.rpc_sync(
+                        to=f"worker{src_rank}",
+                        func=_rpc_get_output,
+                        args=(self._key(src_name, layer_name), chunk_id),
                     )
-                    recv_handle = dist.irecv(tensor=temp, src=src_rank)
-                    recv_handle.wait()
+                    temp = temp.to(tensor_dev).requires_grad_()
                     self._ensure_list(self.inputs, key, num_chunks)
-                    self.inputs[key][chunk_id] = temp.to(tensor_dev)
+                    self.inputs[key][chunk_id] = temp
             if net_dict["rcv"]["strategy"] is None:
                 input_name = (
                     "start" if layer_name == "start" else net_dict["rcv"]["src"][0]
@@ -212,21 +243,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
                 dst_layer_stage = self.model_handler.net_dict[dst_name]["stage"]
                 temp = out if not isinstance(out, list) else out[dst_idx]
                 if current_layer_stage != dst_layer_stage:
-                    temp = temp.to(backend_dev)
-                    if self.setup_phase:
-                        if self.DEBUG:
-                            print(
-                                f"(FWD rank={self.rank}) Layer {layer_name} sending to rank {dst_rank} a tensor with shape: {temp.shape}"
-                            )
-                        utils.send_shape(
-                            shape=temp.shape, dst=dst_rank, device=backend_dev
-                        )
-                        if self.DEBUG:
-                            print(
-                                f"(FWD rank={self.rank}) Layer {layer_name} sent a tensor to rank {dst_rank}"
-                            )
-                    send_handle = dist.isend(tensor=temp, dst=dst_rank)
-                    send_handle.wait()
+                    temp_backend = temp.to(backend_dev)
                     self._ensure_list(self.outputs, key, num_chunks)
                     self.outputs[key][chunk_id] = temp.to(tensor_dev)
                 else:
@@ -321,29 +338,16 @@ class WeightParallelizedSubdomain(BasePMWModel):
                                     retain_graph=True,
                                 )[0]
                             )
-                            if self.setup_phase:
-                                if self.DEBUG:
-                                    print(
-                                        f"(BWD rank={self.rank}) Layer {current_layer} sending to rank {dst_ranks[0]} shape: {self.grad_outputs[reverse_name][chunk_id].shape}"
-                                    )
-                                utils.send_shape(
-                                    shape=self.grad_outputs[reverse_name][
-                                        chunk_id
-                                    ].shape,
-                                    dst=dst_ranks[0],
-                                    device=backend_dev,
-                                )
-                                if self.DEBUG:
-                                    print(
-                                        f"(BWD rank={self.rank}) Layer {current_layer} sent to rank {dst_ranks[0]}"
-                                    )
-                            send_handle = dist.isend(
-                                tensor=self.grad_outputs[reverse_name][chunk_id].to(
-                                    backend_dev
+                            rpc.rpc_sync(
+                                to=f"worker{dst_ranks[0]}",
+                                func=_rpc_store_grad,
+                                args=(
+                                    self._key(dst_name, current_layer),
+                                    chunk_id,
+                                    self.grad_outputs[reverse_name][chunk_id].to(backend_dev),
+                                    len(inputs),
                                 ),
-                                dst=dst_ranks[0],
                             )
-                            send_handle.wait()
             else:
                 for current_layer in reversed(consecutive_block):
                     rcv_names = self.model_handler.net_dict[current_layer][
@@ -365,35 +369,11 @@ class WeightParallelizedSubdomain(BasePMWModel):
                             ), "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
                             if self.rank != rcv_ranks[0]:
                                 outputs = self.outputs[key]
-                                if self.setup_phase:
-                                    if self.DEBUG:
-                                        print(
-                                            f"(BWD rank={self.rank}) Layer {current_layer} waiting to receive from rank {rcv_ranks[0]} the shape"
-                                        )
-                                    rcv_shape = utils.receive_shape(
-                                        src=rcv_ranks[0], device=backend_dev
-                                    )
-                                    if self.DEBUG:
-                                        print(
-                                            f"(BWD rank={self.rank}) Layer {current_layer} received from rank {rcv_ranks[0]} shape {rcv_shape}"
-                                        )
-                                    self.backward_shapes[key] = (
-                                        lambda z, temp_shape=copy.deepcopy(
-                                            list(rcv_shape)[1:]
-                                        ): [z]
-                                        + temp_shape
-                                    )
-                                grad_output = torch.empty(
-                                    self.backward_shapes[key](
-                                        outputs[chunk_id].shape[0]
-                                    ),
-                                    device=backend_dev,
-                                    requires_grad=True,
+                                grad_output = rpc.rpc_sync(
+                                    to=f"worker{rcv_ranks[0]}",
+                                    func=_rpc_get_grad,
+                                    args=(self._key(rcv_name, current_layer), chunk_id),
                                 )
-                                recv_handle = dist.irecv(
-                                    tensor=grad_output, src=rcv_ranks[0]
-                                )
-                                recv_handle.wait()
                                 grad_output = grad_output.to(tensor_dev).detach()
                                 self._ensure_list(
                                     self.grad_outputs, key, len(outputs)
@@ -435,25 +415,11 @@ class WeightParallelizedSubdomain(BasePMWModel):
                                 grad_outputs=all_grads,
                                 retain_graph=True,
                             )[0]
-                            if self.setup_phase:
-                                if self.DEBUG:
-                                    print(
-                                        f"(BWD rank={self.rank}) Layer {current_layer} sending to rank {dst_ranks[0]} shape: {grad_output.shape}"
-                                    )
-                                utils.send_shape(
-                                    shape=grad_output.shape,
-                                    dst=dst_ranks[0],
-                                    device=backend_dev,
-                                )
-                                if self.DEBUG:
-                                    print(
-                                        f"(BWD rank={self.rank}) Layer {current_layer} sent shape to rank {dst_ranks[0]}"
-                                    )
-                            send_handle = dist.isend(
-                                tensor=grad_output.contiguous().to(backend_dev),
-                                dst=dst_ranks[0],
+                            rpc.rpc_sync(
+                                to=f"worker{dst_ranks[0]}",
+                                func=_rpc_store_grad,
+                                args=(self._key(dst_name, current_layer), chunk_id, grad_output.contiguous().to(backend_dev), len(inputs)),
                             )
-                            send_handle.wait()
                             
     def grad(self):
         return [p.grad for p in self.sharded_layers.parameters()]
