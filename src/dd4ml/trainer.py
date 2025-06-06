@@ -103,6 +103,7 @@ class Trainer:
         self.model = self.model.to(self.device)
         # adaptive-batch state
         self.current_batch_size = config.batch_size
+        self.max_batch_size_reached = False
         self.last_loss = float("inf")
 
         # timing
@@ -204,11 +205,17 @@ class Trainer:
         if cfg.batch_inc_factor == 1:
             return  # no batch size adjustment
 
-        if loss > self.last_loss - cfg.loss_tol:
+        if loss > self.last_loss - cfg.loss_tol and not self.max_batch_size_reached:
             new_bs = min(
                 int(math.floor(self.current_batch_size * cfg.batch_inc_factor)),
                 len(self.train_dataset),
             )
+            if new_bs == len(self.train_dataset):
+                self.max_batch_size_reached = True
+                dprint(
+                    f"Current loss ({loss:.4f}) is greater than previous loss - tolerance ({(self.last_loss-cfg.loss_tol):.4f}). Batch size is already at maximum ({new_bs})."
+                )
+                return
             dprint(
                 f"Current loss ({loss:.4f}) is greater than previous loss - tolerance ({(self.last_loss-cfg.loss_tol):.4f}). Increasing batch size from {self.current_batch_size} to {new_bs}."
             )
