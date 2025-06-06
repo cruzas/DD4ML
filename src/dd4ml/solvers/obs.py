@@ -10,6 +10,8 @@ import scipy
 import scipy.linalg
 import torch
 from numpy import linalg as LA
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
+
 
 try:
     from scipy import array, dot
@@ -25,6 +27,17 @@ class OBS:
     def __init__(self):
         super(OBS, self).__init__()
         self.tol = 1e-6
+
+    def _vec_to_wpt(self, vec: torch.Tensor, like: WeightParallelizedTensor) -> WeightParallelizedTensor:
+        """Convert flat tensor ``vec`` to a ``WeightParallelizedTensor`` with
+        the same sharding as ``like``."""
+        shards = []
+        offset = 0
+        for t in like.tensor:
+            n = t.numel()
+            shards.append(vec[offset : offset + n].view_as(t))
+            offset += n
+        return WeightParallelizedTensor(shards, like.backend, like.master_group, like.rank)
 
     def solve_tr_subproblem(self, g, delta, gamma, Psi, Minv):
         # Check that g, delta, gamma, Psi, and Minv do not have NaN or Inf values
@@ -89,8 +102,14 @@ class OBS:
                 term1 = -1.0 * torch.matmul(P_parallel, v[:sizeD])
                 term_help = torch.linalg.solve(PsiPsi, PsiTg)
                 term2 = 1.0 / (gamma + sigmaStar) * torch.matmul(Psi, term_help)
-                term3 = g / (gamma + sigmaStar)
-                pStar = term1 + term2 - term3
+                if isinstance(g, WeightParallelizedTensor):
+                    term3 = g.div(gamma + sigmaStar)
+                    term1 = self._vec_to_wpt(term1, g)
+                    term2 = self._vec_to_wpt(term2, g)
+                    pStar = term1 + term2 - term3
+                else:
+                    term3 = g / (gamma + sigmaStar)
+                    pStar = term1 + term2 - term3
 
             if lambda_min < 0:
                 alpha_sq = delta**2 - pStar.dot(pStar)
@@ -147,7 +166,11 @@ class OBS:
     def ComputeSBySMW(self, tauStar, g, PsiTg, Psi, Minv, PsiPsi):
         W = tauStar * Minv + PsiPsi
         WinvPsiTg = torch.linalg.solve(W, PsiTg)
-        return (-1.0 / tauStar) * g + Psi @ WinvPsiTg  # pstar
+        update = Psi @ WinvPsiTg
+        if isinstance(g, WeightParallelizedTensor):
+            update = self._vec_to_wpt(update, g)
+            return (-1.0 / tauStar) * g + update  # pstar
+        return (-1.0 / tauStar) * g + update  # pstar
 
     def phiBar_f(self, sigma, Dd, a_j, delta):
         m = a_j.shape[0]

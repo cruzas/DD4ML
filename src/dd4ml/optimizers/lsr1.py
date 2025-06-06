@@ -65,7 +65,7 @@ class LSR1:
         if s.norm() < self.tol or y.norm() < self.tol:
             return
 
-        curvature = torch.dot(y, s)
+        curvature = y.dot(s)
         if abs(curvature) <= self.tol * (torch.norm(s) * torch.norm(y)): # <= in case of 0 compared against 0
             # reject pair – insufficient curvature information
             return
@@ -79,7 +79,7 @@ class LSR1:
         self._Y.append(y)
 
         # “adaptive” γ: use last pair  γ = (yᵀy)/(yᵀs)  (positive by curvature check)
-        self.gamma = (torch.dot(y, y) / curvature).clamp_min(self.tol)
+        self.gamma = (y.dot(y) / curvature).clamp_min(self.tol)
 
     def precompute(self) -> None:
         """

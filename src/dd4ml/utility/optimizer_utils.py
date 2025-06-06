@@ -176,8 +176,8 @@ def solve_tr_second_order(
         gradient, delta, lsr1_hessian.gamma, lsr1_hessian.Psi, lsr1_hessian.Minv
     )
     # predicted reduction = -(gᵀp + 0.5 pᵀ B p)
-    g_dot_p = torch.dot(gradient, p)
-    p_B_p = torch.dot(p, lsr1_hessian.B(p))
+    g_dot_p = gradient.dot(p)
+    p_B_p = p.dot(lsr1_hessian.B(p))
     predicted = -(g_dot_p + 0.5 * p_B_p)
     return p, predicted
 

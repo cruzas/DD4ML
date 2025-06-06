@@ -47,6 +47,7 @@ class WeightParallelizedTensor(BasePMWModel):
             return torch.norm(self.detach(), p=p)
         raise NotImplementedError("Only L-2 and L-∞ norms are implemented.")
 
+    @property
     def shape(self):
         """
         Return the full tensor shape across all ranks.
@@ -74,7 +75,7 @@ class WeightParallelizedTensor(BasePMWModel):
         """
         Return the number of dimensions of the full tensor.
         """
-        return len(self.shape())
+        return len(self.shape)
 
     def numel(self):
         return sum(p.numel() for p in self.tensor)
@@ -99,7 +100,9 @@ class WeightParallelizedTensor(BasePMWModel):
         return iter(self.tensor)
 
     def __repr__(self):
-        return f"Rank {self.rank}\nTensor shards: {self.tensor}"
+        # return f"Rank {self.rank}\nTensor shards: {self.tensor}"
+        # Return just the class
+        return f"Rank {self.rank} WeightParallelizedTensor with {len(self.tensor)} shards"
 
     def __neg__(self):
         return WeightParallelizedTensor(

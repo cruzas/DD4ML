@@ -470,7 +470,7 @@ class LSSR1_TR(Optimizer):
 
         # Prepare line search with initial loss and directional derivative
         phi_0 = loss
-        print(f"Rank {self.rank}. Before dphi_0. g is of type {type(g)} and p_comb is of type {type(p_comb)}")
+        print(f"Rank {self.rank}. Before dphi_0. g is of type {type(g)} with shape {g.shape} and p_comb is of type {type(p_comb)} with shape {p_comb.shape}")
         dphi_0 = g.dot(p_comb)
 
         # Perform strong Wolfe line search to compute step length alpha
