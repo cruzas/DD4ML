@@ -229,6 +229,14 @@ class Trainer:
                     p.invalidate_shape_cache()
         self.last_loss = loss
 
+    def sample_control_batch(self, batch_size: int = 1):
+        """Randomly sample a small control batch from the training dataset."""
+        idx = torch.randint(0, len(self.train_dataset), (batch_size,))
+        xs, ys = zip(*(self.train_dataset[int(i)] for i in idx))
+        xs = torch.stack([torch.as_tensor(x) for x in xs])
+        ys = torch.as_tensor(ys)
+        return xs.to(self.device), ys.to(self.device)
+
     def run(self):
         self.setup_data_loaders()
         if self.config.run_by_epoch:
@@ -284,6 +292,14 @@ class Trainer:
                     for k in ("apts_d", "apts_p")
                 ):
                     step_args = {"inputs": x, "labels": y}
+                elif "asntr" in self.optimizer.__class__.__name__.lower():
+                    x_d, y_d = self.sample_control_batch(1)
+                    step_args = {
+                        "inputs": x,
+                        "labels": y,
+                        "inputs_d": x_d,
+                        "labels_d": y_d,
+                    }
                 else:
                     step_args = {"closure": general_closure}
                 total_loss += self.optimizer.step(**step_args)
@@ -416,6 +432,14 @@ class Trainer:
                     or "apts_p" in self.optimizer.__class__.__name__.lower()
                 ):
                     self.loss += self.optimizer.step(inputs=x, labels=y)
+                elif "asntr" in self.optimizer.__class__.__name__.lower():
+                    x_d, y_d = self.sample_control_batch(1)
+                    self.loss += self.optimizer.step(
+                        inputs=x,
+                        labels=y,
+                        inputs_d=x_d,
+                        labels_d=y_d,
+                    )
                 else:
                     self.loss = self.optimizer.step(closure=general_closure)
 

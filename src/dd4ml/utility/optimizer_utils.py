@@ -128,6 +128,29 @@ def get_loc_tr_hparams(config):
     }
 
 
+def get_asntr_hparams(config):
+    """Return default hyperparameters for the ASNTR optimizer."""
+    return {
+        "device": config.device if hasattr(config, "device") else "cpu",
+        "delta": config.delta,
+        "max_delta": config.max_delta,
+        "gamma": 1e-3,
+        "second_order": config.glob_second_order,
+        "mem_length": config.mem_length,
+        "eta": 1e-4,
+        "nu": 1e-4,
+        "eta_1": 0.1,
+        "eta_2": 0.75,
+        "tau_1": 0.5,
+        "tau_2": 0.8,
+        "tau_3": 2.0,
+        "C_1": 1.0,
+        "C_2": 1.0,
+        "alpha": 1.1,
+        "tol": config.tol,
+    }
+
+
 def solve_tr_first_order(
     gradient: Tensor,
     grad_norm: float,
