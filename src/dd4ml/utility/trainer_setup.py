@@ -7,10 +7,19 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .config import get_config, make_std_config
-from dd4ml.utility import mark_trainable, print_params_norm, dprint, criterion_factory, dataset_factory, optimizer_factory, get_device
+from dd4ml.utility import (
+    mark_trainable,
+    print_params_norm,
+    dprint,
+    criterion_factory,
+    dataset_factory,
+    optimizer_factory,
+    get_device,
+)
 
 # You can now add new components dynamically at runtime by calling, e.g.:
 # dataset_factory.register("new_dataset", "dd4ml.datasets.new_dataset", "NewDatasetClass")
+
 
 def parse_norm(norm_value):
     if norm_value in ("inf", "Inf", "INF"):
@@ -37,6 +46,14 @@ def get_config_model_and_trainer(args, wandb_config):
     dataset_name = config_src["dataset_name"]
     model_name = config_src["model_name"]
     optimizer_name = config_src["optimizer"]
+
+    if isinstance(optimizer_name, str):
+        optimizer_name = optimizer_name.lower()
+        config_src["optimizer"] = optimizer_name
+
+    for opt_key in ("loc_opt", "glob_opt"):
+        if opt_key in config_src and isinstance(config_src[opt_key], str):
+            config_src[opt_key] = config_src[opt_key].lower()
 
     all_config = get_config(dataset_name, model_name, optimizer_name)
     if wandb_config is not None:
@@ -131,7 +148,7 @@ def get_config_model_and_trainer(args, wandb_config):
         from dd4ml.optimizers.tr import TR
 
         all_config.trainer = TR.setup_TR_hparams(all_config.trainer)
-        
+
         optimizer_obj = TR(
             params=model.parameters(),
             delta=all_config.trainer.delta,
