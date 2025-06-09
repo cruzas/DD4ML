@@ -40,16 +40,43 @@ class APTS_Base(Optimizer):
         Configure global and local optimizer classes and arguments
         based on whether second-order methods are required.
         """
-        config.glob_opt, config.glob_opt_hparams = (
-            (LSSR1_TR, get_lssr1_tr_hparams(config))
-            if config.glob_second_order
-            else (TR, get_tr_hparams(config))
-        )
-        config.loc_opt, config.loc_opt_hparams = (
-            (LSSR1_TR, get_lssr1_loc_tr_hparams(config))
-            if config.loc_second_order
-            else (TR, get_loc_tr_hparams(config))
-        )
+        glob_map = {
+            "tr": (TR, get_tr_hparams),
+            "lssr1_tr": (LSSR1_TR, get_lssr1_tr_hparams),
+        }
+        loc_map = {
+            "tr": (TR, get_loc_tr_hparams),
+            "lssr1_tr": (LSSR1_TR, get_lssr1_loc_tr_hparams),
+        }
+
+        if isinstance(config.glob_opt, str):
+            key = config.glob_opt.lower()
+            try:
+                config.glob_opt, hp_fn = glob_map[key]
+            except KeyError:
+                raise ValueError(f"Unknown glob_opt: {config.glob_opt}")
+            config.glob_opt_hparams = hp_fn(config)
+        else:
+            config.glob_opt, config.glob_opt_hparams = (
+                (LSSR1_TR, get_lssr1_tr_hparams(config))
+                if config.glob_second_order
+                else (TR, get_tr_hparams(config))
+            )
+
+        loc_value = getattr(config, "loc_opt", None)
+        if isinstance(loc_value, str):
+            key = loc_value.lower()
+            try:
+                config.loc_opt, hp_fn = loc_map[key]
+            except KeyError:
+                raise ValueError(f"Unknown loc_opt: {loc_value}")
+            config.loc_opt_hparams = hp_fn(config)
+        else:
+            config.loc_opt, config.loc_opt_hparams = (
+                (LSSR1_TR, get_lssr1_loc_tr_hparams(config))
+                if config.loc_second_order
+                else (TR, get_loc_tr_hparams(config))
+            )
 
         config.apts_params = get_apts_params(config)
         return config

@@ -60,4 +60,6 @@ parameters:
   max_wolfe_iters:
     value: 10
   glob_opt:
-    value: "asntr"
+    value: "lssr1_tr"
+  subdomain_opt:
+    value: "sgd"
