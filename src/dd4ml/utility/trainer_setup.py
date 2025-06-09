@@ -229,6 +229,22 @@ def get_config_model_and_trainer(args, wandb_config):
             tol=all_config.trainer.tol,
             **all_config.trainer.apts_params,
         )
+    elif optimizer_name == "asntr":
+        from dd4ml.optimizers.asntr import ASNTR
+
+        all_config.trainer = ASNTR.setup_ASNTR_hparams(all_config.trainer)
+
+        optimizer_obj = ASNTR(
+            params=model.parameters(),
+            model=model,
+            criterion=criterion,
+            device=get_device(),
+            delta=all_config.trainer.delta,
+            max_delta=all_config.trainer.max_delta,
+            second_order=all_config.trainer.glob_second_order,
+            mem_length=all_config.trainer.mem_length,
+            tol=all_config.trainer.tol,
+        )
 
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
