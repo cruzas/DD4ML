@@ -143,7 +143,13 @@ def parse_cmd_args() -> argparse.Namespace:
             help="Max iterations for local optimizer",
         )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.optimizer = args.optimizer.lower()
+    if hasattr(args, "glob_opt") and isinstance(args.glob_opt, str):
+        args.glob_opt = args.glob_opt.lower()
+    if hasattr(args, "loc_opt") and isinstance(args.loc_opt, str):
+        args.loc_opt = args.loc_opt.lower()
+    return args
 
 
 def wait_and_exit(rank: int) -> None:
