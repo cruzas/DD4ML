@@ -66,6 +66,7 @@ class Trainer:
         C.data_chunks_amount = 1
         C.use_pmw = False
         C.loc_opt = None
+        C.glob_opt = None
         return C
 
     def __init__(

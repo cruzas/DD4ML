@@ -59,3 +59,5 @@ parameters:
     value: 3
   max_wolfe_iters:
     value: 10
+  glob_opt:
+    value: "asntr"
