@@ -23,6 +23,8 @@ parameters:
     value: 10 # for Transformers
   epochs: 
     value: 10
+  norm_type:
+    value: 2
   delta: 
     value: 0.1
   min_delta: 

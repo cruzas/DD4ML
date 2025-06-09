@@ -6,11 +6,21 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from dd4ml.utility import (
+    criterion_factory,
+    dataset_factory,
+    dprint,
+    get_device,
+    mark_trainable,
+    optimizer_factory,
+    print_params_norm,
+)
+
 from .config import get_config, make_std_config
-from dd4ml.utility import mark_trainable, print_params_norm, dprint, criterion_factory, dataset_factory, optimizer_factory, get_device
 
 # You can now add new components dynamically at runtime by calling, e.g.:
 # dataset_factory.register("new_dataset", "dd4ml.datasets.new_dataset", "NewDatasetClass")
+
 
 def parse_norm(norm_value):
     if norm_value in ("inf", "Inf", "INF"):
@@ -138,7 +148,7 @@ def get_config_model_and_trainer(args, wandb_config):
         from dd4ml.optimizers.tr import TR
 
         all_config.trainer = TR.setup_TR_hparams(all_config.trainer)
-        
+
         optimizer_obj = TR(
             params=model.parameters(),
             delta=all_config.trainer.delta,
@@ -298,6 +308,7 @@ def generic_run(
 
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)
+    dprint(f"Using device: {trainer.device}")
 
     if epoch_end_callback and trainer.config.run_by_epoch:
         trainer.set_callback("on_epoch_end", epoch_end_callback)

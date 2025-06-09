@@ -37,33 +37,29 @@ def make_std_config(config):
             and not "apts_p" in config.optimizer.lower()
         ):
             keys_to_remove.append("num_subdomains")
-        config = remove_keys(config, keys_to_remove)
-    if "apts" not in config.optimizer.lower():
-        keys_to_remove = [
-            "loc_opt",
-            "loc_opt_hparams",
-            "glob_opt",
-            "glob_opt_hparams",
-            "max_loc_iters",
-            "max_glob_iters",
-            "norm_type",
-            "delta",
-            "min_delta",
-            "max_delta",
-            "glob_pass",
-            "foc",
-            "dogleg" "glob_second_order",
-            "loc_second_order",
-            "max_wolfe_iters",
-            "mem_length",
-        ]
-        config = remove_keys(config, keys_to_remove)
-    # if config.optimizer.lower() == "apts_d" or config.optimizer.lower() == "apts_p":
-    #     keys_to_remove = [
-    #         "glob_opt",
-    #         "loc_opt",
-    #     ]
-    #     config = remove_keys(config, keys_to_remove)
+    if "apts" not in config.optimizer.lower() and "tr" not in config.optimizer.lower():
+        keys_to_remove.extend(
+            [
+                "loc_opt",
+                "loc_opt_hparams",
+                "glob_opt",
+                "glob_opt_hparams",
+                "max_loc_iters",
+                "max_glob_iters",
+                "norm_type",
+                "delta",
+                "min_delta",
+                "max_delta",
+                "glob_pass",
+                "foc",
+                "dogleg" "glob_second_order",
+                "loc_second_order",
+                "max_wolfe_iters",
+                "mem_length",
+            ]
+        )
+
+    config = remove_keys(config, keys_to_remove)
     return config
 
 

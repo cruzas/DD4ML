@@ -15,11 +15,11 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure, dprint
 
 from .dataloaders import GeneralizedDistributedDataLoader, OverlapBatchSampler
-from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 
 class Trainer:
@@ -82,6 +82,7 @@ class Trainer:
 
         # determine the device we'll train on
         if config.device == "auto":
+            print("Doing auto device selection...")
             self.device = (
                 f"cuda:{torch.cuda.current_device()}"
                 if dist.get_backend() != "gloo"
@@ -89,6 +90,12 @@ class Trainer:
             )
         else:
             self.device = config.device
+
+        print(f"Is self.device == 'cpu'? {self.device == 'cpu'}")
+        print(f"is torch.backends.mps available? {torch.backends.mps.is_available()}")
+        print(f"is torch.backends.mps built? {torch.backends.mps.is_built()}")
+        print(f"Is distributed initialized? {dist.is_initialized()}")
+        print(f"World size: {dist.get_world_size() if dist.is_initialized() else 1}")
 
         # In case we are on a Mac with MPS enabled, we can use it as a device
         if (
@@ -101,6 +108,7 @@ class Trainer:
             )
         ):
             self.device = torch.device("mps")
+
         self.model = self.model.to(self.device)
         # adaptive-batch state
         self.current_batch_size = config.batch_size
@@ -132,7 +140,9 @@ class Trainer:
         """(Re)create train and test loaders using current_batch_size"""
         cfg, ds_train, ds_test = self.config, self.train_dataset, self.test_dataset
         bs = self.current_batch_size
-        overlap = cfg.overlap if hasattr(cfg, "overlap") else 0 # Overlap between consecutive batches
+        overlap = (
+            cfg.overlap if hasattr(cfg, "overlap") else 0
+        )  # Overlap between consecutive batches
         world_size = dist.get_world_size() if dist.is_initialized() else 1
         rank = dist.get_rank() if dist.is_initialized() else 0
         if cfg.use_pmw:
@@ -277,6 +287,7 @@ class Trainer:
                 sig = inspect.signature(self.optimizer.step).parameters
                 # Check if final_subdomain_closure is part of self.optimizer arguments
                 if "final_subdomain_closure" in sig:
+
                     def final_subdomain_closure(outputs, y=y):
                         y_chunks = y.chunk(len(outputs))
                         return [
