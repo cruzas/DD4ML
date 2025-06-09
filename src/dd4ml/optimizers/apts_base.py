@@ -8,24 +8,12 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
-from dd4ml.utility import (
-    Timer,
-    clone_model,
-    dprint,
-    ensure_tensor,
-    flatten_params,
-    get_apts_params,
-    get_device,
-    get_loc_tr_hparams,
-    get_lssr1_loc_tr_hparams,
-    get_lssr1_tr_hparams,
-    get_state_dict,
-    get_tr_hparams,
-    mark_trainable,
-    restore_params,
-    trainable_params_to_vector,
-    apts_ip_restore_params,
-)
+from dd4ml.utility import (Timer, apts_ip_restore_params, clone_model, dprint,
+                           ensure_tensor, flatten_params, get_apts_params,
+                           get_device, get_loc_tr_hparams,
+                           get_lssr1_loc_tr_hparams, get_lssr1_tr_hparams,
+                           get_state_dict, get_tr_hparams, mark_trainable,
+                           restore_params, trainable_params_to_vector)
 
 from .lssr1_tr import LSSR1_TR
 from .tr import TR
@@ -47,6 +35,7 @@ class APTS_Base(Optimizer):
         loc_map = {
             "tr": (TR, get_loc_tr_hparams),
             "lssr1_tr": (LSSR1_TR, get_lssr1_loc_tr_hparams),
+            "sgd": (torch.optim.SGD, lambda _: {"lr": 0.01}),
         }
 
         if isinstance(config.glob_opt, str):

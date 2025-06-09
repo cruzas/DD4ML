@@ -58,12 +58,12 @@ def make_std_config(config):
             "mem_length",
         ]
         config = remove_keys(config, keys_to_remove)
-    if config.optimizer.lower() == "apts_d" or config.optimizer.lower() == "apts_p":
-        keys_to_remove = [
-            "glob_opt",
-            "loc_opt",
-        ]
-        config = remove_keys(config, keys_to_remove)
+    # if config.optimizer.lower() == "apts_d" or config.optimizer.lower() == "apts_p":
+    #     keys_to_remove = [
+    #         "glob_opt",
+    #         "loc_opt",
+    #     ]
+    #     config = remove_keys(config, keys_to_remove)
     return config
 
 

@@ -44,7 +44,7 @@ def parse_cmd_args() -> argparse.Namespace:
     default_use_pmw = temp_args.optimizer == "apts_ip"
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
-    default_project = temp_args.optimizer + "_tests"
+    default_project = "debug_" + temp_args.optimizer + "_tests"
 
     parser.add_argument(
         "--use_pmw",
@@ -126,22 +126,22 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     temp_args, _ = parser.parse_known_args()
-    if "apts" in temp_args.sweep_config.lower():
-        parser.add_argument(
-            "--glob_opt",
-            type=str,
-            default="TR",
-            help="Global optimizer",
-        )
-        parser.add_argument(
-            "--loc_opt", type=str, default="SGD", help="Local optimizer"
-        )
-        parser.add_argument(
-            "--max_loc_iters",
-            type=int,
-            default=3,
-            help="Max iterations for local optimizer",
-        )
+    # if "apts" in temp_args.sweep_config.lower():
+    # parser.add_argument(
+    #     "--glob_opt",
+    #     type=str,
+    #     default="TR",
+    #     help="Global optimizer",
+    # )
+    # parser.add_argument(
+    #     "--loc_opt", type=str, default="SGD", help="Local optimizer"
+    # )
+    # parser.add_argument(
+    #     "--max_loc_iters",
+    #     type=int,
+    #     default=3,
+    #     help="Max iterations for local optimizer",
+    # )
 
     return parser.parse_args()
 
