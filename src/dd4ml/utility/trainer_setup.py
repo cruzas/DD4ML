@@ -44,6 +44,13 @@ def get_config_model_and_trainer(args, wandb_config):
     else:
         args.pop("sweep_config", None)
     all_config.merge_from_dict(args)
+
+    # Allow `subdomain_opt` as an alias for `loc_opt` in configuration files
+    if hasattr(all_config.trainer, "subdomain_opt") and not hasattr(
+        all_config.trainer, "loc_opt"
+    ):
+        all_config.trainer.loc_opt = all_config.trainer.subdomain_opt
+        delattr(all_config.trainer, "subdomain_opt")
     all_config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
 
     # Instantiate dataset.

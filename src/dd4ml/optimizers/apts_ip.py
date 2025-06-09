@@ -22,11 +22,24 @@ class APTS_IP(APTS_Base):
         elif config.loc_opt == torch.optim.SGD:
             config.loc_opt_hparams["momentum"] = 0.9
 
-        config.glob_opt, config.glob_opt_hparams = (
-            (LSSR1_TR, get_lssr1_tr_hparams(config))
-            if config.glob_second_order
-            else (TR, get_tr_hparams(config))
-        )
+        glob_map = {
+            "tr": (TR, get_tr_hparams),
+            "lssr1_tr": (LSSR1_TR, get_lssr1_tr_hparams),
+        }
+
+        if isinstance(config.glob_opt, str):
+            key = config.glob_opt.lower()
+            try:
+                config.glob_opt, hp_fn = glob_map[key]
+            except KeyError:
+                raise ValueError(f"Unknown glob_opt: {config.glob_opt}")
+            config.glob_opt_hparams = hp_fn(config)
+        else:
+            config.glob_opt, config.glob_opt_hparams = (
+                (LSSR1_TR, get_lssr1_tr_hparams(config))
+                if config.glob_second_order
+                else (TR, get_tr_hparams(config))
+            )
         # Disable gradient broadcast in the global optimizer as each rank
         # holds only a shard of the model when running APTS_IP.
         config.glob_opt_hparams["sync"] = False
