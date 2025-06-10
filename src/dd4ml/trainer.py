@@ -40,7 +40,7 @@ class Trainer:
         C.learning_rate = 1e-3
         C.betas = (0.9, 0.999)  # for Adam
         C.weight_decay = 0.1  # only applied on matmul weights
-        C.grad_norm_clip = 1.0
+        C.grad_norm_clip = None
         # initial batch size and adaptive params
         C.batch_size = 128  # max batch size is lenght of dataset
         C.batch_inc_factor = 1  # factor to increase batch size
@@ -302,14 +302,22 @@ class Trainer:
                         "labels": y,
                         "inputs_d": x_d,
                         "labels_d": y_d,
+                        "hNk": (len(self.train_dataset) - self.current_batch_size)
+                        / len(self.train_dataset),
                     }
                 elif "asntr" in self.optimizer.__class__.__name__.lower():
                     x_d, y_d = self.sample_control_batch(1)
                     step_args = {
-                        "inputs": x,
-                        "labels": y,
-                        "inputs_d": x_d,
-                        "labels_d": y_d,
+                        "closure_main": general_closure,
+                        "closure_d": closure(
+                            x_d,
+                            y_d,
+                            criterion=criterion,
+                            model=model,
+                            data_chunks_amount=cfg.data_chunks_amount,
+                            compute_grad=True,
+                            grad_norm_clip=cfg.grad_norm_clip,
+                        ),
                         "hNk": (len(self.train_dataset) - self.current_batch_size)
                         / len(self.train_dataset),
                     }

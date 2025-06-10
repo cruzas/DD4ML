@@ -21,18 +21,12 @@ class ASNTR(Optimizer):
 
     __name__ = "ASNTR"
 
-    # ------------------------------------------------------------------ #
-    # Top-level helpers
-    # ------------------------------------------------------------------ #
     @staticmethod
     def setup_ASNTR_hparams(cfg):
         for k, v in get_asntr_hparams(cfg).items():
             setattr(cfg, k, v)
         return cfg
 
-    # ------------------------------------------------------------------ #
-    # Construction
-    # ------------------------------------------------------------------ #
     def __init__(
         self,
         params: Iterable[nn.Parameter],
@@ -40,10 +34,12 @@ class ASNTR(Optimizer):
         device: torch.device | str = "cpu",
         lr: float = 1.0,
         delta: float = 1.0,
+        min_delta: float = 1e-3,
         max_delta: float = 10.0,
         gamma: float = 1e-3,
         second_order: bool = True,
         mem_length: int = 30,
+        # controls
         eta: float = 1e-4,
         nu: float = 1e-4,
         eta_1: float = 0.1,
@@ -56,23 +52,26 @@ class ASNTR(Optimizer):
         c_2: float = 100,
         alpha: float = 1.1,
         tol: float = 1e-8,
+        # flat buffer hooks
+        flat_grads_fn: Callable[[], Tensor] | None = None,
+        flat_params_fn: Callable[[], Tensor] | None = None,
+        flat_params: WeightParallelizedTensor | None = None,
     ) -> None:
-        defaults = {"lr": lr}  # kept for API compatibility
+        defaults = {"lr": lr}
         super().__init__(params, defaults)
 
         self.device = torch.device(device)
-
-        # Trust-region radii
         self.delta = float(delta)
+        self.min_delta = float(min_delta)
         self.max_delta = float(max_delta)
         self.tol = float(tol)
         self.second_order = bool(second_order)
 
-        # SR1 memory and OBS solver for the TR sub-problem
+        # SR1 memory and OBS solver
         self.hess = LSR1(gamma=gamma, memory_length=mem_length, device=self.device)
         self.obs = OBS()
 
-        # Algorithmic constants
+        # algorithmic constants
         self.eta = eta
         self.nu = nu
         self.eta_1 = eta_1
@@ -82,85 +81,116 @@ class ASNTR(Optimizer):
         self.tau_3 = tau_3
         self.c_1 = c_1
         self.c_2 = c_2
-        self.alpha = alpha  # α > 1 for decreasing tₖ and t̃ₖ
-        self.dataset_len = 0  # to be initialized by the user (N in the paper)
-
-        # Iteration counter
+        self.alpha = alpha
         self.k = 0
 
-        # ------------------------------------------------------------------
-        # Optimizer state
-        # ------------------------------------------------------------------
-        # Store previous step and gradient in the *global* state dictionary so
-        # that they are included in ``state_dict`` serialisation, akin to
-        # LSSR1_TR.
+        # precompute shapes and offsets for flatten/unflatten
+        shapes: List[torch.Size] = []
+        offsets = [0]
+        for p in self.param_groups[0]["params"]:
+            n = p.numel()
+            shapes.append(p.shape)
+            offsets.append(offsets[-1] + n)
+        total_size = offsets[-1]
+        self._shapes = shapes
+        self._offsets = offsets
+
         st = self.state
-        st["prev_s"] = None  # type: Tensor | None
-        st["prev_g"] = None  # type: Tensor | None
+        # allocate flat buffers
+        if flat_params is not None:
+            st["flat_wk"] = flat_params.clone()
+            st["flat_gk"] = flat_params.clone()
+        else:
+            buf = torch.zeros(total_size, device=self.device)
+            st["flat_wk"] = buf
+            st["flat_gk"] = buf.clone()
 
-    # ------------------------------------------------------------------ #
-    # Internal helpers
-    # ------------------------------------------------------------------ #
-    def _all_params(self):
-        for group in self.param_groups:
-            for p in group["params"]:
-                yield p
+        # hooks
+        self._flat_params_fn = (
+            flat_params_fn if flat_params_fn is not None else self._flatten_params
+        )
+        self._flat_grads_fn = (
+            flat_grads_fn if flat_grads_fn is not None else self._flatten_grads
+        )
 
-    def _flatgrad(self) -> Tensor:
-        pieces: List[Tensor] = []
-        for p in self._all_params():
-            if p.grad is None:
-                pieces.append(torch.zeros_like(p).view(-1))
-            else:
-                g = p.grad
-                if isinstance(g, WeightParallelizedTensor):
-                    g = g.detach()
-                pieces.append(g.view(-1))
-        return torch.cat(pieces)
+        # state for previous step
+        st["prev_s"] = None
+        st["prev_g"] = None
 
-    def _apply_flat(self, step: Tensor, sign: float) -> None:
-        idx = 0
+        # for external
+        self.inc_batch_size = False
+        self.move_to_next_batch = True
+
+    def _flatten_params(self) -> Tensor:
+        buf = self.state["flat_wk"]
+        for p, start, end in zip(
+            self.param_groups[0]["params"], self._offsets, self._offsets[1:]
+        ):
+            buf[start:end].copy_(p.data.view(-1))
+        return buf
+
+    def _flatten_grads(self) -> Tensor:
+        buf = self.state["flat_gk"]
+        for p, start, end in zip(
+            self.param_groups[0]["params"], self._offsets, self._offsets[1:]
+        ):
+            buf[start:end].copy_(g.view(-1))
+        return buf
+
+    def _unflatten_update(self, vec: Tensor) -> None:
         with torch.no_grad():
-            for p in self._all_params():
-                numel = p.numel()
-                p.data.add_(sign * step[idx : idx + numel].view_as(p))
-                idx += numel
+            if isinstance(vec, WeightParallelizedTensor):
+                for p, shard in zip(self.param_groups[0]["params"], vec.tensor):
+                    p.data.copy_(shard.view_as(p))
+            else:
+                for p, start, end in zip(
+                    self.param_groups[0]["params"], self._offsets, self._offsets[1:]
+                ):
+                    p.data.copy_(vec[start:end].view_as(p))
 
-    # ------------------------------------------------------------------ #
-    # Public API
-    # ------------------------------------------------------------------ #
     def step(
         self,
         *,
         closure_main: Callable[[bool], Tensor],
         closure_d: Callable[[bool], Tensor],
-        hNk=None,
+        hNk,
         **_,
     ) -> float:
-        """
-        Perform one ASNTR step.
-
-        The method follows the algorithmic structure from the original
-        implementation but now interacts with ``self.state`` instead of the
-        removed ``self._prev_s`` and ``self._prev_g`` attributes.
-        """
+        # Reset for external
+        self.inc_batch_size = False
+        self.move_to_next_batch = True
 
         st = self.state
+        # record current flat parameters
+        wk = self._flat_params_fn().clone().detach()
 
-        # Trust-region penalties
-        tk = self.c_1 / (self.k + 1) ** self.alpha
-        ttilde_k = self.c_2 / (self.k + 1) ** self.alpha
-
+        # evaluate objective and gradient
         fN_old = _["loss"] if "loss" in _ else closure_main(compute_grad=True)
-        g = _["grad"] if "grad" in _ else self._flatgrad().detach()
+        g = _["grad"] if "grad" in _ else self._flat_grads_fn()
+        fD_old = closure_d(compute_grad=True)
+        g_bar = self._flat_grads_fn()
 
-        fD_old = closure_d(compute_grad=True)  # grads for control batch
-        g_bar = self._flatgrad().detach()
-
+        # update SR1 memory
         if st["prev_s"] is not None:
-            self.hess.update_memory(st["prev_s"], g - st["prev_g"])  # type: ignore[arg-type]
+            self.hess.update_memory(st["prev_s"], g - st["prev_g"])
 
         gn = torch.norm(g, p=self.norm_type)
+        if abs(hNk) > self.tol:
+            if gn < self.tol * hNk:
+                self.inc_batch_size = True
+                self.move_to_next_batch = True
+            else:
+                if rho_D < self.nu:
+                    self.inc_batch_size = True
+                    self.move_to_next_batch = True
+                else:
+                    if rho_N < self.eta:
+                        self.inc_batch_size = False
+                        self.move_to_next_batch = False
+                    else:
+                        self.inc_batch_size = False
+                        self.move_to_next_batch = True
+
         if self.second_order and len(self.hess._S) > 0:
             step, pred_red = solve_tr_second_order(
                 g, gn, self.delta, self.hess, self.obs, self.tol
@@ -168,23 +198,42 @@ class ASNTR(Optimizer):
         else:
             step, pred_red = solve_tr_first_order(g, gn, self.delta, self.tol)
 
-        self._apply_flat(step, +1)  # move to trial point
+        # trial update
+        self._unflatten_update(wk + step)
         with torch.no_grad():
             fN_new = closure_main(compute_grad=False)
             fD_new = closure_d(compute_grad=False)
 
-        rho_N = (fN_old - fN_new + tk * self.delta) / (pred_red + 1e-12)
-        rho_D = (fD_old - fD_new + ttilde_k * self.delta) / (-g_bar.dot(step) + 1e-12)
+        # ratios
+        tk = self.c_1 / (self.k + 1) ** self.alpha
+        ttilde_k = self.c_2 / (self.k + 1) ** self.alpha
 
-        accepted = rho_N >= self.eta and rho_D >= self.nu
+        if abs(float(pred_red)) < self.tol:
+            rho_N = float("inf")
+        else:
+            rho_N = (fN_old - fN_new + tk * self.delta) / pred_red
+
+        pred_red_d = -g_bar.dot(step)
+        if abs(float(pred_red_d)) < self.tol:
+            rho_D = float("inf")
+        else:
+            rho_D = (fD_old - fD_new + ttilde_k * self.delta) / -g_bar.dot(step)
+
+        # accept or reject
+        if abs(hNk) > self.tol:
+            accepted = rho_N >= self.eta and rho_D >= self.nu
+        else:
+            accepted = rho_N >= self.eta
+
         if accepted:
             st["prev_s"] = step.clone().detach()
             st["prev_g"] = g.clone().detach()
-        else:  # reject - roll back
-            self._apply_flat(step, -1)
+        else:
+            self._unflatten_update(wk)
             st["prev_s"] = None
             st["prev_g"] = None
 
+        # adjust delta
         if rho_N < self.eta_1:
             self.delta *= self.tau_1
         elif (
@@ -192,13 +241,7 @@ class ASNTR(Optimizer):
             and torch.norm(step, p=self.norm_type) > self.tau_2 * self.delta
         ):
             self.delta = min(self.delta * self.tau_3, self.max_delta)
+        self.delta = max(self.min_delta, min(self.delta, self.max_delta))
 
-        # Clip trust-region radius between [min_delta, max_delta]
-        self.delta = max(
-            self.min_delta,
-            min(self.delta, self.max_delta),
-        )
-
-        # Increment iteration counter
         self.k += 1
         return fN_new

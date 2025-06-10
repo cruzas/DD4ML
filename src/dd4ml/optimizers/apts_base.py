@@ -432,23 +432,23 @@ class APTS_Base(Optimizer):
             # Dogleg-style prediction
             g = self.init_glob_grad
             # linear part
-            pred_val = -g.dot(step)
+            pred_red = -g.dot(step)
             # add quadratic term if SR1 info exists
             if self.glob_opt.hess._S is not None and len(self.glob_opt.hess._S) > 0:
                 self.glob_opt.hess.precompute()
                 Bp = self.glob_opt.hess.B(step)
-                pred_val -= 0.5 * step.dot(Bp)
+                pred_red -= 0.5 * step.dot(Bp)
         else:
-            pred_val = pred
+            pred_red = pred
 
         # Compute rho = (f(init) − f(trial)) / pred
-        if abs(float(pred_val)) < self.tol:
+        if abs(float(pred_red)) < self.tol:
             rho = float("inf")
         else:
-            rho = (self.init_glob_loss - trial_loss) / pred_val
+            rho = (self.init_glob_loss - trial_loss) / pred_red
 
         # Accept/reject + adjust trust region
-        if pred_val < self.tol or rho < self.nu_dec:
+        if pred_red < self.tol or rho < self.nu_dec:
             # Reject: shrink trust region and restore original params
             self.delta = max(self.delta * self.dec_factor, self.min_delta)
             self.update_pytorch_lr()

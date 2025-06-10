@@ -114,7 +114,7 @@ class APTS_P(APTS_Base):
     def loc_grad_to_vector(self):
         return trainable_params_to_vector(self.loc_model)
 
-    def step(self, inputs, labels, inputs_d=None, labels_d=None):
+    def step(self, inputs, labels, inputs_d=None, labels_d=None, hNk=None):
         """
         Performs one APTS_P step: evaluate initial losses/gradients,
         run local iterations, propose a step, test acceptance, and possibly
@@ -126,6 +126,7 @@ class APTS_P(APTS_Base):
         # Store inputs and labels for closures
         self.inputs, self.labels = inputs, labels
         self.inputs_d, self.labels_d = inputs_d, labels_d
+        self.hNk = hNk
 
         # Reset gradient evaluation counters (as Python floats)
         # Note: closures will increment these
