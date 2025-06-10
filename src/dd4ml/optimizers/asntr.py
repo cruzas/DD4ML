@@ -162,7 +162,7 @@ class ASNTR(Optimizer):
 
         st = self.state
         # record current flat parameters
-        wk = self._flat_params_fn().clone().detach()
+        wk = self._flat_params_fn()
 
         # evaluate objective and gradient
         fN_old = _["loss"] if "loss" in _ else closure_main(compute_grad=True)

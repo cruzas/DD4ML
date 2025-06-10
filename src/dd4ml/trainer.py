@@ -8,6 +8,7 @@ import math
 import os
 import time
 from collections import defaultdict
+from itertools import chain
 
 import torch
 import torch.distributed as dist
@@ -210,7 +211,42 @@ class Trainer:
         if cfg.batch_inc_factor == 1:
             return  # no batch size adjustment
 
-        if loss > self.last_loss - cfg.loss_tol and not self.max_batch_size_reached:
+        loss_increased_and_still_not_max_batch_size = (
+            loss > self.last_loss - cfg.loss_tol and not self.max_batch_size_reached
+        )
+
+        # Check if either self.optimizer or self.optimizer.glob_opt is ASNTR
+        asntr_is_glob_opt = (
+            hasattr(self.optimizer, "glob_opt")
+            and "asntr" in self.optimizer.glob_opt.__class__.__name__.lower()
+        )
+        asntr_is_opt = "asntr" in self.optimizer.__class__.__name__.lower()
+        asntr_present = asntr_is_glob_opt or asntr_is_opt
+        inc_batch_size_opt = (
+            self.optimizer.inc_batch_size
+            if hasattr(self.optimizer, "inc_batch_size")
+            else False
+        )
+        inc_batch_size_glob_opt = (
+            self.optimizer.glob_opt.inc_batch_size
+            if hasattr(self.optimizer, "glob_opt")
+            and hasattr(self.optimizer.glob_opt, "inc_batch_size")
+            else False
+        )
+        inc_batch_size = inc_batch_size_opt or inc_batch_size_glob_opt
+
+        # Check if self.optimizer or self.optimizer.glob_opt is LSSR1_TR
+        lssr1_tr_is_glob_opt = (
+            hasattr(self.optimizer, "glob_opt")
+            and "lssr1_tr" in self.optimizer.glob_opt.__class__.__name__.lower()
+        )
+        lssr1_tr_is_opt = "lssr1_tr" in self.optimizer.__class__.__name__.lower()
+        lssr1_tr_present = lssr1_tr_is_glob_opt or lssr1_tr_is_opt
+
+        lssr1_tr_cond = loss_increased_and_still_not_max_batch_size and lssr1_tr_present
+        asntr_cond = asntr_present and inc_batch_size
+
+        if lssr1_tr_cond or asntr_cond:
             new_bs = min(
                 int(math.floor(self.current_batch_size * cfg.batch_inc_factor)),
                 len(self.train_dataset),
@@ -233,6 +269,22 @@ class Trainer:
                     p.invalidate_shape_cache()
         self.last_loss = loss
 
+    def _stay_here(self) -> bool:
+        """Return True if either optimiser requests to keep the current batch,
+        and reset both flags so they may be set again later."""
+        stay = False
+
+        if hasattr(self.optimizer, "move_to_next_batch"):
+            stay |= not self.optimizer.move_to_next_batch
+            self.optimizer.move_to_next_batch = True
+
+        glob = getattr(self.optimizer, "glob_opt", None)
+        if glob is not None and hasattr(glob, "move_to_next_batch"):
+            stay |= not glob.move_to_next_batch
+            glob.move_to_next_batch = True
+
+        return stay
+
     def sample_control_batch(self, batch_size: int = 1):
         """Randomly sample a small control batch from the training dataset."""
         idx = torch.randint(0, len(self.train_dataset), (batch_size,))
@@ -254,7 +306,14 @@ class Trainer:
         criterion = self.criterion
         total_loss = 0.0  # epoch loss
         self.iter_num = 0
-        for batch_idx, (x, y) in enumerate(self.train_loader):
+        data_iter = iter(self.train)
+        batch_idx = 0
+        while batch_idx < len(self.train_loader):
+            try:
+                x, y = next(data_iter)
+            except StopIteration:
+                break
+
             batch_time_start = time.time()
             x, y = x.to(self.device), y.to(self.device)
             if self.epoch_num == 0:
@@ -332,6 +391,12 @@ class Trainer:
             self.running_time = time.time() - self.total_start_time
             self.trigger_callbacks("on_batch_end")
             self.iter_num += 1
+            # decide whether to reuse or advance
+            if self._stay_here():
+                dprint(f"Staying on batch with index {batch_idx}.")
+                data_iter = chain([(x, y)], data_iter)
+            else:
+                batch_idx += 1
 
         self.loss = total_loss / len(self.train_loader)
         self.adjust_batch_size(self.loss)
