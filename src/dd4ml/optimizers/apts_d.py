@@ -71,6 +71,10 @@ class APTS_D(APTS_Base):
         self.loc_closure = (
             self.foc_loc_closure if self.foc else self.non_foc_loc_closure
         )
+        if isinstance(self.loc_opt, ASNTR):
+            self.loc_closure_d = (
+                self.foc_loc_closure_d if self.foc else self.non_foc_loc_closure_d
+            )
 
         # Print name of glob_opt and loc_opt
         dprint(
@@ -94,14 +98,17 @@ class APTS_D(APTS_Base):
                 step /= self.nr_models
         return step, loc_red
 
-    def step(self, inputs, labels):
+    def step(self, inputs, labels, inputs_d=None, labels_d=None):
         """
         Performs one APTS_D step: evaluate initial losses/gradients,
         run local iterations, propose a step, test acceptance, and possibly
         run additional global iterations.
+
+        inputs_d, labels_d are only used in case we are using ASNTR as the global/local optimizer.
         """
         # Store inputs and labels for closures
         self.inputs, self.labels = inputs, labels
+        self.inputs_d, self.labels_d = inputs_d, labels_d
 
         # Reset gradient evaluation counters (as Python floats)
         # Note: closures will increment these

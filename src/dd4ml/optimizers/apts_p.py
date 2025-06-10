@@ -68,6 +68,8 @@ class APTS_P(APTS_Base):
         self.loc_opt = loc_opt(self.loc_model.parameters(), **loc_opt_hparams)
 
         self.loc_closure = self.non_foc_loc_closure
+        if isinstance(self.loc_opt, ASNTR):
+            self.loc_closure_d = self.non_foc_loc_closure_d
 
         # Print name of glob_opt and loc_opt
         dprint(
@@ -112,9 +114,18 @@ class APTS_P(APTS_Base):
     def loc_grad_to_vector(self):
         return trainable_params_to_vector(self.loc_model)
 
-    def step(self, inputs, labels):
+    def step(self, inputs, labels, inputs_d=None, labels_d=None):
+        """
+        Performs one APTS_P step: evaluate initial losses/gradients,
+        run local iterations, propose a step, test acceptance, and possibly
+        run additional global iterations.
+
+        inputs_d, labels_d are only used in case we are using ASNTR as the global/local optimizer.
+        """
+
         # Store inputs and labels for closures
         self.inputs, self.labels = inputs, labels
+        self.inputs_d, self.labels_d = inputs_d, labels_d
 
         # Reset gradient evaluation counters (as Python floats)
         # Note: closures will increment these

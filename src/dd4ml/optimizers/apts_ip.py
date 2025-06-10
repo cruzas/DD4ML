@@ -43,7 +43,7 @@ class APTS_IP(APTS_Base):
         # Disable gradient broadcast in the global optimizer as each rank
         # holds only a shard of the model when running APTS_IP.
         config.glob_opt_hparams["sync"] = False
-        config.apts_params = get_apts_params(config)
+        config.apts_params = get_apts_hparams(config)
         return config
 
     def __init__(
@@ -111,11 +111,9 @@ class APTS_IP(APTS_Base):
             )
 
         self.loc_opt = loc_opt(params=model.subdomain_params(), **loc_opt_hparams)
-        
+
         glob_opt_hparams["flat_params"] = self.model.parameters()
-        self.glob_opt = glob_opt(
-            params=list(model.parameters()), **glob_opt_hparams
-        )
+        self.glob_opt = glob_opt(params=list(model.parameters()), **glob_opt_hparams)
         self.glob_opt._flat_grads_fn = self.model.grad
         self.glob_opt._flat_params_fn = self.model.parameters
 

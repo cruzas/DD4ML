@@ -24,7 +24,7 @@ def get_state_dict(model):
     return model.module.state_dict() if hasattr(model, "module") else model.state_dict()
 
 
-def get_apts_params(config):
+def get_apts_hparams(config):
     return {
         "delta": config.delta,
         "min_delta": config.min_delta,
@@ -145,7 +145,7 @@ def get_asntr_hparams(config):
         "tau_2": 0.8,
         "tau_3": 2.0,
         "C_1": 1.0,
-        "C_2": 1.0,
+        "C_2": 100,
         "alpha": 1.1,
         "tol": config.tol,
     }

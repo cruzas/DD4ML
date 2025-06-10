@@ -114,7 +114,7 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Trial number. Used to generate seed for reproducibility.",
     )
     parser.add_argument(
-        "--num_subdomains", type=int, default=2, help="Number of subdomains"
+        "--num_subdomains", type=int, default=1, help="Number of subdomains"
     )
 
     parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
@@ -292,7 +292,7 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 2
+    world_size = 1
     if args["use_pmw"]:
         world_size = (
             args["num_subdomains"]

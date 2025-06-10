@@ -91,12 +91,6 @@ class Trainer:
         else:
             self.device = config.device
 
-        print(f"Is self.device == 'cpu'? {self.device == 'cpu'}")
-        print(f"is torch.backends.mps available? {torch.backends.mps.is_available()}")
-        print(f"is torch.backends.mps built? {torch.backends.mps.is_built()}")
-        print(f"Is distributed initialized? {dist.is_initialized()}")
-        print(f"World size: {dist.get_world_size() if dist.is_initialized() else 1}")
-
         # In case we are on a Mac with MPS enabled, we can use it as a device
         if (
             self.device == "cpu"
@@ -302,7 +296,13 @@ class Trainer:
                     k in self.optimizer.__class__.__name__.lower()
                     for k in ("apts_d", "apts_p")
                 ):
-                    step_args = {"inputs": x, "labels": y}
+                    x_d, y_d = self.sample_control_batch(1)
+                    step_args = {
+                        "inputs": x,
+                        "labels": y,
+                        "inputs_d": x_d,
+                        "labels_d": y_d,
+                    }
                 elif "asntr" in self.optimizer.__class__.__name__.lower():
                     x_d, y_d = self.sample_control_batch(1)
                     step_args = {
@@ -310,6 +310,8 @@ class Trainer:
                         "labels": y,
                         "inputs_d": x_d,
                         "labels_d": y_d,
+                        "hNk": (len(self.train_dataset) - self.current_batch_size)
+                        / len(self.train_dataset),
                     }
                 else:
                     step_args = {"closure": general_closure}

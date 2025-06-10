@@ -8,12 +8,24 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
-from dd4ml.utility import (Timer, apts_ip_restore_params, clone_model, dprint,
-                           ensure_tensor, flatten_params, get_apts_params,
-                           get_device, get_loc_tr_hparams,
-                           get_lssr1_loc_tr_hparams, get_lssr1_tr_hparams,
-                           get_state_dict, get_tr_hparams, mark_trainable,
-                           restore_params, trainable_params_to_vector)
+from dd4ml.utility import (
+    Timer,
+    apts_ip_restore_params,
+    clone_model,
+    dprint,
+    ensure_tensor,
+    flatten_params,
+    get_apts_hparams,
+    get_device,
+    get_loc_tr_hparams,
+    get_lssr1_loc_tr_hparams,
+    get_lssr1_tr_hparams,
+    get_state_dict,
+    get_tr_hparams,
+    mark_trainable,
+    restore_params,
+    trainable_params_to_vector,
+)
 
 from .lssr1_tr import LSSR1_TR
 from .tr import TR
@@ -67,7 +79,7 @@ class APTS_Base(Optimizer):
                 else (TR, get_loc_tr_hparams(config))
             )
 
-        config.apts_params = get_apts_params(config)
+        config.apts_params = get_apts_hparams(config)
         return config
 
     def __init__(
@@ -116,6 +128,7 @@ class APTS_Base(Optimizer):
         self.nr_models = nr_models  # number of models in the distributed environment
         self.device = get_device(device)
         self.criterion = criterion
+        self.dataset_len = 0
 
         # Instantiate global optimizer (trust-region or LSSR1_TR)
         self.model = model
@@ -125,6 +138,7 @@ class APTS_Base(Optimizer):
         self.loc_model = None
         self.loc_opt = None
         self.loc_closure = None
+        self.loc_closure_d = None  # For ASNTR
 
         # Keep delta in sync with underlying global optimizer
         self.delta = self.glob_opt.delta
@@ -277,7 +291,7 @@ class APTS_Base(Optimizer):
             loss = loss + (self.resid @ diff)
         return loss
 
-    def glob_closure(self, compute_grad: bool = False):
+    def glob_closure_main(self, compute_grad: bool = False):
         """
         Global closure: zeroes gradients, computes loss on the global model,
         optionally backpropagates, and reduces loss across processes if needed.
@@ -292,11 +306,57 @@ class APTS_Base(Optimizer):
             loss /= self.nr_models
         return loss
 
-    def _step_loop(self, optim, max_iters, loss, grad, closure=None):
+    # For ASNTR
+    def non_foc_loc_closure_d(self, compute_grad: bool = False):
+        self.loc_opt.zero_grad()
+        loss = self.criterion(self.loc_model(self.inputs_d), self.labels_d)
+        if torch.is_grad_enabled() or compute_grad:
+            loss.backward()
+            self.loc_grad_evals += 1
+        return loss
+
+    def foc_loc_closure_d(self, compute_grad: bool = False):
+        self.loc_opt.zero_grad()
+        loss = self.non_foc_loc_closure_d(compute_grad)
+
+        # Flatten global and local parameters into pre-allocated buffers
+        glob_flat = flatten_params(self.model, self._flat_params_buffer)
+        loc_flat = flatten_params(self.loc_model, self._loc_flat_buffer)
+        diff = loc_flat - glob_flat
+
+        # If difference above tolerance, add residual inner-product term
+        if not torch.all(torch.abs(diff) < self.tol):
+            if self.resid.dim() == 0 and self.resid.item() == 0:
+                self.resid = torch.zeros_like(diff)
+            loss = loss + (self.resid @ diff)
+        return loss
+
+    def glob_closure_d(self, compute_grad: bool = False):
+        self.zero_grad()
+        loss = self.criterion(self.model(self.inputs_d), self.labels_d)
+        if torch.is_grad_enabled() or compute_grad:
+            loss.backward()  # DDP will handle gradient averaging
+            self.grad_evals += 1.0  # Count global gradient evaluation
+        if self.nr_models > 1:
+            dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+            loss /= self.nr_models
+        return loss
+
+    def _step_loop(self, optim, max_iters, loss, grad, closure=None, closure_d=None):
         for _ in range(max_iters):
-            # Perform an optimization step (trust-region or LSSR1) with precomputed values
+            # Perform an optimization step (trust-region, LSSR1, or ASNTR) with precomputed values
             if closure is not None:
-                loss, grad = optim.step(closure=closure, loss=loss, grad=grad)
+                # check if tr or lssr1_tr optimizer
+                if isinstance(optim, (TR, LSSR1_TR)):
+                    # For TR/LSSR1_TR optimizers, closure is expected to return loss and grad
+                    loss, grad = optim.step(closure=closure, loss=loss, grad=grad)
+                else:
+                    loss, grad = optim.step(
+                        closure_main=closure,
+                        closure_d=closure_d,
+                        loss=loss,
+                        grad=grad,
+                    )
             else:
                 raise ValueError(
                     "Closure must be provided for global/local optimization step in APTS. To be modified in future."
@@ -310,6 +370,15 @@ class APTS_Base(Optimizer):
         return loss, grad
 
     def loc_steps(self, loss, grad):
+        step_loop_args = {
+            "optim": self.loc_opt,
+            "max_iters": self.max_loc_iters,
+            "loss": loss,
+            "grad": grad,
+            "closure": self.loc_closure,
+            "closure_d": self.loc_closure_d,
+        }
+
         return self._step_loop(
             optim=self.loc_opt,
             max_iters=self.max_loc_iters,
@@ -318,16 +387,21 @@ class APTS_Base(Optimizer):
             closure=self.loc_closure,
         )
 
-    def glob_steps(self, loss, grad, closure=None):
-        return self._step_loop(
-            optim=self.glob_opt,
-            max_iters=self.max_glob_iters,
-            loss=loss,
-            grad=grad,
-            closure=self.glob_closure if closure is None else closure,
-        )
+    def glob_steps(self, loss, grad, closure=None, closure_d=None):
+        step_loop_args = {
+            "optim": self.glob_opt,
+            "max_iters": self.max_glob_iters,
+            "loss": loss,
+            "grad": grad,
+            "closure": self.glob_closure_main if closure is None else closure,
+            "closure_d": self.glob_closure_main_d if closure_d is None else closure_d,
+        }
 
-    def control_step(self, step: torch.Tensor, pred: torch.Tensor | None = None, closure=None):
+        return self._step_loop(**step_loop_args)
+
+    def control_step(
+        self, step: torch.Tensor, pred: torch.Tensor | None = None, closure=None
+    ):
         """
         Unified trust-region control:
           - If `pred` is given, use it directly (pure TR).
@@ -338,12 +412,20 @@ class APTS_Base(Optimizer):
 
         # Tentatively apply the step
         restore_fn = restore_params if closure is None else apts_ip_restore_params
-        
+
         restore_fn(self.model, self.init_glob_flat + step)
 
         # Evaluate trial loss & gradient
-        trial_loss = self.glob_closure(compute_grad=True) if closure is None else closure(compute_grad=True, zero_grad=True)
-        trial_grad = self.glob_grad_to_vector() if closure is None else self.model.grad(clone=True)
+        trial_loss = (
+            self.glob_closure(compute_grad=True)
+            if closure is None
+            else closure(compute_grad=True, zero_grad=True)
+        )
+        trial_grad = (
+            self.glob_grad_to_vector()
+            if closure is None
+            else self.model.grad(clone=True)
+        )
 
         # Compute or use supplied `pred`
         if pred is None:

@@ -7,8 +7,8 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 from torch.optim.optimizer import Optimizer
-from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.solvers.obs import OBS
 from dd4ml.utility.optimizer_utils import solve_tr_first_order, solve_tr_second_order
 
@@ -40,13 +40,13 @@ class LSSR1_TR(Optimizer):
         nu_4: float = 1.2,
         tol: float = 1e-8,
         norm_type: int = 2,
-        c1: float = 1e-4,
-        c2: float = 0.9,
+        c_1: float = 1e-4,
+        c_2: float = 0.9,
         alpha_max: float = 10.0,
         sync: bool = False,
-        flat_grads_fn = None,
-        flat_params_fn = None,
-        flat_params = None, # only passed by APTS_IP
+        flat_grads_fn=None,
+        flat_params_fn=None,
+        flat_params=None,  # only passed by APTS_IP
     ):
         # Ensure at least one parameter is provided
         param_list = list(params)
@@ -54,7 +54,7 @@ class LSSR1_TR(Optimizer):
             raise ValueError("Optimiser got an empty parameter list")
 
         # Only lr remains in defaults
-        super().__init__(param_list, {'lr': lr})
+        super().__init__(param_list, {"lr": lr})
 
         # Assign other hyperparameters as attributes
         self.delta = delta
@@ -74,8 +74,8 @@ class LSSR1_TR(Optimizer):
         self.nu_4 = nu_4
         self.tol = tol
         self.norm_type = norm_type
-        self.c1 = c1
-        self.c2 = c2
+        self.c_1 = c_1
+        self.c_2 = c_2
         self.alpha_max = alpha_max
 
         # Derive device and dtype from the first parameter tensor
@@ -104,15 +104,21 @@ class LSSR1_TR(Optimizer):
             # If flat_params is provided, use it directly
             st["flat_wk"] = WeightParallelizedTensor(
                 [torch.zeros_like(t) for t in flat_params.tensor],
-                flat_params.backend, flat_params.master_group, flat_params.rank
+                flat_params.backend,
+                flat_params.master_group,
+                flat_params.rank,
             )
             st["flat_gk"] = WeightParallelizedTensor(
                 [torch.zeros_like(t) for t in flat_params.tensor],
-                flat_params.backend, flat_params.master_group, flat_params.rank
+                flat_params.backend,
+                flat_params.master_group,
+                flat_params.rank,
             )
             st["flat_vk"] = WeightParallelizedTensor(
                 [torch.zeros_like(t) for t in flat_params.tensor],
-                flat_params.backend, flat_params.master_group, flat_params.rank
+                flat_params.backend,
+                flat_params.master_group,
+                flat_params.rank,
             )
         else:
             st["flat_wk"] = torch.zeros(total_size, device=device, dtype=dtype)
@@ -137,9 +143,13 @@ class LSSR1_TR(Optimizer):
         self.sync = bool(sync)
         self.rank = dist.get_rank() if dist.is_initialized() else 0
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
-        
-        self._flat_grads_fn = flat_grads_fn if flat_grads_fn is not None else self._flatten_grads
-        self._flat_params_fn = flat_params_fn if flat_params_fn is not None else self._flatten_params
+
+        self._flat_grads_fn = (
+            flat_grads_fn if flat_grads_fn is not None else self._flatten_grads
+        )
+        self._flat_params_fn = (
+            flat_params_fn if flat_params_fn is not None else self._flatten_params
+        )
 
     def _avg_scalar(self, value: Tensor) -> Tensor:
         """
@@ -239,8 +249,8 @@ class LSSR1_TR(Optimizer):
         phi_0: Tensor,
         dphi_0: Tensor,
         closure: Callable,
-        c1: float,
-        c2: float,
+        c_1: float,
+        c_2: float,
         max_iter: int = 20,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
@@ -274,12 +284,12 @@ class LSSR1_TR(Optimizer):
             )
 
             # Check Armijo condition or if phi_j >= phi_lo
-            armijo = phi_j > phi_0 + c1 * alpha_j * dphi_0
+            armijo = phi_j > phi_0 + c_1 * alpha_j * dphi_0
             if armijo or (phi_j >= phi_lo):
                 alpha_hi, phi_hi = alpha_j, phi_j
             else:
                 # Check strong Wolfe curvature condition
-                strong_wolfe = abs(dphi_j) <= -c2 * dphi_0
+                strong_wolfe = abs(dphi_j) <= -c_2 * dphi_0
                 if strong_wolfe:
                     return alpha_j, phi_j, grad_j
                 switch = dphi_j * (alpha_hi - alpha_lo) >= 0
@@ -303,8 +313,8 @@ class LSSR1_TR(Optimizer):
         dphi_0: Tensor,
         closure: Callable,
         alpha_0: float = 1.0,
-        c1: float = 1e-4,
-        c2: float = 0.9,
+        c_1: float = 1e-4,
+        c_2: float = 0.9,
         alpha_max: float = 10.0,
         max_iter: int = 10,
     ) -> Tuple[Tensor, Tensor, Tensor]:
@@ -324,7 +334,7 @@ class LSSR1_TR(Optimizer):
                 wk, p, alpha_i.item(), closure
             )
 
-            cond1 = phi_i > phi_0 + c1 * alpha_i * dphi_0
+            cond1 = phi_i > phi_0 + c_1 * alpha_i * dphi_0
             cond2 = (i > 0) and (phi_i >= phi_prev)
             # If either condition triggers, enter zoom phase
             if cond1 or cond2:
@@ -339,12 +349,12 @@ class LSSR1_TR(Optimizer):
                     phi_0,
                     dphi_0,
                     closure,
-                    c1,
-                    c2,
+                    c_1,
+                    c_2,
                 )
 
             # If curvature condition satisfied, accept alpha_i
-            if abs(dphi_i) <= -c2 * dphi_0:
+            if abs(dphi_i) <= -c_2 * dphi_0:
                 return alpha_i, phi_i, grad_i
 
             # If derivative becomes positive, perform zoom with swapped bounds
@@ -360,8 +370,8 @@ class LSSR1_TR(Optimizer):
                     phi_0,
                     dphi_0,
                     closure,
-                    c1,
-                    c2,
+                    c_1,
+                    c_2,
                 )
 
             # Update previous iterate values and double alpha_i (capped at alpha_max)
@@ -384,8 +394,8 @@ class LSSR1_TR(Optimizer):
         dphi_0: Tensor,
         closure: Callable,
         alpha_0: float = 1.0,
-        c1: float = 1e-4,
-        c2: float = 0.9,
+        c_1: float = 1e-4,
+        c_2: float = 0.9,
         max_iter: int = 10,
     ) -> Tuple[float, float, Tensor]:
         """
@@ -398,8 +408,8 @@ class LSSR1_TR(Optimizer):
             phi_alpha, grad_alpha, dphi_alpha = self._evaluate_function_and_gradient(
                 wk, p, alpha, closure
             )
-            armijo_ok = phi_alpha <= phi_0 + c1 * alpha * dphi_0
-            curvature_ok = abs(dphi_alpha) <= c2 * abs(dphi_0)
+            armijo_ok = phi_alpha <= phi_0 + c_1 * alpha * dphi_0
+            curvature_ok = abs(dphi_alpha) <= c_2 * abs(dphi_0)
             if armijo_ok and curvature_ok:
                 return alpha, phi_alpha, grad_alpha
             alpha *= 0.5
@@ -416,7 +426,7 @@ class LSSR1_TR(Optimizer):
         # Evaluate or retrieve precomputed loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
         g = _["grad"] if "grad" in _ else self._flat_grads_fn()
-        
+
         gn = torch.norm(g, p=self.norm_type)
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
@@ -427,8 +437,8 @@ class LSSR1_TR(Optimizer):
             return loss, g
 
         # Flatten current parameters and preserve a copy for updates
-        wk_flat = self._flat_params_fn() #self._flatten_params()
-        wk = wk_flat.clone()
+        wk_flat = self._flat_params_fn()  # self._flatten_params()
+        wk = wk_flat.clone().detach()
         st = self.state
         sec = self.second_order
 
@@ -438,7 +448,7 @@ class LSSR1_TR(Optimizer):
             yk = g - st["prev_grad"]
             if sk.norm() > self.tol and yk.norm() > self.tol:
                 self.hess.update_memory(sk, yk)
-        st["old_wk"], st["prev_grad"] = wk.clone(), g.clone()
+        st["old_wk"], st["prev_grad"] = wk.clone().detach(), g.clone().detach()
 
         # Solve trust-region subproblem: second-order if memory available, otherwise first-order
         if sec and len(self.hess._S) > 0:
@@ -463,7 +473,7 @@ class LSSR1_TR(Optimizer):
             p_comb_norm = math.sqrt(float(p_comb_norm_sq))
             scale = min(1.0, self.delta / p_comb_norm)
             p_comb.mul_(scale)
-        st["flat_vk"] = vk.clone()  # Store updated vk for next iteration
+        st["flat_vk"] = vk.clone().detach()  # Store updated vk for next iteration
 
         # Prepare line search with initial loss and directional derivative
         phi_0 = loss
@@ -477,8 +487,8 @@ class LSSR1_TR(Optimizer):
             dphi_0,
             closure,
             alpha_0=self.defaults["lr"],
-            c1=self.c1,
-            c2=self.c2,
+            c_1=self.c_1,
+            c_2=self.c_2,
             alpha_max=self.alpha_max,
             max_iter=self.max_wolfe_iters,
         )

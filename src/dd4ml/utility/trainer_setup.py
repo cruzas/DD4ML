@@ -265,6 +265,7 @@ def get_config_model_and_trainer(args, wandb_config):
     trainer = Trainer(
         all_config.trainer, model, optimizer_obj, criterion, dataset, test_dataset
     )
+    trainer.optimizer.dataset_len = len(dataset)
     return all_config, model, trainer
 
 
