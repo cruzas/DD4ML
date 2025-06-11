@@ -5,6 +5,7 @@ Model handler takes care of the parallelized model logic. This is why this is sl
 
 import inspect
 import math
+import numbers
 import os
 import time
 from collections import defaultdict
@@ -70,6 +71,7 @@ class Trainer:
         C.glob_opt = None
         C.overlap = 0.0
         C.full_eval_freq = None
+        C.full_eval_mode = "after_epoch"
         return C
 
     def __init__(
@@ -373,7 +375,7 @@ class Trainer:
         for x, y in eval_loader:
             x, y = x.to(self.device), y.to(self.device)
             out = self.model(x)
-            if not cond_std:               # pipeline → extract the shard
+            if not cond_std:  # pipeline → extract the shard
                 out = out[0]
             if cond_std or (cond_d_a and cond_d_b):
                 loss = crit(out, y).item()
@@ -476,7 +478,17 @@ class Trainer:
                     }
                 else:
                     step_args = {"closure": general_closure}
-                batch_loss, *__ = self.optimizer.step(**step_args)
+
+                result = self.optimizer.step(**step_args)
+                # scalar Tensor or Python float → batch_loss = result
+                if isinstance(result, numbers.Number) or (
+                    torch.is_tensor(result) and result.ndim == 0
+                ):
+                    batch_loss = result
+                # otherwise assume it's a sequence
+                else:
+                    batch_loss, *__ = result
+
                 total_loss += batch_loss
 
             self.loss = total_loss / curr_batch_count
@@ -489,7 +501,8 @@ class Trainer:
                 batch_idx += 1
 
             # Adjust batch size if needed (checks done automatically within the function)
-            self._adjust_batch_size(self.loss)
+            if self._asntr_present():
+                self._adjust_batch_size(self.loss)
 
             # Print progress within the epoch
             self.epoch_progress = 100.0 * (batch_idx + 1) / len(self.train_loader)
@@ -499,11 +512,11 @@ class Trainer:
             self.trigger_callbacks("on_batch_end")
             self.iter_num += 1
 
-        tnow = time.time()
         if self._lssr1_tr_present():
             full_loss = self._eval_full_objective()
             self._adjust_batch_size(full_loss)
-        
+
+        tnow = time.time()
         self.epoch_dt = tnow - self.epoch_time
         self.epoch_time = tnow
 

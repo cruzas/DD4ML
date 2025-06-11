@@ -5,7 +5,7 @@ current_dir=$(pwd)
 script="run_config_file.py" # Python script to run
 
 # --- General parameter settings ---#
-optimizer="lssr1_tr"
+optimizer="asntr"
 dataset="mnist"
 batch_sizes=(10000)
 model="simple_ffnn"

@@ -457,17 +457,17 @@ class LSSR1_TR(Optimizer):
 
         # Solve trust-region subproblem: second-order if memory available, otherwise first-order
         if sec and len(self.hess._S) > 0:
-            # pred = -(g*p + 0.5*p*B*p)
-            p_star, pred = solve_tr_second_order(
+            # pred_red = -(g*p + 0.5*p*B*p)
+            p_star, pred_red = solve_tr_second_order(
                 g, gn, self.delta, self.hess, self.obs, self.tol
             )
         else:
-            # pred = -g*p
-            p_star, pred = solve_tr_first_order(g, gn, self.delta, self.tol)
+            # pred_red = -g*p
+            p_star, pred_red = solve_tr_first_order(g, gn, self.delta, self.tol)
 
-        # Since pred is the classical predicted TR reduction, here we multiply it by -1 
+        # Since pred_red is the classical pred_redicted TR reduction, here we multiply it by -1 
         # to abide by Q_k(p) specified in Equation (10) in the paper
-        pred *= -1
+        pred_red *= -1
     
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
@@ -508,8 +508,8 @@ class LSSR1_TR(Optimizer):
         p_step = alpha * p_comb
         self._unflatten_update(wk + p_step)
 
-        # Compute trust-region ratio ρ = (f(new) − f(old)) / predicted
-        rho = (new_loss - loss) / pred if (alpha > 0 and pred < 0) else 0.0
+        # Compute trust-region ratio ρ = (f(new) − f(old)) / pred_redicted
+        rho = (new_loss - loss) / pred_red if (alpha > 0 and pred_red < 0) else 0.0
         s_norm_sq = p_step.dot(p_step)
         s_norm = math.sqrt(float(s_norm_sq))
         delta_old = self.delta
