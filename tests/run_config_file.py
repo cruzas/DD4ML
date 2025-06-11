@@ -222,7 +222,8 @@ def main(
         trainer, save_model: bool = False, save_frequency: int = 5
     ) -> None:
 
-        delta = trainer.optimizer.param_groups[0]["lr"]
+        # delta = trainer.optimizer.param_groups[0]["lr"]
+        delta = trainer.optimizer.delta
         thing_to_print = "lr"
 
         dprint(

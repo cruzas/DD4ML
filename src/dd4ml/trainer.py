@@ -68,6 +68,7 @@ class Trainer:
         C.use_pmw = False
         C.loc_opt = None
         C.glob_opt = None
+        C.overlap = 0.33
         return C
 
     def __init__(
@@ -205,69 +206,26 @@ class Trainer:
                 pin_memory=True,
             )
 
-    def adjust_batch_size(self, loss):
-        """Increase batch size when current loss is greater than previous loss."""
-        cfg = self.config
-        if cfg.batch_inc_factor == 1:
-            return  # no batch size adjustment
-
-        loss_increased_and_still_not_max_batch_size = (
-            loss > self.last_loss - cfg.loss_tol and not self.max_batch_size_reached
-        )
-
-        # Check if either self.optimizer or self.optimizer.glob_opt is ASNTR
+    def _asntr_present(self):
+        # Check if ASNTR is the optimizer itself...
+        asntr_is_opt = "asntr" in self.optimizer.__class__.__name__.lower()
+        # ...or whether it is the global optimizer in the case of APTS*
         asntr_is_glob_opt = (
             hasattr(self.optimizer, "glob_opt")
             and "asntr" in self.optimizer.glob_opt.__class__.__name__.lower()
         )
-        asntr_is_opt = "asntr" in self.optimizer.__class__.__name__.lower()
-        asntr_present = asntr_is_glob_opt or asntr_is_opt
-        inc_batch_size_opt = (
-            self.optimizer.inc_batch_size
-            if hasattr(self.optimizer, "inc_batch_size")
-            else False
-        )
-        inc_batch_size_glob_opt = (
-            self.optimizer.glob_opt.inc_batch_size
-            if hasattr(self.optimizer, "glob_opt")
-            and hasattr(self.optimizer.glob_opt, "inc_batch_size")
-            else False
-        )
-        inc_batch_size = inc_batch_size_opt or inc_batch_size_glob_opt
 
-        # Check if self.optimizer or self.optimizer.glob_opt is LSSR1_TR
+        return asntr_is_glob_opt or asntr_is_opt
+
+    def _lssr1_tr_present(self):
+        # Check if LSSR1_TR is the optimizer itself...
+        lssr1_tr_is_opt = "lssr1_tr" in self.optimizer.__class__.__name__.lower()
+        # ...or whether it is the global optimizer in the case of APTS*
         lssr1_tr_is_glob_opt = (
             hasattr(self.optimizer, "glob_opt")
             and "lssr1_tr" in self.optimizer.glob_opt.__class__.__name__.lower()
         )
-        lssr1_tr_is_opt = "lssr1_tr" in self.optimizer.__class__.__name__.lower()
-        lssr1_tr_present = lssr1_tr_is_glob_opt or lssr1_tr_is_opt
-
-        lssr1_tr_cond = loss_increased_and_still_not_max_batch_size and lssr1_tr_present
-        asntr_cond = asntr_present and inc_batch_size
-
-        if lssr1_tr_cond or asntr_cond:
-            new_bs = min(
-                int(math.floor(self.current_batch_size * cfg.batch_inc_factor)),
-                len(self.train_dataset),
-            )
-            if new_bs == len(self.train_dataset):
-                self.max_batch_size_reached = True
-                dprint(
-                    f"Current loss ({loss:.4f}) is greater than previous loss - tolerance ({(self.last_loss-cfg.loss_tol):.4f}). Batch size is already at maximum ({new_bs})."
-                )
-                return
-            dprint(
-                f"Current loss ({loss:.4f}) is greater than previous loss - tolerance ({(self.last_loss-cfg.loss_tol):.4f}). Increasing batch size from {self.current_batch_size} to {new_bs}."
-            )
-            self.current_batch_size = new_bs
-            # Rebuild data loaders to reflect the new batch size
-            self.setup_data_loaders()
-            # Invalidate cached shapes for any WeightParallelizedTensor parameters
-            for p in self.model.parameters():
-                if isinstance(p, WeightParallelizedTensor):
-                    p.invalidate_shape_cache()
-        self.last_loss = loss
+        return lssr1_tr_is_glob_opt or lssr1_tr_is_opt
 
     def _stay_here(self) -> bool:
         """Return True if either optimiser requests to keep the current batch,
@@ -284,6 +242,63 @@ class Trainer:
             glob.move_to_next_batch = True
 
         return stay
+
+    def _inc_batch_size(self) -> bool:
+        """Return True if either optimiser requests to increase the batch size,
+        and reset both flags so they may be set again later."""
+        inc = False
+
+        if hasattr(self.optimizer, "inc_batch_size"):
+            inc |= self.optimizer.inc_batch_size
+            self.optimizer.inc_batch_size = False
+
+        glob = getattr(self.optimizer, "glob_opt", None)
+        if glob is not None and hasattr(glob, "inc_batch_size"):
+            inc |= glob.inc_batch_size
+            glob.inc_batch_size = False
+
+        return inc
+
+    def _adjust_batch_size(self, loss):
+        """Increase batch size when current loss is greater than previous loss."""
+        cfg = self.config
+        if cfg.batch_inc_factor == 1:
+            return  # no batch size adjustment
+
+        # Check if the loss has increased and we have not reached the maximum batch size
+        loss_inc_and_still_not_max_bs = (
+            loss > self.last_loss - cfg.loss_tol and not self.max_batch_size_reached
+        )
+
+        # Condition that must be satisfied for LSSR1 to increase batch size
+        lssr1_tr_cond = self._lssr1_tr_present() and loss_inc_and_still_not_max_bs
+
+        # Condition that must be satisfied for ASNTR to increase batch size
+        asntr_cond = self._asntr_present() and self._inc_batch_size()
+
+        if lssr1_tr_cond or asntr_cond:
+            new_bs = min(
+                int(math.floor(self.current_batch_size * cfg.batch_inc_factor)),
+                len(self.train_dataset),
+            )
+            if new_bs == len(self.train_dataset):
+                self.max_batch_size_reached = True
+                dprint(
+                    f"Current loss: {loss}. Previous loss: {self.last_loss}. Batch size is already at maximum ({new_bs})."
+                )
+                return
+
+            dprint(
+                f"Current loss: {loss}. Previous loss: {self.last_loss}. Increasing batch size from {self.current_batch_size} to {new_bs}."
+            )
+            self.current_batch_size = new_bs
+            # Rebuild data loaders to reflect the new batch size
+            self.setup_data_loaders()
+            # Invalidate cached shapes for any WeightParallelizedTensor parameters
+            for p in self.model.parameters():
+                if isinstance(p, WeightParallelizedTensor):
+                    p.invalidate_shape_cache()
+        self.last_loss = loss
 
     def sample_control_batch(self, batch_size: int = 1):
         """Randomly sample a small control batch from the training dataset."""
@@ -306,7 +321,7 @@ class Trainer:
         criterion = self.criterion
         total_loss = 0.0  # epoch loss
         self.iter_num = 0
-        data_iter = iter(self.train)
+        data_iter = iter(self.train_loader)
         batch_idx = 0
         while batch_idx < len(self.train_loader):
             try:
@@ -314,6 +329,7 @@ class Trainer:
             except StopIteration:
                 break
 
+            curr_batch_count = batch_idx + 1
             batch_time_start = time.time()
             x, y = x.to(self.device), y.to(self.device)
             if self.epoch_num == 0:
@@ -382,7 +398,20 @@ class Trainer:
                     }
                 else:
                     step_args = {"closure": general_closure}
-                total_loss += self.optimizer.step(**step_args)
+                batch_loss, *__ = self.optimizer.step(**step_args)
+                total_loss += batch_loss
+
+            self.loss = total_loss / curr_batch_count
+            print(f"Loss after batch {batch_idx + 1}: {self.loss:.4f}")
+
+            if self._stay_here():
+                dprint(f"Staying on batch with index {batch_idx}.")
+                data_iter = chain([(x, y)], data_iter)
+            else:
+                batch_idx += 1
+
+            # Adjust batch size if needed (checks done automatically within the function)
+            self._adjust_batch_size(self.loss)
 
             # Print progress within the epoch
             self.epoch_progress = 100.0 * (batch_idx + 1) / len(self.train_loader)
@@ -391,15 +420,7 @@ class Trainer:
             self.running_time = time.time() - self.total_start_time
             self.trigger_callbacks("on_batch_end")
             self.iter_num += 1
-            # decide whether to reuse or advance
-            if self._stay_here():
-                dprint(f"Staying on batch with index {batch_idx}.")
-                data_iter = chain([(x, y)], data_iter)
-            else:
-                batch_idx += 1
 
-        self.loss = total_loss / len(self.train_loader)
-        self.adjust_batch_size(self.loss)
         tnow = time.time()
         self.epoch_dt = tnow - self.epoch_time
         self.epoch_time = tnow

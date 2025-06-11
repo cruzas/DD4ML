@@ -79,6 +79,7 @@ class ASNTR(Optimizer):
         self.tau_1 = tau_1
         self.tau_2 = tau_2
         self.tau_3 = tau_3
+        self.norm_type = norm_type
         self.c_1 = c_1
         self.c_2 = c_2
         self.alpha = alpha
@@ -134,7 +135,7 @@ class ASNTR(Optimizer):
         for p, start, end in zip(
             self.param_groups[0]["params"], self._offsets, self._offsets[1:]
         ):
-            buf[start:end].copy_(g.view(-1))
+            buf[start:end].copy_(p.grad.view(-1))
         return buf
 
     def _unflatten_update(self, vec: Tensor) -> None:
@@ -175,7 +176,46 @@ class ASNTR(Optimizer):
             self.hess.update_memory(st["prev_s"], g - st["prev_g"])
 
         gn = torch.norm(g, p=self.norm_type)
+        if self.second_order and len(self.hess._S) > 0:
+            print("(INFO) Using second-order ASNTR step.")
+            step, pred_red = solve_tr_second_order(
+                g, gn, self.delta, self.hess, self.obs, self.tol
+            )
+        else:
+            print("(INFO) Using first-order ASNTR step.")
+            step, pred_red = solve_tr_first_order(g, gn, self.delta, self.tol)
+
+        # trial update
+        self._unflatten_update(wk + step)
+        with torch.no_grad():
+            fN_new = closure_main(compute_grad=False)
+            fD_new = closure_d(compute_grad=False)
+
+        # ratios
+        tk = self.c_1 / ((self.k + 1) ** self.alpha)
+        ttilde_k = self.c_2 / ((self.k + 1) ** self.alpha)
+
+        print(
+            f"abs(hNk): {hNk:.4f}, tol: {self.tol:.4f}, t{self.k} = {tk:.4f}, ttilde_{self.k} = {ttilde_k:.4f}"
+        )
+
+        if abs(float(pred_red)) < self.tol:
+            rho_N = float("inf")
+        else:
+            rho_N = (fN_old - fN_new + tk * self.delta) / pred_red
+
+        pred_red_d = -g_bar.dot(step)
+        if abs(float(pred_red_d)) < self.tol:
+            rho_D = float("inf")
+        else:
+            rho_D = (fD_old - fD_new + ttilde_k * self.delta) / pred_red_d
+
+        print(f"pred_red = {pred_red:.4f}, pred_red_d = {pred_red_d:.4f}")
+        print(f"rho_N = {rho_N:.4f}, rho_D = {rho_D:.4f}")
+
         if abs(hNk) > self.tol:
+            accepted = rho_N >= self.eta and rho_D >= self.nu
+
             if gn < self.tol * hNk:
                 self.inc_batch_size = True
                 self.move_to_next_batch = True
@@ -190,45 +230,18 @@ class ASNTR(Optimizer):
                     else:
                         self.inc_batch_size = False
                         self.move_to_next_batch = True
-
-        if self.second_order and len(self.hess._S) > 0:
-            step, pred_red = solve_tr_second_order(
-                g, gn, self.delta, self.hess, self.obs, self.tol
-            )
-        else:
-            step, pred_red = solve_tr_first_order(g, gn, self.delta, self.tol)
-
-        # trial update
-        self._unflatten_update(wk + step)
-        with torch.no_grad():
-            fN_new = closure_main(compute_grad=False)
-            fD_new = closure_d(compute_grad=False)
-
-        # ratios
-        tk = self.c_1 / (self.k + 1) ** self.alpha
-        ttilde_k = self.c_2 / (self.k + 1) ** self.alpha
-
-        if abs(float(pred_red)) < self.tol:
-            rho_N = float("inf")
-        else:
-            rho_N = (fN_old - fN_new + tk * self.delta) / pred_red
-
-        pred_red_d = -g_bar.dot(step)
-        if abs(float(pred_red_d)) < self.tol:
-            rho_D = float("inf")
-        else:
-            rho_D = (fD_old - fD_new + ttilde_k * self.delta) / -g_bar.dot(step)
-
-        # accept or reject
-        if abs(hNk) > self.tol:
-            accepted = rho_N >= self.eta and rho_D >= self.nu
         else:
             accepted = rho_N >= self.eta
 
+        print(f"Increase batch size for next step?: {self.inc_batch_size}")
+        print(f"Move to next batch for next step?: {self.move_to_next_batch}")
+
         if accepted:
+            print("(ASNTR) Step accepted.")
             st["prev_s"] = step.clone().detach()
             st["prev_g"] = g.clone().detach()
         else:
+            print("(ASNTR) Step rejected, reverting to previous parameters.")
             self._unflatten_update(wk)
             st["prev_s"] = None
             st["prev_g"] = None
@@ -244,4 +257,4 @@ class ASNTR(Optimizer):
         self.delta = max(self.min_delta, min(self.delta, self.max_delta))
 
         self.k += 1
-        return fN_new
+        return fN_new if accepted else fN_old

@@ -16,7 +16,7 @@ parameters:
   num_replicas_per_subdomain:
     value: 1
   glob_second_order:
-    value: True
+    value: False
   mem_length:
     value: 3
   max_iters:
@@ -25,6 +25,8 @@ parameters:
     value: 10
   norm_type:
     value: 2
+  learning_rate:
+    value: 0.01
   delta: 
     value: 0.1
   min_delta: 

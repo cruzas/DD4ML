@@ -10,6 +10,7 @@ from torch.optim.optimizer import Optimizer
 
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.solvers.obs import OBS
+from dd4ml.utility import get_lssr1_tr_hparams
 from dd4ml.utility.optimizer_utils import solve_tr_first_order, solve_tr_second_order
 
 from .lsr1 import LSR1
@@ -17,6 +18,16 @@ from .lsr1 import LSR1
 
 class LSSR1_TR(Optimizer):
     __name__ = "LSSR1_TR"
+
+    @staticmethod
+    def setup_LSSR1_TR_hparams(cfg):
+        """
+        Setup hyperparameters for the LSSR1_TR optimizer based on the provided config.
+        This function extracts relevant parameters and returns them as a dictionary.
+        """
+        for k, v in get_lssr1_tr_hparams(cfg).items():
+            setattr(cfg, k, v)
+        return cfg
 
     def __init__(
         self,
@@ -72,7 +83,7 @@ class LSSR1_TR(Optimizer):
         self.nu_2 = nu_2
         self.nu_3 = nu_3
         self.nu_4 = nu_4
-        self.tol = tol
+        self.tol = float(tol)
         self.norm_type = norm_type
         self.c_1 = c_1
         self.c_2 = c_2
@@ -86,7 +97,7 @@ class LSSR1_TR(Optimizer):
         )
         device = first_param.device
         dtype = first_param.dtype
-
+        
         # Compute shapes and offsets to flatten all parameters into a single vector
         shapes: list[torch.Size] = []
         offsets = [0]
@@ -125,9 +136,6 @@ class LSSR1_TR(Optimizer):
             st["flat_gk"] = torch.zeros_like(st["flat_wk"])
             st["flat_vk"] = torch.zeros_like(st["flat_wk"])
         st["prev_grad"] = None
-
-        # Cache tolerance as tensor to avoid recreating each time
-        st["tol_tensor"] = torch.tensor(self.tol, device=device, dtype=dtype)
 
         # Instantiate OBS solver for trust-region subproblem
         self.obs = OBS()
@@ -258,7 +266,6 @@ class LSSR1_TR(Optimizer):
         narrowing the interval [alpha_lo, alpha_hi] until conditions are met
         or maximum iterations exceeded. Returns (alpha_j, loss, gradient).
         """
-        tol_tensor = self.state["tol_tensor"]
         for _ in range(max_iter):
             # Interpolate new trial alpha within [alpha_lo, alpha_hi]
             if _ == 0:
@@ -299,7 +306,7 @@ class LSSR1_TR(Optimizer):
                 alpha_lo, phi_lo, dphi_lo = alpha_j, phi_j, dphi_j
 
             # Terminate if interval is sufficiently small
-            if abs(alpha_hi - alpha_lo) < tol_tensor:
+            if abs(alpha_hi - alpha_lo) < self.tol:
                 break
 
         # If maximum iterations exceeded, return best lower bound
@@ -323,7 +330,6 @@ class LSSR1_TR(Optimizer):
         that satisfies both Armijo and curvature conditions.
         Returns chosen alpha, new loss, and new gradient.
         """
-        tol_tensor = self.state["tol_tensor"]
         alpha_prev = torch.tensor(0.0, device=wk.device)
         phi_prev = phi_0
         dphi_prev = dphi_0
@@ -403,7 +409,6 @@ class LSSR1_TR(Optimizer):
         Returns step size alpha, new loss, and new gradient.
         """
         alpha = alpha_0
-        tol_tensor = self.state["tol_tensor"]
         for _ in range(max_iter):
             phi_alpha, grad_alpha, dphi_alpha = self._evaluate_function_and_gradient(
                 wk, p, alpha, closure
@@ -413,7 +418,7 @@ class LSSR1_TR(Optimizer):
             if armijo_ok and curvature_ok:
                 return alpha, phi_alpha, grad_alpha
             alpha *= 0.5
-            if alpha < tol_tensor.item():
+            if alpha < self.tol.item():
                 break
         # If line search fails, return zero step
         return 0.0, phi_0, self._flat_grads_fn()
@@ -452,12 +457,18 @@ class LSSR1_TR(Optimizer):
 
         # Solve trust-region subproblem: second-order if memory available, otherwise first-order
         if sec and len(self.hess._S) > 0:
+            # pred = -(g*p + 0.5*p*B*p)
             p_star, pred = solve_tr_second_order(
                 g, gn, self.delta, self.hess, self.obs, self.tol
             )
         else:
+            # pred = -g*p
             p_star, pred = solve_tr_first_order(g, gn, self.delta, self.tol)
 
+        # Since pred is the classical predicted TR reduction, here we multiply it by -1 
+        # to abide by Q_k(p) specified in Equation (10) in the paper
+        pred *= -1
+    
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
         vk.mul_(self.mu).add_(wk - st["old_wk"])

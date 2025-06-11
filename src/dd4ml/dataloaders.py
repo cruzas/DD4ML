@@ -5,13 +5,8 @@ from typing import Iterator, List, Optional, Sequence
 import numpy as np
 import torch
 import torch.distributed as dist
-from torch.utils.data import (
-    BatchSampler,
-    DataLoader,
-    Dataset,
-    DistributedSampler,
-    Sampler,
-)
+from torch.utils.data import (BatchSampler, DataLoader, Dataset,
+                              DistributedSampler, Sampler)
 from torch.utils.data.distributed import DistributedSampler
 
 

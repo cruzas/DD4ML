@@ -36,7 +36,7 @@ def get_apts_hparams(config):
     }
 
 
-def get_lssr1_tr_hparams(config):
+def get_lssr1_tr_hparams(config):    
     return {
         "delta": config.delta,
         "min_delta": config.min_delta,
@@ -132,6 +132,9 @@ def get_asntr_hparams(config):
     """Return default hyperparameters for the ASNTR optimizer."""
     return {
         "device": config.device if hasattr(config, "device") else "cpu",
+        "learning_rate": (
+            config.learning_rate if hasattr(config, "learning_rate") else 0.01
+        ),
         "delta": config.delta,
         "max_delta": config.max_delta,
         "gamma": 1e-3,
@@ -144,8 +147,9 @@ def get_asntr_hparams(config):
         "tau_1": 0.5,
         "tau_2": 0.8,
         "tau_3": 2.0,
-        "C_1": 1.0,
-        "C_2": 100,
+        "norm_type": config.norm_type,
+        "c_1": 1.0,
+        "c_2": 100,
         "alpha": 1.1,
         "tol": config.tol,
     }
@@ -195,7 +199,7 @@ def solve_tr_second_order(
     device = gradient.device
     dtype = gradient.dtype
     delta = torch.tensor(trust_radius, device=device, dtype=dtype)
-    p = -obs_solver.solve_tr_subproblem(
+    p = obs_solver.solve_tr_subproblem(
         gradient, delta, lsr1_hessian.gamma, lsr1_hessian.Psi, lsr1_hessian.Minv
     )
     # predicted reduction = -(gᵀp + 0.5 pᵀ B p)

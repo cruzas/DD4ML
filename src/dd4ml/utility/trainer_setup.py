@@ -49,12 +49,13 @@ def get_config_model_and_trainer(args, wandb_config):
     optimizer_name = config_src["optimizer"]
 
     all_config = get_config(dataset_name, model_name, optimizer_name)
+    
     if wandb_config is not None:
         all_config.merge_from_dict(wandb_config)
     else:
         args.pop("sweep_config", None)
     all_config.merge_from_dict(args)
-
+    
     # Allow `subdomain_opt` as an alias for `loc_opt` in configuration files
     if hasattr(all_config.trainer, "subdomain_opt") and not hasattr(
         all_config.trainer, "loc_opt"
@@ -62,6 +63,7 @@ def get_config_model_and_trainer(args, wandb_config):
         all_config.trainer.loc_opt = all_config.trainer.subdomain_opt
         delattr(all_config.trainer, "subdomain_opt")
     all_config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
+    print(f"all_config tol type={type(all_config.trainer.tol)} after merging and cleaning up")
 
     # Instantiate dataset.
     dataset = dataset_factory.create(all_config.dataset_name, all_config.data)
@@ -190,14 +192,12 @@ def get_config_model_and_trainer(args, wandb_config):
 
         all_config.trainer = APTS_D.setup_APTS_hparams(all_config.trainer)
         all_config.trainer.apts_d = True
-        loc_rank = int(os.environ.get("LOCAL_RANK", 0))
-        device = get_device()
-        model.to(device)
+
         optimizer_obj = APTS_D(
             params=model.parameters(),
             model=model,
             criterion=criterion,
-            device=device,
+            device=get_device(),
             nr_models=all_config.model.num_subdomains,
             glob_opt=all_config.trainer.glob_opt,
             glob_opt_hparams=all_config.trainer.glob_opt_hparams,
@@ -218,14 +218,12 @@ def get_config_model_and_trainer(args, wandb_config):
 
         all_config.trainer = APTS_P.setup_APTS_hparams(all_config.trainer)
         loc_rank = int(os.environ.get("LOCAL_RANK", 0))
-        device = get_device()
 
-        model.to(device)
         optimizer_obj = APTS_P(
             params=model.parameters(),
             model=model,
             criterion=criterion,
-            device=device,
+            device=get_device(),
             nr_models=all_config.model.num_subdomains,
             glob_opt=all_config.trainer.glob_opt,
             glob_opt_hparams=all_config.trainer.glob_opt_hparams,
@@ -239,6 +237,34 @@ def get_config_model_and_trainer(args, wandb_config):
             tol=all_config.trainer.tol,
             **all_config.trainer.apts_params,
         )
+    elif optimizer_name == "lssr1_tr":
+        from dd4ml.optimizers.lssr1_tr import LSSR1_TR
+
+        all_config.trainer = LSSR1_TR.setup_LSSR1_TR_hparams(all_config.trainer)
+
+        optimizer_obj = LSSR1_TR(
+            params=model.parameters(),
+            lr=all_config.trainer.learning_rate,
+            delta=all_config.trainer.delta,
+            min_delta=all_config.trainer.min_delta,
+            max_delta=all_config.trainer.max_delta,
+            gamma=all_config.trainer.gamma,
+            second_order=all_config.trainer.glob_second_order,
+            mem_length=all_config.trainer.mem_length,
+            max_wolfe_iters=all_config.trainer.max_wolfe_iters,
+            mu=all_config.trainer.mu,
+            tau_1=all_config.trainer.tau_1,
+            tau_2=all_config.trainer.tau_2,
+            tau_3=all_config.trainer.tau_3,
+            nu_1=all_config.trainer.nu_1,
+            nu_2=all_config.trainer.nu_2,
+            nu_3=all_config.trainer.nu_3,
+            nu_4=all_config.trainer.nu_4,
+            tol=all_config.trainer.tol,
+            norm_type=all_config.trainer.norm_type,
+            sync=True,
+        )
+
     elif optimizer_name == "asntr":
         from dd4ml.optimizers.asntr import ASNTR
 
@@ -246,13 +272,25 @@ def get_config_model_and_trainer(args, wandb_config):
 
         optimizer_obj = ASNTR(
             params=model.parameters(),
-            model=model,
-            criterion=criterion,
             device=get_device(),
+            lr=all_config.trainer.learning_rate,
             delta=all_config.trainer.delta,
+            min_delta=all_config.trainer.min_delta,
             max_delta=all_config.trainer.max_delta,
+            gamma=all_config.trainer.gamma,
             second_order=all_config.trainer.glob_second_order,
             mem_length=all_config.trainer.mem_length,
+            eta=all_config.trainer.eta,
+            nu=all_config.trainer.nu,
+            eta_1=all_config.trainer.eta_1,
+            eta_2=all_config.trainer.eta_2,
+            tau_1=all_config.trainer.tau_1,
+            tau_2=all_config.trainer.tau_2,
+            tau_3=all_config.trainer.tau_3,
+            norm_type=all_config.trainer.norm_type,
+            c_1=all_config.trainer.c_1,
+            c_2=all_config.trainer.c_2,
+            alpha=all_config.trainer.alpha,
             tol=all_config.trainer.tol,
         )
 
