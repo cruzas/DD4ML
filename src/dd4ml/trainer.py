@@ -411,7 +411,8 @@ class Trainer:
                 batch_idx += 1
 
             # Adjust batch size if needed (checks done automatically within the function)
-            self._adjust_batch_size(self.loss)
+            if self.epoch_num > 0:
+                self._adjust_batch_size(self.loss)
 
             # Print progress within the epoch
             self.epoch_progress = 100.0 * (batch_idx + 1) / len(self.train_loader)

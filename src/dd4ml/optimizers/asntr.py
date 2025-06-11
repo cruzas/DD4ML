@@ -178,12 +178,18 @@ class ASNTR(Optimizer):
         gn = torch.norm(g, p=self.norm_type)
         if self.second_order and len(self.hess._S) > 0:
             print("(INFO) Using second-order ASNTR step.")
+            # pred = -(g*p + 0.5*p*B*p)
             step, pred_red = solve_tr_second_order(
                 g, gn, self.delta, self.hess, self.obs, self.tol
             )
         else:
             print("(INFO) Using first-order ASNTR step.")
+            # pred = -g*p
             step, pred_red = solve_tr_first_order(g, gn, self.delta, self.tol)
+
+        # Since pred is the classical predicted TR reduction, here we multiply it by -1 
+        # to abide by Q_k(p) specified in Equation (10) in the paper
+        pred *= -1
 
         # trial update
         self._unflatten_update(wk + step)

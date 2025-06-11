@@ -90,7 +90,7 @@ class OBS:
         if lambda_min > 0 and torch.norm(helpp) <= delta:
             pStar = self.ComputeSBySMW(gamma, g, PsiTg, Psi, Minv, PsiPsi)
             return pStar
-        elif lambda_min <= 0 and self.phiBar_f(-lambda_min, Lambda, a_j, delta) > 0:
+        elif lambda_min <= 0 and self.phiBar_f(-lambda_min, Lambda, a_j, delta) >= 0:
             sigmaStar = -lambda_min
             v = torch.zeros(sizeD + 1)
             idx_pseudo = torch.where(torch.abs(Lambda + sigmaStar) > self.tol)
