@@ -68,7 +68,8 @@ class Trainer:
         C.use_pmw = False
         C.loc_opt = None
         C.glob_opt = None
-        C.overlap = 0.33
+        C.overlap = 0.0
+        C.full_eval_freq = None
         return C
 
     def __init__(
@@ -315,6 +316,83 @@ class Trainer:
         else:
             self.run_by_iter()
 
+    @torch.no_grad()
+    def _eval_full_objective(self) -> float:
+        """
+        Evaluate f(w) = (1/n) Σ_i f_i(w) over the *entire* training set
+        without disturbing the main train_loader iterator.
+
+        Works for both cfg.use_pmw = {False, True}.
+        """
+        was_training = self.model.training
+        self.model.eval()
+
+        # ------------------------------------------------------------------ #
+        # 1.  Build an evaluation loader identical to train_loader
+        #     but independent of its iterator state.                         #
+        # ------------------------------------------------------------------ #
+        cfg = self.config
+        if cfg.use_pmw:
+            # same class as the training loader
+            eval_loader = GeneralizedDistributedDataLoader(
+                model_handler=cfg.model_handler,
+                dataset=self.train_dataset,
+                batch_size=self.current_batch_size,
+                shuffle=False,
+                overlap=0,
+                num_workers=cfg.num_workers,
+                pin_memory=True,
+            )
+        else:
+            eval_loader = DataLoader(
+                self.train_dataset,
+                batch_size=self.current_batch_size,
+                shuffle=False,
+                num_workers=cfg.num_workers,
+                pin_memory=True,
+            )
+
+        # ------------------------------------------------------------------ #
+        # 2.  Accumulate loss, being careful with pipeline parallel ranks.    #
+        # ------------------------------------------------------------------ #
+        total, n = 0.0, 0
+        crit = self.criterion
+
+        cond_std = not hasattr(self.model, "model_handler")
+        cond_d_a = (
+            hasattr(self.model, "model_handler")
+            and self.model.model_handler.is_last_stage()
+        )
+        cond_d_b = False
+        if not cond_std:  # identify the global rank that owns the last stage
+            last_stage_rank = self.model.model_handler.get_stage_ranks(
+                stage_name="last", mode="global"
+            )[0]
+            cond_d_b = dist.get_rank() == last_stage_rank
+
+        for x, y in eval_loader:
+            x, y = x.to(self.device), y.to(self.device)
+            out = self.model(x)
+            if not cond_std:               # pipeline → extract the shard
+                out = out[0]
+            if cond_std or (cond_d_a and cond_d_b):
+                loss = crit(out, y).item()
+                bs = y.size(0)
+                total += loss * bs
+                n += bs
+
+        # ------------------------------------------------------------------ #
+        # 3.  Reduce across ranks so every process sees the true objective.   #
+        # ------------------------------------------------------------------ #
+        if dist.is_initialized():
+            buf = torch.tensor([total, n], device=self.device, dtype=torch.float64)
+            dist.all_reduce(buf, op=dist.ReduceOp.SUM)
+            total, n = buf.tolist()
+
+        if was_training:
+            self.model.train()
+        return total / n
+
     def compute_epoch_loss(self):
         model, cfg = self.model, self.config
         model.train()
@@ -411,8 +489,7 @@ class Trainer:
                 batch_idx += 1
 
             # Adjust batch size if needed (checks done automatically within the function)
-            if self.epoch_num > 0:
-                self._adjust_batch_size(self.loss)
+            self._adjust_batch_size(self.loss)
 
             # Print progress within the epoch
             self.epoch_progress = 100.0 * (batch_idx + 1) / len(self.train_loader)
@@ -423,6 +500,10 @@ class Trainer:
             self.iter_num += 1
 
         tnow = time.time()
+        if self._lssr1_tr_present():
+            full_loss = self._eval_full_objective()
+            self._adjust_batch_size(full_loss)
+        
         self.epoch_dt = tnow - self.epoch_time
         self.epoch_time = tnow
 
