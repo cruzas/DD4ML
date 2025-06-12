@@ -13,21 +13,21 @@ def get_device(device=None):
     if device is not None:
         return device
     else:
-        if (
-            torch.backends.mps.is_available()
-            and torch.backends.mps.is_built()
-            and (
-                (dist.is_initialized() and dist.get_world_size() == 1)
-                or not dist.is_initialized()
-            )
-        ):
-            return torch.device("mps")
-        else:
-            return (
-                f"cuda:{torch.cuda.current_device()}"
-                if dist.get_backend() != "gloo"
-                else "cpu"
-            )
+        # if (
+        #     torch.backends.mps.is_available()
+        #     and torch.backends.mps.is_built()
+        #     and (
+        #         (dist.is_initialized() and dist.get_world_size() == 1)
+        #         or not dist.is_initialized()
+        #     )
+        # ):
+        #     return torch.device("mps")
+        # else:
+        return (
+            f"cuda:{torch.cuda.current_device()}"
+            if dist.get_backend() != "gloo"
+            else "cpu"
+        )
 
 
 def cross_entropy_transformers(logits, targets):

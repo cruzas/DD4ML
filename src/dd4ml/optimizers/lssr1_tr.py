@@ -97,7 +97,7 @@ class LSSR1_TR(Optimizer):
         )
         device = first_param.device
         dtype = first_param.dtype
-        
+
         # Compute shapes and offsets to flatten all parameters into a single vector
         shapes: list[torch.Size] = []
         offsets = [0]
@@ -167,7 +167,7 @@ class LSSR1_TR(Optimizer):
         if not (self.sync and self.world_size > 1):
             return value
         # Use float64 accumulation for precision
-        buf = value.detach().to(torch.float64)
+        buf = value.detach().to(torch.float32)
         dist.reduce(buf, dst=0, op=dist.ReduceOp.SUM)
         if self.rank == 0:
             buf /= self.world_size
@@ -465,10 +465,10 @@ class LSSR1_TR(Optimizer):
             # pred_red = -g*p
             p_star, pred_red = solve_tr_first_order(g, gn, self.delta, self.tol)
 
-        # Since pred_red is the classical pred_redicted TR reduction, here we multiply it by -1 
+        # Since pred_red is the classical pred_redicted TR reduction, here we multiply it by -1
         # to abide by Q_k(p) specified in Equation (10) in the paper
         pred_red *= -1
-    
+
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
         vk.mul_(self.mu).add_(wk - st["old_wk"])

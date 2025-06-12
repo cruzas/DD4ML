@@ -17,19 +17,11 @@ from torch.utils.data.distributed import DistributedSampler
 
 class OverlapBatchSampler(BatchSampler):
     """
-    Wrap any (index) sampler so that successive batches share a given
-    number or fraction of examples, while maintaining the same number of batches
-    as without overlap (but with larger batch sizes).
+    Successive batches share `overlap` examples **without**
+    changing the number of batches:
 
-    Parameters
-    ----------
-    base_sampler   : Sampler producing individual indices (e.g. RandomSampler
-                     or the internal sampler created by DistributedSampler).
-    batch_size     : Desired base batch size N (without overlap).
-    overlap        : If 0 < overlap < 1  → interpreted as a *fraction* of N.
-                     If overlap is an int ≥ 1 → interpreted as that many
-                     examples (capped at N-1).
-    drop_last      : Same semantics as torch BatchSampler.
+        stride = batch_size               # unique indices per step
+        size   = batch_size + overlap_sz  # actual minibatch length
     """
 
     def __init__(
@@ -44,60 +36,49 @@ class OverlapBatchSampler(BatchSampler):
         self.drop_last = drop_last
 
         if isinstance(overlap, float) and 0.0 < overlap < 1.0:
-            self.overlap_sz = int(round(overlap * batch_size))
+            self.overlap_sz = int(round(overlap * self.batch_size))
         elif isinstance(overlap, int) and overlap >= 1:
-            self.overlap_sz = min(overlap, batch_size - 1)
-        else:  # no overlap
+            self.overlap_sz = min(overlap, self.batch_size - 1)
+        else:
             self.overlap_sz = 0
 
-        # Calculate the effective batch size (new samples per batch)
-        self.effective_batch_size = self.batch_size - self.overlap_sz
-        if self.effective_batch_size <= 0:
-            raise ValueError("overlap ≥ batch_size, no progress!")
+        if self.overlap_sz >= self.batch_size:
+            raise ValueError("`overlap` must be smaller than `batch_size`")
 
-        # Calculate actual batch size (including overlap)
-        self.actual_batch_size = self.batch_size + self.overlap_sz
+    # --------------------------------------------------------------------- #
+    # Iteration
+    # --------------------------------------------------------------------- #
+    def __iter__(self):
+        idxs = list(self.base_sampler)  # one full pass over dataset
+        n = len(idxs)
+        stride = self.batch_size  # progress after every batch
+        size = self.batch_size + self.overlap_sz
 
-        self._prev_tail: List[int] = []  # keeps last overlap_sz indices
+        n_batches = n // stride if self.drop_last else math.ceil(n / stride)
 
-    def __iter__(self) -> Iterator[List[int]]:
-        self._prev_tail.clear()
-        acc: List[int] = []
+        for b in range(n_batches):
+            start = b * stride  # left edge of unique block
 
-        for idx in self.base_sampler:
-            acc.append(idx)
+            # --- unique part ------------------------------------------------
+            unique = idxs[start : start + stride]
+            if len(unique) < stride:  # wrap-around at epoch end
+                unique += idxs[: stride - len(unique)]
 
-            if len(acc) == self.effective_batch_size:
-                # prepend the stored tail from previous batch
-                batch = self._prev_tail + acc
+            # --- overlap part ----------------------------------------------
+            o_start = (start + stride) % n
+            o_end = o_start + self.overlap_sz
+            if o_end <= n:
+                overlap = idxs[o_start:o_end]
+            else:  # need to wrap
+                overlap = idxs[o_start:] + idxs[: o_end - n]
 
-                # For the first batch, we don't have overlap yet
-                if len(self._prev_tail) == 0:
-                    if len(batch) >= self.batch_size or not self.drop_last:
-                        yield batch
-                else:
-                    # For subsequent batches, yield the batch with overlap
-                    if len(batch) >= self.actual_batch_size or not self.drop_last:
-                        yield batch
+            yield unique + overlap  # length == size
 
-                # Store overlap for next batch
-                self._prev_tail = (
-                    batch[-self.overlap_sz :] if self.overlap_sz > 0 else []
-                )
-                acc = []
-
-        # handle last (possibly incomplete) batch
-        if acc and not self.drop_last:
-            final_batch = self._prev_tail + acc
-            yield final_batch
-
-    def __len__(self) -> int:
-        """
-        Returns the same number of batches as would be produced without overlap,
-        maintaining the original batch count but with larger batch sizes.
-        """
+    # --------------------------------------------------------------------- #
+    # Length (optional, but handy)
+    # --------------------------------------------------------------------- #
+    def __len__(self):
         n = len(self.base_sampler)
-        # Calculate number of batches as if there was no overlap
         return (
             n // self.batch_size if self.drop_last else math.ceil(n / self.batch_size)
         )

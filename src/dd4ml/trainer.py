@@ -97,16 +97,16 @@ class Trainer:
             self.device = config.device
 
         # In case we are on a Mac with MPS enabled, we can use it as a device
-        if (
-            self.device == "cpu"
-            and torch.backends.mps.is_available()
-            and torch.backends.mps.is_built()
-            and (
-                (dist.is_initialized() and dist.get_world_size() == 1)
-                or not dist.is_initialized()
-            )
-        ):
-            self.device = torch.device("mps")
+        # if (
+        #     self.device == "cpu"
+        #     and torch.backends.mps.is_available()
+        #     and torch.backends.mps.is_built()
+        #     and (
+        #         (dist.is_initialized() and dist.get_world_size() == 1)
+        #         or not dist.is_initialized()
+        #     )
+        # ):
+        #     self.device = torch.device("mps")
 
         self.model = self.model.to(self.device)
         # adaptive-batch state
@@ -387,7 +387,7 @@ class Trainer:
         # 3.  Reduce across ranks so every process sees the true objective.   #
         # ------------------------------------------------------------------ #
         if dist.is_initialized():
-            buf = torch.tensor([total, n], device=self.device, dtype=torch.float64)
+            buf = torch.tensor([total, n], device=self.device, dtype=torch.float32)
             dist.all_reduce(buf, op=dist.ReduceOp.SUM)
             total, n = buf.tolist()
 
@@ -412,6 +412,7 @@ class Trainer:
             curr_batch_count = batch_idx + 1
             batch_time_start = time.time()
             x, y = x.to(self.device), y.to(self.device)
+
             if self.epoch_num == 0:
                 first_closure = closure(
                     x,
