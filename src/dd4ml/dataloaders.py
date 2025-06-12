@@ -5,21 +5,27 @@ from typing import Iterator, List, Optional, Sequence
 import numpy as np
 import torch
 import torch.distributed as dist
-from torch.utils.data import (BatchSampler, DataLoader, Dataset,
-                              DistributedSampler, Sampler)
+from torch.utils.data import (
+    BatchSampler,
+    DataLoader,
+    Dataset,
+    DistributedSampler,
+    Sampler,
+)
 from torch.utils.data.distributed import DistributedSampler
 
 
 class OverlapBatchSampler(BatchSampler):
     """
     Wrap any (index) sampler so that successive batches share a given
-    number or fraction of examples.
+    number or fraction of examples, while maintaining the same number of batches
+    as without overlap (but with larger batch sizes).
 
     Parameters
     ----------
     base_sampler   : Sampler producing individual indices (e.g. RandomSampler
                      or the internal sampler created by DistributedSampler).
-    batch_size     : Desired batch size N.
+    batch_size     : Desired base batch size N (without overlap).
     overlap        : If 0 < overlap < 1  → interpreted as a *fraction* of N.
                      If overlap is an int ≥ 1 → interpreted as that many
                      examples (capped at N-1).
@@ -44,7 +50,15 @@ class OverlapBatchSampler(BatchSampler):
         else:  # no overlap
             self.overlap_sz = 0
 
-        self._prev_tail: List[int] = []  # keeps last `overlap_sz` indices
+        # Calculate the effective batch size (new samples per batch)
+        self.effective_batch_size = self.batch_size - self.overlap_sz
+        if self.effective_batch_size <= 0:
+            raise ValueError("overlap ≥ batch_size, no progress!")
+
+        # Calculate actual batch size (including overlap)
+        self.actual_batch_size = self.batch_size + self.overlap_sz
+
+        self._prev_tail: List[int] = []  # keeps last overlap_sz indices
 
     def __iter__(self) -> Iterator[List[int]]:
         self._prev_tail.clear()
@@ -53,26 +67,40 @@ class OverlapBatchSampler(BatchSampler):
         for idx in self.base_sampler:
             acc.append(idx)
 
-            if len(acc) == self.batch_size - self.overlap_sz:
+            if len(acc) == self.effective_batch_size:
                 # prepend the stored tail from previous batch
                 batch = self._prev_tail + acc
-                if len(batch) == self.batch_size:
-                    yield batch
-                elif not self.drop_last:
-                    yield batch  # shorter final batch
-                self._prev_tail = batch[-self.overlap_sz :]  # update tail
+
+                # For the first batch, we don't have overlap yet
+                if len(self._prev_tail) == 0:
+                    if len(batch) >= self.batch_size or not self.drop_last:
+                        yield batch
+                else:
+                    # For subsequent batches, yield the batch with overlap
+                    if len(batch) >= self.actual_batch_size or not self.drop_last:
+                        yield batch
+
+                # Store overlap for next batch
+                self._prev_tail = (
+                    batch[-self.overlap_sz :] if self.overlap_sz > 0 else []
+                )
                 acc = []
 
         # handle last (possibly incomplete) batch
         if acc and not self.drop_last:
-            yield self._prev_tail + acc
+            final_batch = self._prev_tail + acc
+            yield final_batch
 
-    def __len__(self) -> int:  # optional but nice to have
+    def __len__(self) -> int:
+        """
+        Returns the same number of batches as would be produced without overlap,
+        maintaining the original batch count but with larger batch sizes.
+        """
         n = len(self.base_sampler)
-        eff_bs = self.batch_size - self.overlap_sz
-        if eff_bs <= 0:
-            raise ValueError("overlap ≥ batch_size, no progress!")
-        return n // eff_bs if self.drop_last else math.ceil(n / eff_bs)
+        # Calculate number of batches as if there was no overlap
+        return (
+            n // self.batch_size if self.drop_last else math.ceil(n / self.batch_size)
+        )
 
 
 class MockDataset(Dataset):
@@ -168,7 +196,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
 
         tot_replicas = model_handler.tot_replicas
         num_stages = model_handler.num_stages
-        
+
         first_layer_ranks = model_handler.get_stage_ranks(
             stage_name="first", mode="global"
         )
