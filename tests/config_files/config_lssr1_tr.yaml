@@ -18,7 +18,7 @@ parameters:
   glob_second_order:
     value: True
   max_wolfe_iters:
-    value: 10
+    value: 20
   mem_length:
     value: 3
   max_iters:
@@ -52,4 +52,4 @@ parameters:
   batch_inc_factor:
     value: 1.5
   overlap:
-    value: 0.33
+    value: 0.1

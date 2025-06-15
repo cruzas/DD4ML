@@ -60,7 +60,7 @@ class Trainer:
         C.max_loc_iters = 3  # for APTS*
         C.glob_second_order = False  # for APTS*
         C.loc_second_order = False  # for APTS*
-        C.max_wolfe_iters = 10  # for APTS*
+        C.max_wolfe_iters = 20  # for APTS*
         C.gradient_accumulation = True  # for APTS*
         C.accumulation_steps = 1  # for APTS*
         C.mem_length = 3  # for TR methods
@@ -95,18 +95,6 @@ class Trainer:
             )
         else:
             self.device = config.device
-
-        # In case we are on a Mac with MPS enabled, we can use it as a device
-        # if (
-        #     self.device == "cpu"
-        #     and torch.backends.mps.is_available()
-        #     and torch.backends.mps.is_built()
-        #     and (
-        #         (dist.is_initialized() and dist.get_world_size() == 1)
-        #         or not dist.is_initialized()
-        #     )
-        # ):
-        #     self.device = torch.device("mps")
 
         self.model = self.model.to(self.device)
         # adaptive-batch state

@@ -40,7 +40,7 @@ class LSSR1_TR(Optimizer):
         gamma: float = 1e-3,
         second_order: bool = True,
         mem_length: int = 10,
-        max_wolfe_iters: int = 10,
+        max_wolfe_iters: int = 20,
         mu: float = 0.9,
         tau_1: float = 0.1,
         tau_2: float = 0.25,
@@ -330,10 +330,12 @@ class LSSR1_TR(Optimizer):
         that satisfies both Armijo and curvature conditions.
         Returns chosen alpha, new loss, and new gradient.
         """
-        alpha_prev = torch.tensor(0.0, device=wk.device)
+        alpha_prev = torch.tensor(alpha_0, device=wk.device)
         phi_prev = phi_0
         dphi_prev = dphi_0
-        alpha_i = torch.tensor(alpha_0, device=wk.device)
+
+        # Choose the halfway value between 0 and alpha_max
+        alpha_i = torch.tensor(0.5 * alpha_max, device=wk.device, dtype=wk.dtype)
 
         for i in range(max_iter):
             phi_i, grad_i, dphi_i = self._evaluate_function_and_gradient(
@@ -341,7 +343,7 @@ class LSSR1_TR(Optimizer):
             )
 
             cond1 = phi_i > phi_0 + c_1 * alpha_i * dphi_0
-            cond2 = (i > 0) and (phi_i >= phi_prev)
+            cond2 = (i > 1) and (phi_i >= phi_prev)
             # If either condition triggers, enter zoom phase
             if cond1 or cond2:
                 return self._zoom(
@@ -453,6 +455,11 @@ class LSSR1_TR(Optimizer):
             yk = g - st["prev_grad"]
             if sk.norm() > self.tol and yk.norm() > self.tol:
                 self.hess.update_memory(sk, yk)
+                den = sk.dot(yk)
+                if den > self.tol:
+                    self.hess.gamma = (yk.dot(yk) / den).to(self.hess.device)
+                    self.gamma = self.hess.gamma
+
         st["old_wk"], st["prev_grad"] = wk.clone().detach(), g.clone().detach()
 
         # Solve trust-region subproblem: second-order if memory available, otherwise first-order
@@ -489,6 +496,12 @@ class LSSR1_TR(Optimizer):
         # Prepare line search with initial loss and directional derivative
         phi_0 = loss
         dphi_0 = g.dot(p_comb)
+
+        # Assumption 3 in paper
+        if dphi_0.item() > 0:
+            p_comb *= -1
+            pred_red *= -1
+            dphi_0 *= -1
 
         # Perform strong Wolfe line search to compute step length alpha
         alpha, new_loss, new_g = self._strong_wolfe_line_search(
