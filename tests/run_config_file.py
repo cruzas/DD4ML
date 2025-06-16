@@ -7,16 +7,9 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import yaml
 
-from dd4ml.utility import (
-    broadcast_dict,
-    detect_environment,
-    dprint,
-    find_free_port,
-    generic_run,
-    is_main_process,
-    prepare_distributed_environment,
-    set_seed,
-)
+from dd4ml.utility import (broadcast_dict, detect_environment, dprint,
+                           find_free_port, generic_run, is_main_process,
+                           prepare_distributed_environment, set_seed)
 
 try:
     import wandb
@@ -227,7 +220,7 @@ def main(
         thing_to_print = "lr"
 
         dprint(
-            f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, {thing_to_print}: {delta:.6e}"
+            f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, {thing_to_print}: {delta:.6e}"
         )
 
         if rank == 0 and use_wandb:
@@ -238,6 +231,7 @@ def main(
                     "loss": trainer.loss,
                     "accuracy": trainer.accuracy,
                     "running_time": trainer.running_time,
+                    "grad_evals": trainer.grad_evals,
                 }
             )
         if save_model:
@@ -261,12 +255,14 @@ def main(
                     "iter": trainer.iter_num,
                     "loss": trainer.loss,
                     "running_time": trainer.running_time,
+                    "grad_evals": trainer.grad_evals,
                 }
             )
 
         if trainer.iter_num % 100 == 0:
+            perplexity = trainer.compute_test_perplexity()
             dprint(
-                f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss:.5f}"
+                f"Iter {trainer.iter_num}, g-evals: {trainer.grad_evals}, time {trainer.iter_dt * 1000:.2f}ms, loss {trainer.loss:.5f}"
             )
         if save_model:
             proj = wandb_config.get("project", trial_args["project"])

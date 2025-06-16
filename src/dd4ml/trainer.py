@@ -72,6 +72,7 @@ class Trainer:
         C.overlap = 0.0
         C.full_eval_freq = None
         C.full_eval_mode = "after_epoch"
+        self.grad_evals = 0
         return C
 
     def __init__(
@@ -122,6 +123,24 @@ class Trainer:
     def trigger_callbacks(self, onevent: str):
         for callback in self.callbacks.get(onevent, []):
             callback(self)
+
+    def _get_num_batches(self):
+        """Return the number of batches in the current train_loader."""
+        return len(self.train_loader)
+
+    def _wrap_grad_counter(self, func):
+        """
+        Return a closure that increments grad_evals by 1/num_batches each call,
+        so that after num_batches batches, grad_evals += 1.
+        """
+        num_batches = None
+
+        def wrapper(*args, **kwargs):
+            num_batches = len(self.train_loader)
+            self.grad_evals += 1.0 / num_batches
+            return func(*args, **kwargs)
+
+        return wrapper
 
     def setup_data_loaders(self):
         """(Re)create train and test loaders using current_batch_size"""
@@ -219,7 +238,7 @@ class Trainer:
         return lssr1_tr_is_glob_opt or lssr1_tr_is_opt
 
     def _stay_here(self) -> bool:
-        """Return True if either optimiser requests to keep the current batch,
+        """Return True if either optimizer requests to keep the current batch,
         and reset both flags so they may be set again later."""
         stay = False
 
@@ -235,7 +254,7 @@ class Trainer:
         return stay
 
     def _inc_batch_size(self) -> bool:
-        """Return True if either optimiser requests to increase the batch size,
+        """Return True if either optimizer requests to increase the batch size,
         and reset both flags so they may be set again later."""
         inc = False
 
@@ -290,6 +309,15 @@ class Trainer:
                 if isinstance(p, WeightParallelizedTensor):
                     p.invalidate_shape_cache()
         self.last_loss = loss
+
+    def _compute_hNk(self):
+        """Compute the hNk value for the current batch size."""
+        if self._asntr_present():
+            # hNk = (N - k) / N, where N is the total number of samples and k is the current batch size
+            return (len(self.train_dataset) - self.current_batch_size) / len(
+                self.train_dataset
+            )
+        return None
 
     def sample_control_batch(self, batch_size: int = 1):
         """Randomly sample a small control batch from the training dataset."""
@@ -391,7 +419,8 @@ class Trainer:
         self.iter_num = 0
         data_iter = iter(self.train_loader)
         batch_idx = 0
-        while batch_idx < len(self.train_loader):
+        num_batches = len(self.train_loader)
+        while batch_idx < num_batches:
             try:
                 x, y = next(data_iter)
             except StopIteration:
@@ -400,6 +429,10 @@ class Trainer:
             curr_batch_count = batch_idx + 1
             batch_time_start = time.time()
             x, y = x.to(self.device), y.to(self.device)
+            if self._asntr_present():
+                x_d, y_d = self.sample_control_batch(1)
+            else:
+                x_d, y_d = None, None
 
             if self.epoch_num == 0:
                 first_closure = closure(
@@ -421,6 +454,8 @@ class Trainer:
                     compute_grad=True,
                     grad_norm_clip=cfg.grad_norm_clip,
                 )
+                if not hasattr(self.optimizer, "grad_evals"):
+                    general_closure = self._wrap_grad_counter(general_closure)
                 step_args = {}
                 sig = inspect.signature(self.optimizer.step).parameters
                 # Check if final_subdomain_closure is part of self.optimizer arguments
@@ -440,35 +475,40 @@ class Trainer:
                     k in self.optimizer.__class__.__name__.lower()
                     for k in ("apts_d", "apts_p")
                 ):
-                    x_d, y_d = self.sample_control_batch(1)
                     step_args = {
                         "inputs": x,
                         "labels": y,
                         "inputs_d": x_d,
                         "labels_d": y_d,
-                        "hNk": (len(self.train_dataset) - self.current_batch_size)
-                        / len(self.train_dataset),
+                        "hNk": self._compute_hNk(),
                     }
                 elif "asntr" in self.optimizer.__class__.__name__.lower():
-                    x_d, y_d = self.sample_control_batch(1)
+                    closure_d = closure(
+                        x_d,
+                        y_d,
+                        criterion=criterion,
+                        model=model,
+                        data_chunks_amount=cfg.data_chunks_amount,
+                        compute_grad=True,
+                        grad_norm_clip=cfg.grad_norm_clip,
+                    )
+
+                    if not hasattr(self.optimizer, "grad_evals"):
+                        closure_d = self._wrap_grad_counter(closure_d)
+
                     step_args = {
                         "closure_main": general_closure,
-                        "closure_d": closure(
-                            x_d,
-                            y_d,
-                            criterion=criterion,
-                            model=model,
-                            data_chunks_amount=cfg.data_chunks_amount,
-                            compute_grad=True,
-                            grad_norm_clip=cfg.grad_norm_clip,
-                        ),
-                        "hNk": (len(self.train_dataset) - self.current_batch_size)
-                        / len(self.train_dataset),
+                        "closure_d": closure_d,
+                        "hNk": self._compute_hNk(),
                     }
                 else:
                     step_args = {"closure": general_closure}
 
                 result = self.optimizer.step(**step_args)
+                self.grad_evals += (
+                    getattr(self.optimizer, "grad_evals", 0)
+                ) / num_batches
+
                 # scalar Tensor or Python float → batch_loss = result
                 if isinstance(result, numbers.Number) or (
                     torch.is_tensor(result) and result.ndim == 0
@@ -494,7 +534,7 @@ class Trainer:
                 self._adjust_batch_size(self.loss)
 
             # Print progress within the epoch
-            self.epoch_progress = 100.0 * (batch_idx + 1) / len(self.train_loader)
+            self.epoch_progress = 100.0 * (batch_idx + 1) / num_batches
             self.batch_dt = time.time() - batch_time_start
             self.iter_dt = self.batch_dt
             self.running_time = time.time() - self.total_start_time
@@ -568,77 +608,173 @@ class Trainer:
         self.total_start_time = time.time()
         self.iter_time = time.time()
         self.data_iter = iter(self.train_loader)
+        # Compute the number of batches in the train_loader
+        num_batches = self._get_num_batches()
+
         for self.iter_num in range(
             cfg.max_iters + 1 if cfg.max_iters is not None else float("inf")
         ):
-            # fetch the next batch (x, y) and re-init iterator if needed
+            # fetch next batch
             try:
                 batch = next(self.data_iter)
             except StopIteration:
                 self.data_iter = iter(self.train_loader)
                 batch = next(self.data_iter)
-            batch = [t.to(self.device) for t in batch]
-            x, y = batch
 
+            x, y = (t.to(self.device) for t in batch)
+            if self._asntr_present():
+                x_d, y_d = self.sample_control_batch(1)
+            else:
+                x_d, y_d = None, None
+
+            # first‐step initialisation
             if self.iter_num == 0:
                 first_closure = closure(
                     x,
                     y,
                     self.criterion,
-                    self.model,
+                    model,
                     data_chunks_amount=cfg.data_chunks_amount,
                     compute_grad=False,
                 )
                 self.loss = first_closure()
             else:
-                self.optimizer.zero_grad()
                 general_closure = closure(
                     x,
                     y,
                     criterion=self.criterion,
-                    model=self.model,
+                    model=model,
                     data_chunks_amount=cfg.data_chunks_amount,
                     compute_grad=True,
                     grad_norm_clip=cfg.grad_norm_clip,
                 )
-                # Check if self.optimizer.step requires final_subdomain_closure
-                if (
-                    "final_subdomain_closure"
-                    in inspect.signature(self.optimizer.step).parameters
-                ):  # for APTS
+                if not hasattr(self.optimizer, "grad_evals"):
+                    general_closure = self._wrap_grad_counter(general_closure)
+
+                # build step_args
+                step_args = {}
+                sig = inspect.signature(self.optimizer.step).parameters
+
+                if "final_subdomain_closure" in sig:
 
                     def final_subdomain_closure(outputs, y=y):
-                        y_chunks = y.chunk(len(outputs))
-                        loss = []
-                        for i, o in enumerate(outputs):
-                            loss.append(self.criterion(o, y_chunks[i]))
-                        return loss
+                        ys = y.chunk(len(outputs))
+                        return [self.criterion(o, yc) for o, yc in zip(outputs, ys)]
 
-                    self.loss = self.optimizer.step(
-                        closure=general_closure,
-                        final_subdomain_closure=final_subdomain_closure,
-                    )
-                elif (
-                    "apts_d" in self.optimizer.__class__.__name__.lower()
-                    or "apts_p" in self.optimizer.__class__.__name__.lower()
+                    step_args = {
+                        "closure": general_closure,
+                        "final_subdomain_closure": final_subdomain_closure,
+                    }
+
+                elif any(
+                    k in self.optimizer.__class__.__name__.lower()
+                    for k in ("apts_d", "apts_p")
                 ):
-                    self.loss += self.optimizer.step(inputs=x, labels=y)
-                elif "asntr" in self.optimizer.__class__.__name__.lower():
-                    x_d, y_d = self.sample_control_batch(1)
-                    self.loss += self.optimizer.step(
-                        inputs=x,
-                        labels=y,
-                        inputs_d=x_d,
-                        labels_d=y_d,
-                    )
-                else:
-                    self.loss = self.optimizer.step(closure=general_closure)
+                    step_args = {
+                        "inputs": x,
+                        "labels": y,
+                        "inputs_d": x_d,
+                        "labels_d": y_d,
+                        "hNk": self._compute_hNk(),
+                    }
 
+                elif "asntr" in self.optimizer.__class__.__name__.lower():
+                    closure_d = closure(
+                        x_d,
+                        y_d,
+                        criterion=self.criterion,
+                        model=model,
+                        data_chunks_amount=cfg.data_chunks_amount,
+                        compute_grad=True,
+                        grad_norm_clip=cfg.grad_norm_clip,
+                    )
+                    if not hasattr(self.optimizer, "grad_evals"):
+                        closure_d = self._wrap_grad_counter(closure_d)
+                    step_args = {
+                        "inputs": x,
+                        "labels": y,
+                        "closure_main": general_closure,
+                        "closure_d": closure_d,
+                        "inputs_d": x_d,
+                        "labels_d": y_d,
+                        "hNk": self._compute_hNk(),
+                    }
+
+                else:
+                    step_args = {"closure": general_closure}
+
+                # perform optimization step
+                result = self.optimizer.step(**step_args)
+                self.grad_evals += (
+                    getattr(self.optimizer, "grad_evals", 0)
+                ) / num_batches
+
+                # extract loss
+                if isinstance(result, numbers.Number) or (
+                    torch.is_tensor(result) and result.ndim == 0
+                ):
+                    self.loss = result
+                else:
+                    self.loss, *_ = result
+
+            # possibly repeat batch
+            if self._stay_here():
+                dprint("Staying on batch.")
+                self.data_iter = chain([(x, y)], self.data_iter)
+
+            # adaptive batch‐size
+            if self._asntr_present() or self._lssr1_tr_present():
+                self._adjust_batch_size(self.loss)
+
+            # timing & callbacks
             tnow = time.time()
             self.iter_dt = tnow - self.iter_time
             self.running_time = tnow - self.total_start_time
             self.trigger_callbacks("on_batch_end")
             self.iter_time = tnow
 
-    def compute_perplexity(self):
-        pass
+    @torch.no_grad()
+    def compute_test_perplexity(self):
+        """Compute the model's perplexity on the test set (supports distributed/pipeline parallel)."""
+        model = self.model
+        model.eval()
+
+        total_loss = 0.0
+        total_tokens = 0
+
+        # Determine when to accumulate (last pipeline stage or standard model)
+        cond_std = not hasattr(model, "model_handler")
+        cond_d_a = (
+            hasattr(model, "model_handler") and model.model_handler.is_last_stage()
+        )
+        cond_d_b = False
+        if not cond_std:
+            last_stage_rank = model.model_handler.get_stage_ranks(
+                stage_name="last", mode="global"
+            )[0]
+            cond_d_b = dist.get_rank() == last_stage_rank
+
+        for x, y in self.test_loader:
+            x, y = x.to(self.device), y.to(self.device)
+            outputs = model(x)
+            if not cond_std:
+                outputs = outputs[0]
+
+            if cond_std or (cond_d_a and cond_d_b):
+                # Flatten logits and targets
+                logits = outputs.view(-1, outputs.size(-1))
+                targets = y.view(-1)
+                loss = self.criterion(logits, targets)
+                total_loss += loss.item() * targets.numel()
+                total_tokens += targets.numel()
+
+        # Aggregate across all ranks
+        if dist.is_initialized():
+            buf = torch.tensor(
+                [total_loss, total_tokens], device=self.device, dtype=torch.float32
+            )
+            dist.all_reduce(buf, op=dist.ReduceOp.SUM)
+            total_loss, total_tokens = buf.tolist()
+
+        model.train()
+        return math.exp(total_loss / total_tokens) if total_tokens > 0 else float("inf")

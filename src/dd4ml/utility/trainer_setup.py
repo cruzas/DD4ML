@@ -49,13 +49,13 @@ def get_config_model_and_trainer(args, wandb_config):
     optimizer_name = config_src["optimizer"]
 
     all_config = get_config(dataset_name, model_name, optimizer_name)
-    
+
     if wandb_config is not None:
         all_config.merge_from_dict(wandb_config)
     else:
         args.pop("sweep_config", None)
     all_config.merge_from_dict(args)
-    
+
     # Allow `subdomain_opt` as an alias for `loc_opt` in configuration files
     if hasattr(all_config.trainer, "subdomain_opt") and not hasattr(
         all_config.trainer, "loc_opt"
@@ -63,7 +63,9 @@ def get_config_model_and_trainer(args, wandb_config):
         all_config.trainer.loc_opt = all_config.trainer.subdomain_opt
         delattr(all_config.trainer, "subdomain_opt")
     all_config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
-    print(f"all_config tol type={type(all_config.trainer.tol)} after merging and cleaning up")
+    print(
+        f"all_config tol type={type(all_config.trainer.tol)} after merging and cleaning up"
+    )
 
     # Instantiate dataset.
     dataset = dataset_factory.create(all_config.dataset_name, all_config.data)
@@ -298,7 +300,15 @@ def get_config_model_and_trainer(args, wandb_config):
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
     # Set training schedule based on dataset.
-    all_config.trainer.run_by_epoch = not ("shakespeare" in all_config.dataset_name)
+    # all_config.trainer.run_by_epoch = not ("shakespeare" in all_config.dataset_name)
+
+    # Check if cnn, ffnn, or resnet are substrings in the model name in lower case to determine whether to run by epoch or not
+    if (
+        "cnn" in all_config.model.model_class.__name__.lower()
+        or "ffnn" in all_config.model.model_class.__name__.lower()
+        or "resnet" in all_config.model.model_class.__name__.lower()
+    ):
+        all_config.trainer.run_by_epoch = False
 
     trainer = Trainer(
         all_config.trainer, model, optimizer_obj, criterion, dataset, test_dataset

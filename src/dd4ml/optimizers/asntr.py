@@ -187,7 +187,7 @@ class ASNTR(Optimizer):
             # pred_red = -g*p
             step, pred_red = solve_tr_first_order(g, gn, self.delta, self.tol)
 
-        # Since pred_red is the classical predicted TR reduction, here we multiply it by -1 
+        # Since pred_red is the classical predicted TR reduction, here we multiply it by -1
         # to abide by Q_k(p) specified in Equation (10) in the paper
         pred_red *= -1
 
