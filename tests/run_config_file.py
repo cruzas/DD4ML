@@ -7,9 +7,16 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import yaml
 
-from dd4ml.utility import (broadcast_dict, detect_environment, dprint,
-                           find_free_port, generic_run, is_main_process,
-                           prepare_distributed_environment, set_seed)
+from dd4ml.utility import (
+    broadcast_dict,
+    detect_environment,
+    dprint,
+    find_free_port,
+    generic_run,
+    is_main_process,
+    prepare_distributed_environment,
+    set_seed,
+)
 
 try:
     import wandb
@@ -27,7 +34,7 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--optimizer", type=str, default="apts_d", help="Optimizer name"
+        "--optimizer", type=str, default="lssr1_tr", help="Optimizer name"
     )
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
@@ -72,15 +79,13 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset_name", type=str, default="mnist", help="Dataset name"
     )
-    parser.add_argument("--overlap", type=float, default=0.01, help="Overlap factor")
-    parser.add_argument(
-        "--model_name", type=str, default="simple_resnet", help="Model name"
-    )
+    parser.add_argument("--overlap", type=float, default=0.33, help="Overlap factor")
+    parser.add_argument("--model_name", type=str, default="nanogpt", help="Model name")
     parser.add_argument(
         "--criterion", type=str, default="cross_entropy", help="Criterion name"
     )
     parser.add_argument(
-        "--learning_rate", type=float, default=0.01, help="Learning rate"
+        "--learning_rate", type=float, default=1.0, help="Learning rate"
     )
     parser.add_argument("--delta", type=float, default=0.01, help="Trust-region radius")
     parser.add_argument(
@@ -119,23 +124,6 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     temp_args, _ = parser.parse_known_args()
-    # if "apts" in temp_args.sweep_config.lower():
-    # parser.add_argument(
-    #     "--glob_opt",
-    #     type=str,
-    #     default="TR",
-    #     help="Global optimizer",
-    # )
-    # parser.add_argument(
-    #     "--loc_opt", type=str, default="SGD", help="Local optimizer"
-    # )
-    # parser.add_argument(
-    #     "--max_loc_iters",
-    #     type=int,
-    #     default=3,
-    #     help="Max iterations for local optimizer",
-    # )
-
     return parser.parse_args()
 
 

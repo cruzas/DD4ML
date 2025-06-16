@@ -36,11 +36,11 @@ parameters:
   max_delta:
     value: 10.0
   dataset_name:
-    value: "mnist"
+    value: "tinyshakespeare"
   model_name:
-    value: "simple_cnn"
+    value: "nanogpt"
   criterion:
-    value: "cross_entropy"
+    value: "cross_entropy_transformers"
   gradient_accumulation:
     value: True
   accumulation_steps:

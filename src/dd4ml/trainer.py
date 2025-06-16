@@ -72,7 +72,6 @@ class Trainer:
         C.overlap = 0.0
         C.full_eval_freq = None
         C.full_eval_mode = "after_epoch"
-        self.grad_evals = 0
         return C
 
     def __init__(
@@ -102,6 +101,7 @@ class Trainer:
         self.current_batch_size = config.batch_size
         self.max_batch_size_reached = False
         self.last_loss = float("inf")
+        self.grad_evals = 0.0
 
         # timing
         self.total_start_time = 0.0  # for computing the total running time

@@ -72,8 +72,7 @@ MODEL_MAP = {
     "simple_cnn": ("dd4ml.models.cnn.simple_cnn", "SimpleCNN"),
     "big_cnn": ("dd4ml.models.cnn.big_cnn", "BigCNN"),
     "simple_resnet": ("dd4ml.models.resnet.simple_resnet", "SimpleResNet"),
-    "mingpt": ("dd4ml.models.gpt.mingpt.model", "GPT"),
-    "tinyllama": 
+    "nanogpt": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
 }
 
 CRITERION_MAP = {
