@@ -36,7 +36,7 @@ class Trainer:
         C.num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
         # training schedule
         C.epochs = 3
-        C.run_by_epoch = False  # if False, run by iteration instead of epochs, typically for transformer networks
+        C.run_by_epoch = True  # if False, run by iteration instead of epochs, typically for transformer networks
         C.max_iters = 1000
         # optimizer
         C.learning_rate = 1e-3

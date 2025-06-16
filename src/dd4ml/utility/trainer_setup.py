@@ -308,6 +308,8 @@ def get_config_model_and_trainer(args, wandb_config):
         or "ffnn" in all_config.model.model_class.__name__.lower()
         or "resnet" in all_config.model.model_class.__name__.lower()
     ):
+        all_config.trainer.run_by_epoch = True
+    else:
         all_config.trainer.run_by_epoch = False
 
     trainer = Trainer(
