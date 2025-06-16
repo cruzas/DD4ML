@@ -5,15 +5,18 @@ current_dir=$(pwd)
 script="run_config_file.py" # Python script to run
 
 # --- General parameter settings ---#
-optimizer="asntr"
+optimizer="lssr1_tr"
 dataset="mnist"
 batch_sizes=(10000)
-model="simple_ffnn"
+model="simple_cnn"
 criterion="cross_entropy"
 epochs=20
 trials=1
 num_subd_arr=(1) # For data-parallel executions
-batch_inc_factor=1.25
+batch_inc_factor=1.5
+overlap=0.01
+mem_length=3
+max_wolfe_iters=20
 
 # --- Optimizer-specific settings ---#
 use_pmw="false"
@@ -101,10 +104,19 @@ for num_stages in "${num_stages_arr[@]:-1}"; do
                     update_config "criterion" "${criterion}"
                     update_config "epochs" "${epochs}"
                     update_config "num_subdomains" "${num_subd}"
+                    update_config "batch_inc_factor" "${batch_inc_factor}"
+                    update_config "overlap" "${overlap}"
+                    update_config "optimizer" "${optimizer}"
 
                     if [[ "$use_pmw" == "true" ]]; then
                         update_config "num_stages" "${num_stages}"
                         update_config "num_replicas_per_subdomain" "${num_rep}"
+                    fi
+
+                    # Check that optimize is not SGD or Adam
+                    if [[ "$optimizer" != "sgd" && "$optimizer" != "adam" ]]; then
+                        update_config "mem_length" "${mem_length}"
+                        update_config "max_wolfe_iters" "${max_wolfe_iters}"
                     fi
 
                     # Check if gradient accumulation is enabled

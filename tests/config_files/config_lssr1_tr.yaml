@@ -34,7 +34,7 @@ parameters:
   min_delta:
     value: 0.001
   max_delta:
-    value: 2.0
+    value: 10.0
   dataset_name:
     value: "mnist"
   model_name:
@@ -52,4 +52,4 @@ parameters:
   batch_inc_factor:
     value: 1.5
   overlap:
-    value: 0.1
+    value: 0.33
