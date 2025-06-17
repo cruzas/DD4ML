@@ -61,5 +61,5 @@ parameters:
     value: 10
   glob_opt:
     value: "lssr1_tr"
-  subdomain_opt:
+  loc_opt:
     value: "tr"

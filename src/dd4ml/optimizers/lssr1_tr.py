@@ -478,6 +478,10 @@ class LSSR1_TR(Optimizer):
 
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
+        # Print shapes
+        print("vk.mul_(self.mu) shape:", vk.mul_(self.mu).shape)
+        print("wk - st['old_wk'] shape:", (wk - st["old_wk"]).shape)
+        
         vk.mul_(self.mu).add_(wk - st["old_wk"])
         vk_norm_sq = vk.dot(vk)
         if vk_norm_sq > 0.0:

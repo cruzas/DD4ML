@@ -5,7 +5,7 @@ current_dir=$(pwd)
 script="run_config_file.py" # Python script to run
 
 # --- General parameter settings ---#
-optimizer="apts_d"
+optimizer="apts_ip"
 dataset="tinyshakespeare"
 model="nanogpt"
 trials=1
@@ -36,9 +36,6 @@ fi
 use_pmw="false"
 if [[ "$optimizer" == "apts_ip" ]]; then
     use_pmw="true"
-fi
-
-if [[ "$use_pmw" == "true" ]]; then
     num_subd_arr=(1) # For data-parallel executions
     num_stages_arr=(2)
     num_rep_arr=(1)

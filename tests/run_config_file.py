@@ -237,7 +237,7 @@ def main(
             )
 
     def batch_end_callback(
-        trainer, save_model: bool = True, save_frequency: int = 500
+        trainer, save_model: bool = True, save_frequency: int = 10000
     ) -> None:
         if trainer.iter_num % 50 == 0:
             if rank == 0 and use_wandb:
