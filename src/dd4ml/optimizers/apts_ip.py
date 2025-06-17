@@ -6,13 +6,13 @@ class APTS_IP(APTS_Base):
 
     @staticmethod
     def setup_APTS_hparams(config):
-        loc_opts = {
+        loc_map = {
             "adam": torch.optim.Adam,
             "adamw": torch.optim.AdamW,
             "sgd": torch.optim.SGD,
         }
         try:
-            config.loc_opt = loc_opts[config.loc_opt.lower()]
+            config.loc_opt = loc_map[config.loc_opt.lower()]
         except KeyError:
             raise ValueError(f"Unknown subdomain optimizer: {config.loc_opt}")
 
@@ -34,12 +34,12 @@ class APTS_IP(APTS_Base):
             except KeyError:
                 raise ValueError(f"Unknown glob_opt: {config.glob_opt}")
             config.glob_opt_hparams = hp_fn(config)
-        else:
-            config.glob_opt, config.glob_opt_hparams = (
-                (LSSR1_TR, get_lssr1_tr_hparams(config))
-                if config.glob_second_order
-                else (TR, get_tr_hparams(config))
-            )
+        # else:
+        #     config.glob_opt, config.glob_opt_hparams = (
+        #         (LSSR1_TR, get_lssr1_tr_hparams(config))
+        #         if config.glob_second_order
+        #         else (TR, get_tr_hparams(config))
+        #     )
         # Disable gradient broadcast in the global optimizer as each rank
         # holds only a shard of the model when running APTS_IP.
         config.glob_opt_hparams["sync"] = False

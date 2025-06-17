@@ -26,7 +26,7 @@ parameters:
   norm_type:
     value: inf
   max_loc_iters:
-    value: 3
+    value: 5
   max_glob_iters:
     value: 1
   max_iters:
@@ -56,10 +56,10 @@ parameters:
   batch_inc_factor:
     value: 2.0
   mem_length:
-    value: 3
+    value: 5
   max_wolfe_iters:
     value: 10
   glob_opt:
-    value: "lssr1_tr"
+    value: "tr"
   loc_opt:
     value: "sgd"

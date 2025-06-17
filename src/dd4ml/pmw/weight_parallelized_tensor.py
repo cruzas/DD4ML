@@ -165,7 +165,7 @@ class WeightParallelizedTensor(BasePMWModel):
         )
         local_dp = local_dp.to(device)
         dist.all_reduce(local_dp, group=self.master_group, op=dist.ReduceOp.SUM)
-        return local_dp.item()
+        return local_dp
 
     def __add__(self, other):
         if isinstance(other, WeightParallelizedTensor):

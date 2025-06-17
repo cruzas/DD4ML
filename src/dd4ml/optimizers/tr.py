@@ -55,10 +55,9 @@ class TR(Optimizer):
 
         # Optional second-order support
         if self.second_order:
-            tol = self.tol
             mem_len = self.mem_length
             device = self.ps[0].device
-            self.hess = LSR1(1.0, mem_len, device, tol)
+            self.hess = LSR1(gamma=1.0, memory_length=mem_len, device=device, tol=self.tol)
             self.obs = OBS()
         else:
             self.hess = None  # type: ignore

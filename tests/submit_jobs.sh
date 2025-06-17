@@ -10,7 +10,7 @@ dataset="tinyshakespeare"
 model="nanogpt"
 trials=1
 num_subd_arr=(1) # For data-parallel executions
-mem_length=3
+mem_length=8
 max_wolfe_iters=20
 if [[ "$model" == "nanogpt" ]]; then
     max_iters=2000000

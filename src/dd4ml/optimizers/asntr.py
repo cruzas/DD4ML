@@ -68,7 +68,7 @@ class ASNTR(Optimizer):
         self.second_order = bool(second_order)
 
         # SR1 memory and OBS solver
-        self.hess = LSR1(gamma=gamma, memory_length=mem_length, device=self.device)
+        self.hess = LSR1(gamma=gamma, memory_length=mem_length, device=self.device, tol=self.tol)
         self.obs = OBS()
 
         # algorithmic constants

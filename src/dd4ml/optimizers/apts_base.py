@@ -58,12 +58,12 @@ class APTS_Base(Optimizer):
             except KeyError:
                 raise ValueError(f"Unknown glob_opt: {config.glob_opt}")
             config.glob_opt_hparams = hp_fn(config)
-        else:
-            config.glob_opt, config.glob_opt_hparams = (
-                (LSSR1_TR, get_lssr1_tr_hparams(config))
-                if config.glob_second_order
-                else (TR, get_tr_hparams(config))
-            )
+        # else:
+        #     config.glob_opt, config.glob_opt_hparams = (
+        #         (LSSR1_TR, get_lssr1_tr_hparams(config))
+        #         if config.glob_second_order
+        #         else (TR, get_tr_hparams(config))
+            # )
 
         loc_value = getattr(config, "loc_opt", None)
         if isinstance(loc_value, str):
@@ -73,12 +73,12 @@ class APTS_Base(Optimizer):
             except KeyError:
                 raise ValueError(f"Unknown loc_opt: {loc_value}")
             config.loc_opt_hparams = hp_fn(config)
-        else:
-            config.loc_opt, config.loc_opt_hparams = (
-                (LSSR1_TR, get_lssr1_loc_tr_hparams(config))
-                if config.loc_second_order
-                else (TR, get_loc_tr_hparams(config))
-            )
+        # else:
+        #     config.loc_opt, config.loc_opt_hparams = (
+        #         (LSSR1_TR, get_lssr1_loc_tr_hparams(config))
+        #         if config.loc_second_order
+        #         else (TR, get_loc_tr_hparams(config))
+        #     )
 
         config.apts_params = get_apts_hparams(config)
         return config

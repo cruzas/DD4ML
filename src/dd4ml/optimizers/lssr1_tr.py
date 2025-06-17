@@ -145,6 +145,7 @@ class LSSR1_TR(Optimizer):
             memory_length=self.mem_length,
             device=device,
             dtype=dtype,
+            tol=self.tol,
         )
 
         # Flags for distributed synchronisation
@@ -445,7 +446,7 @@ class LSSR1_TR(Optimizer):
 
         # Flatten current parameters and preserve a copy for updates
         wk_flat = self._flat_params_fn()  # self._flatten_params()
-        wk = wk_flat.clone().detach()
+        wk = wk_flat.clone() #.detach()
         st = self.state
         sec = self.second_order
 
@@ -460,7 +461,8 @@ class LSSR1_TR(Optimizer):
                     self.hess.gamma = (yk.dot(yk) / den).to(self.hess.device)
                     self.gamma = self.hess.gamma
 
-        st["old_wk"], st["prev_grad"] = wk.clone().detach(), g.clone().detach()
+        # st["old_wk"], st["prev_grad"] = wk.clone().detach(), g.clone().detach()
+        st["old_wk"], st["prev_grad"] = wk.clone(), g.clone()
 
         # Solve trust-region subproblem: second-order if memory available, otherwise first-order
         if sec and len(self.hess._S) > 0:
@@ -479,9 +481,6 @@ class LSSR1_TR(Optimizer):
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
         # Print shapes
-        print("vk.mul_(self.mu) shape:", vk.mul_(self.mu).shape)
-        print("wk - st['old_wk'] shape:", (wk - st["old_wk"]).shape)
-        
         vk.mul_(self.mu).add_(wk - st["old_wk"])
         vk_norm_sq = vk.dot(vk)
         if vk_norm_sq > 0.0:
@@ -495,7 +494,7 @@ class LSSR1_TR(Optimizer):
             p_comb_norm = math.sqrt(float(p_comb_norm_sq))
             scale = min(1.0, self.delta / p_comb_norm)
             p_comb.mul_(scale)
-        st["flat_vk"] = vk.clone().detach()  # Store updated vk for next iteration
+        st["flat_vk"] = vk.clone()#.detach()  # Store updated vk for next iteration
 
         # Prepare line search with initial loss and directional derivative
         phi_0 = loss
