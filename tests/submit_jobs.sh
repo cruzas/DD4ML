@@ -5,18 +5,32 @@ current_dir=$(pwd)
 script="run_config_file.py" # Python script to run
 
 # --- General parameter settings ---#
-optimizer="lssr1_tr"
+optimizer="apts_d"
 dataset="tinyshakespeare"
-batch_sizes=(256)
 model="nanogpt"
-criterion="cross_entropy_transformers"
-epochs=20
 trials=1
 num_subd_arr=(1) # For data-parallel executions
-batch_inc_factor=1.5
-overlap=0.33
 mem_length=3
 max_wolfe_iters=20
+if [[ "$model" == "nanogpt" ]]; then
+    max_iters=2000000
+    epochs=0
+    criterion="cross_entropy_transformers"
+    batch_sizes=(128)
+else
+    max_iters=0
+    epochs=20
+    criterion="cross_entropy"
+    batch_sizes=(10000)
+fi
+
+if [[ "$optimizer" == "apts_d" || "$optimizer" == "apts_p" || "$optimizer" == "apts_ip" || "$optimizer" == "LSSR1_TR" ]]; then
+    batch_inc_factor=1.5
+    overlap=0.33
+else
+    batch_inc_factor=1.0
+    overlap=0.0
+fi
 
 # --- Optimizer-specific settings ---#
 use_pmw="false"
@@ -107,6 +121,7 @@ for num_stages in "${num_stages_arr[@]:-1}"; do
                     update_config "batch_inc_factor" "${batch_inc_factor}"
                     update_config "overlap" "${overlap}"
                     update_config "optimizer" "${optimizer}"
+                    update_config "max_iters" "${max_iters}"
 
                     if [[ "$use_pmw" == "true" ]]; then
                         update_config "num_stages" "${num_stages}"

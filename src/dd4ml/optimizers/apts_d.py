@@ -119,7 +119,7 @@ class APTS_D(APTS_Base):
         self.init_glob_flat = self.glob_params_to_vector()
 
         # Compute initial global/local loss and gradient
-        self.init_glob_loss, self.init_loc_loss = self.glob_closure(
+        self.init_glob_loss, self.init_loc_loss = self.glob_closure_main(
             compute_grad=True
         ), self.loc_closure(compute_grad=True)
 

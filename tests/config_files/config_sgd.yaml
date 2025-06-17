@@ -12,7 +12,7 @@ parameters:
   epochs: 
     value: 10 # used for any other model other than LLMs
   max_iters:
-    value: 10000
+    value: 2000000
   learning_rate:
     value: 0.1
   dataset_name: 

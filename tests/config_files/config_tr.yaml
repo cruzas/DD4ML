@@ -12,13 +12,18 @@ parameters:
   max_iters:
     value: 10 # used for LLMs
   optimizer: 
-    values: ["trust_region"]
+    value: "tr"
   dataset_name: 
-    values: ["mnist"]
-    # values: ["tinyshakespeare"] 
+    value: "mnist"
   model_name: 
-    values: ["simple_cnn"]
-    # values: ["nanogpt"] 
+    value: "simple_cnn"
   criterion:
-    values: ["cross_entropy"] 
-    # values: ["cross_entropy_transformers"] 
+    value: "cross_entropy"
+  mem_length:
+    value: 5
+  overlap:
+    value: 0
+  max_wolfe_iters:
+    value: 20
+  batch_inc_factor:
+    value: 1.0

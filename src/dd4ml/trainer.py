@@ -70,8 +70,7 @@ class Trainer:
         C.loc_opt = None
         C.glob_opt = None
         C.overlap = 0.0
-        C.full_eval_freq = None
-        C.full_eval_mode = "after_epoch"
+        C.adjust_batch_size_every_iters = 10000 # for use with LLMs and LSSR1_TR
         return C
 
     def __init__(
@@ -345,13 +344,10 @@ class Trainer:
 
         Works for both cfg.use_pmw = {False, True}.
         """
+        dprint("Evaluating full objective function over the training set...")
         was_training = self.model.training
         self.model.eval()
 
-        # ------------------------------------------------------------------ #
-        # 1.  Build an evaluation loader identical to train_loader
-        #     but independent of its iterator state.                         #
-        # ------------------------------------------------------------------ #
         cfg = self.config
         if cfg.use_pmw:
             # same class as the training loader
@@ -373,9 +369,6 @@ class Trainer:
                 pin_memory=True,
             )
 
-        # ------------------------------------------------------------------ #
-        # 2.  Accumulate loss, being careful with pipeline parallel ranks.    #
-        # ------------------------------------------------------------------ #
         total, n = 0.0, 0
         crit = self.criterion
 
@@ -402,9 +395,6 @@ class Trainer:
                 total += loss * bs
                 n += bs
 
-        # ------------------------------------------------------------------ #
-        # 3.  Reduce across ranks so every process sees the true objective.   #
-        # ------------------------------------------------------------------ #
         if dist.is_initialized():
             buf = torch.tensor([total, n], device=self.device, dtype=torch.float32)
             dist.all_reduce(buf, op=dist.ReduceOp.SUM)
@@ -607,6 +597,7 @@ class Trainer:
 
     def run_by_iter(self):
         model, cfg = self.model, self.config
+        cfg.adjust_batch_size_every_iters = int(float(cfg.adjust_batch_size_every_iters))   
         model.train()
         self.total_start_time = time.time()
         self.iter_time = time.time()
@@ -727,8 +718,13 @@ class Trainer:
                 self.data_iter = chain([(x, y)], self.data_iter)
 
             # adaptive batch‐size
-            if self._asntr_present() or self._lssr1_tr_present():
+            if self._asntr_present():
                 self._adjust_batch_size(self.loss)
+            elif self._lssr1_tr_present() and self.iter_num > 0 and self.iter_num % cfg.adjust_batch_size_every_iters == 0:
+                full_loss = self._eval_full_objective()
+                self._adjust_batch_size(full_loss)
+
+            self.curr_train_perplexity = self.compute_current_train_perplexity()
 
             # timing & callbacks
             tnow = time.time()
@@ -736,6 +732,14 @@ class Trainer:
             self.running_time = tnow - self.total_start_time
             self.trigger_callbacks("on_batch_end")
             self.iter_time = tnow
+
+    @torch.no_grad()
+    def compute_current_train_perplexity(self):
+        """Compute train perplexity directly from the latest batch loss."""
+        # self.loss may be a float or a zero‐dim tensor
+        loss_val = self.loss.item() if torch.is_tensor(self.loss) else float(self.loss)
+        return math.exp(loss_val)
+        
 
     @torch.no_grad()
     def compute_test_perplexity(self):

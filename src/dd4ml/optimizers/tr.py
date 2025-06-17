@@ -25,7 +25,7 @@ class TR(Optimizer):
         # Extract trust-region hyperparameters from kwargs
         self.delta = kwargs.pop("delta", 0.1)
         self.norm_type = kwargs.pop("norm_type", 2)
-        self.tol = kwargs.pop("tol", 1e-6)
+        self.tol = float(kwargs.pop("tol", 1e-6))
         self.second_order = bool(kwargs.pop("second_order", False))
         self.mem_length = int(kwargs.pop("mem_length", 10))
         self.nu_dec = kwargs.pop("nu_dec")

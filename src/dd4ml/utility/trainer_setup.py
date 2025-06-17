@@ -80,7 +80,8 @@ def get_config_model_and_trainer(args, wandb_config):
         all_config.model.block_size = dataset.get_block_size()
 
     all_config = make_std_config(all_config)
-    all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
+    if hasattr(all_config.trainer, "norm_type"):
+        all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
 
     # Model instantiation (with optional parallelization).
     if getattr(all_config.trainer, "use_pmw", False) and hasattr(
@@ -161,10 +162,11 @@ def get_config_model_and_trainer(args, wandb_config):
             nu=all_config.trainer.nu,
             inc_factor=all_config.trainer.inc_factor,
             dec_factor=all_config.trainer.dec_factor,
-            nu_1=all_config.trainer.nu_1,
-            nu_2=all_config.trainer.nu_2,
-            max_iter=all_config.trainer.max_iter,
+            nu_dec=all_config.trainer.nu_dec,
+            nu_inc=all_config.trainer.nu_inc,
             norm_type=all_config.trainer.norm_type,
+            mem_length=all_config.trainer.mem_length,
+            second_order=all_config.trainer.glob_second_order,
         )
     elif optimizer_name == "apts_ip":
         from dd4ml.optimizers.apts_ip import APTS_IP

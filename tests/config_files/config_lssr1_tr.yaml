@@ -6,7 +6,7 @@ parameters:
   optimizer:
     value: "lssr1_tr"
   batch_size:
-    value: 10000
+    value: 12
   effective_batch_size:
     value: 10000
   num_stages:
@@ -22,7 +22,7 @@ parameters:
   mem_length:
     value: 3
   max_iters:
-    value: 2000 # for Transformers
+    value: 2e6 # for Transformers
   epochs:
     value: 10
   norm_type:
@@ -53,3 +53,5 @@ parameters:
     value: 1.5
   overlap:
     value: 0.33
+  adjust_batch_size_every_iters:
+    value: 1e99

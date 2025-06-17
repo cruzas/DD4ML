@@ -239,14 +239,13 @@ def main(
     def batch_end_callback(
         trainer, save_model: bool = True, save_frequency: int = 500
     ) -> None:
-        if trainer.iter_num % 100 == 0:
-            perplexity = trainer.compute_test_perplexity()
+        if trainer.iter_num % 50 == 0:
             if rank == 0 and use_wandb:
                 log_fn(
                     {
                         "iter": trainer.iter_num,
                         "loss": trainer.loss,
-                        "perplexity": perplexity,
+                        "train_perplexity": trainer.curr_train_perplexity,
                         "running_time": trainer.running_time,
                         "grad_evals": trainer.grad_evals,
                     }

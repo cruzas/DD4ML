@@ -29,6 +29,7 @@ from dd4ml.utility import (
 
 from .lssr1_tr import LSSR1_TR
 from .tr import TR
+from .asntr import ASNTR
 
 
 class APTS_Base(Optimizer):
@@ -394,7 +395,7 @@ class APTS_Base(Optimizer):
             "loss": loss,
             "grad": grad,
             "closure": self.glob_closure_main if closure is None else closure,
-            "closure_d": self.glob_closure_main_d if closure_d is None else closure_d,
+            "closure_d": self.glob_closure_d if closure_d is None else closure_d,
         }
 
         return self._step_loop(**step_loop_args)
@@ -417,7 +418,7 @@ class APTS_Base(Optimizer):
 
         # Evaluate trial loss & gradient
         trial_loss = (
-            self.glob_closure(compute_grad=True)
+            self.glob_closure_main(compute_grad=True)
             if closure is None
             else closure(compute_grad=True, zero_grad=True)
         )
