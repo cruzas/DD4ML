@@ -44,7 +44,8 @@ def parse_cmd_args() -> argparse.Namespace:
     default_use_pmw = temp_args.optimizer == "apts_ip"
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
-    default_project = "debug_" + temp_args.optimizer + "_tests"
+    # default_project = "thesis" + temp_args.optimizer + "_tests"
+    default_project = "thesis_tests"
 
     parser.add_argument(
         "--use_pmw",

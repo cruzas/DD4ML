@@ -5,11 +5,11 @@ current_dir=$(pwd)
 script="run_config_file.py" # Python script to run
 
 # --- General parameter settings ---#
-optimizer="apts_ip"
-dataset="tinyshakespeare"
-model="nanogpt"
+optimizer="apts_d"
+dataset="mnist"
+model="simple_resnet"
 trials=1
-num_subd_arr=(1) # For data-parallel executions
+num_subd_arr=(2) # For data-parallel executions
 mem_length=8
 max_wolfe_iters=20
 if [[ "$model" == "nanogpt" ]]; then
@@ -19,17 +19,19 @@ if [[ "$model" == "nanogpt" ]]; then
     batch_sizes=(128)
 else
     max_iters=0
-    epochs=20
+    epochs=15
     criterion="cross_entropy"
-    batch_sizes=(10000)
+    batch_sizes=(15000)
 fi
 
 if [[ "$optimizer" == "apts_d" || "$optimizer" == "apts_p" || "$optimizer" == "apts_ip" || "$optimizer" == "LSSR1_TR" ]]; then
     batch_inc_factor=1.5
     overlap=0.33
+    max_loc_iters=1
 else
     batch_inc_factor=1.0
     overlap=0.0
+    max_loc_iters=0
 fi
 
 # --- Optimizer-specific settings ---#
@@ -119,6 +121,7 @@ for num_stages in "${num_stages_arr[@]:-1}"; do
                     update_config "overlap" "${overlap}"
                     update_config "optimizer" "${optimizer}"
                     update_config "max_iters" "${max_iters}"
+                    update_config "max_loc_iters" "${max_loc_iters}"
 
                     if [[ "$use_pmw" == "true" ]]; then
                         update_config "num_stages" "${num_stages}"

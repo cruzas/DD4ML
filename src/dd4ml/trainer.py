@@ -514,7 +514,7 @@ class Trainer:
                 total_loss += batch_loss
 
             self.loss = total_loss / curr_batch_count
-            print(f"Loss after batch {batch_idx + 1}: {self.loss:.4f}")
+            # print(f"Loss after batch {batch_idx + 1}: {self.loss:.4f}")
 
             if self._stay_here():
                 dprint(f"Staying on batch with index {batch_idx}.")
