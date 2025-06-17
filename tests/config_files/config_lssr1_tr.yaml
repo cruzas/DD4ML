@@ -22,7 +22,7 @@ parameters:
   mem_length:
     value: 3
   max_iters:
-    value: 10 # for Transformers
+    value: 2000 # for Transformers
   epochs:
     value: 10
   norm_type:

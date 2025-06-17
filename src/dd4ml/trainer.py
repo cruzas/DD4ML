@@ -37,7 +37,7 @@ class Trainer:
         # training schedule
         C.epochs = 3
         C.run_by_epoch = True  # if False, run by iteration instead of epochs, typically for transformer networks
-        C.max_iters = 1000
+        C.max_iters = 100000
         # optimizer
         C.learning_rate = 1e-3
         C.betas = (0.9, 0.999)  # for Adam
@@ -304,6 +304,9 @@ class Trainer:
             self.current_batch_size = new_bs
             # Rebuild data loaders to reflect the new batch size
             self.setup_data_loaders()
+            dprint(
+                f"Rebuilt data loaders with new batch size: {self.current_batch_size}."
+            )
             # Invalidate cached shapes for any WeightParallelizedTensor parameters
             for p in self.model.parameters():
                 if isinstance(p, WeightParallelizedTensor):
@@ -610,6 +613,7 @@ class Trainer:
         self.data_iter = iter(self.train_loader)
         # Compute the number of batches in the train_loader
         num_batches = self._get_num_batches()
+        dprint(f"Number of batches in train_loader: {num_batches}")
 
         for self.iter_num in range(
             cfg.max_iters + 1 if cfg.max_iters is not None else float("inf")

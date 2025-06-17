@@ -6,15 +6,15 @@ script="run_config_file.py" # Python script to run
 
 # --- General parameter settings ---#
 optimizer="lssr1_tr"
-dataset="mnist"
-batch_sizes=(10000)
-model="simple_cnn"
-criterion="cross_entropy"
+dataset="tinyshakespeare"
+batch_sizes=(256)
+model="nanogpt"
+criterion="cross_entropy_transformers"
 epochs=20
 trials=1
 num_subd_arr=(1) # For data-parallel executions
 batch_inc_factor=1.5
-overlap=0.01
+overlap=0.33
 mem_length=3
 max_wolfe_iters=20
 

@@ -210,7 +210,7 @@ def main(
         thing_to_print = "lr"
 
         dprint(
-            f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, {thing_to_print}: {delta:.6e}"
+            f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
         )
 
         if rank == 0 and use_wandb:
@@ -239,33 +239,34 @@ def main(
     def batch_end_callback(
         trainer, save_model: bool = True, save_frequency: int = 500
     ) -> None:
-        if rank == 0 and use_wandb:
-            log_fn(
-                {
-                    "iter": trainer.iter_num,
-                    "loss": trainer.loss,
-                    "running_time": trainer.running_time,
-                    "grad_evals": trainer.grad_evals,
-                }
-            )
-
         if trainer.iter_num % 100 == 0:
             perplexity = trainer.compute_test_perplexity()
+            if rank == 0 and use_wandb:
+                log_fn(
+                    {
+                        "iter": trainer.iter_num,
+                        "loss": trainer.loss,
+                        "perplexity": perplexity,
+                        "running_time": trainer.running_time,
+                        "grad_evals": trainer.grad_evals,
+                    }
+                )   
+            
             dprint(
-                f"Iter {trainer.iter_num}, g-evals: {trainer.grad_evals}, time {trainer.iter_dt * 1000:.2f}ms, loss {trainer.loss:.5f}"
+                f"Iter {trainer.iter_num}, g-evals: {trainer.grad_evals}, time {trainer.iter_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, loss {trainer.loss:.5f}"
             )
-        if save_model:
-            proj = wandb_config.get("project", trial_args["project"])
-            filename = f"{proj}_{apts_id}_iter_{{count}}.pt"
-            save_model_if_needed(
-                trainer,
-                count=trainer.iter_num,
-                frequency=save_frequency,
-                work_dir=trial_args["work_dir"],
-                project=proj,
-                use_pmw=trial_args["use_pmw"],
-                filename_template=filename,
-            )
+            if save_model:
+                proj = wandb_config.get("project", trial_args["project"])
+                filename = f"{proj}_{apts_id}_iter_{{count}}.pt"
+                save_model_if_needed(
+                    trainer,
+                    count=trainer.iter_num,
+                    frequency=save_frequency,
+                    work_dir=trial_args["work_dir"],
+                    project=proj,
+                    use_pmw=trial_args["use_pmw"],
+                    filename_template=filename,
+                )
 
     generic_run(
         rank=rank,
