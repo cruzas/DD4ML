@@ -4,6 +4,7 @@ set -euo pipefail
 # --- Constants & Defaults --- #
 SCRIPT="run_config_file.py"
 PROJECT="debugging"
+PAPER_TR_UPDATE=true # only for lssr1_tr or APTS_* with LSSR1_TR as glob_opt or loc_opt
 TRIALS=1
 USE_PMW=false
 GRAD_ACC=false
@@ -90,7 +91,6 @@ set_apts_lssr1_tr_params() {
 
 # --- Helpers --- #
 
-# Extract APTS details for filename
 extract_apts_details() {
   APTS_GLOB_OPT="none"
   APTS_LOC_OPT="none"
@@ -122,7 +122,6 @@ submit_job() {
   if ! sbatch --nodes="${nodes}" "$jobfile"; then
     echo "ERROR: sbatch failed for $job_name" >&2
   fi
-
   rm -f "$jobfile"
 }
 
@@ -137,8 +136,14 @@ calc_nodes() {
   echo "$world_size"
 }
 
+# --- Improved update_config: replace or append if missing --- #
 update_config() {
-  sed -i "/$1:/ {n; s/value: .*/value: $2/}" "$config_file"
+  local key=$1 val=$2
+  if grep -qE "^${key}:" "$config_file"; then
+    sed -i "/^${key}:/ {n; s/value: .*/value: ${val}/}" "$config_file"
+  else
+    printf "\n%s:\n  value: %s\n" "$key" "$val" >>"$config_file"
+  fi
 }
 
 # --- Initialise all params --- #
@@ -170,7 +175,12 @@ for num_stages in "${NUM_STAGES[@]}"; do
           job_name="${optimizer}_${dataset}_${actual_bs}_nst_${num_stages}_nsd_${num_subd}_nrpsd_${num_rep}"
           if [[ "$optimizer" == *apts_* ]]; then
             job_name+="_gopt_${APTS_GLOB_OPT}_lopt_${APTS_LOC_OPT}_gso_${APTS_GLOB_SO}_lso_${APTS_LOC_SO}"
-          elif [[ "$optimizer" == "lssr1_tr" || "$optimizer" == "tr" ]]; then
+            if [[ "$APTS_GLOB_OPT" == "lssr1_tr" || "$APTS_LOC_OPT" == "lssr1_tr" ]]; then
+              job_name+="_ptru_${PAPER_TR_UPDATE}"
+            fi
+          elif [[ "$optimizer" == "lssr1_tr" ]]; then
+            job_name+="_gso_${APTS_GLOB_SO}_ptru_${PAPER_TR_UPDATE}"
+          elif [[ "$optimizer" == "tr" ]]; then
             job_name+="_gso_${APTS_GLOB_SO}"
           fi
           job_name+="_trial_${trial}"
@@ -198,6 +208,14 @@ for num_stages in "${NUM_STAGES[@]}"; do
           update_config max_iters "${EVAL_PARAMS[1]#*=}"
           update_config num_subdomains "$num_subd"
 
+          # Conditionally apply PAPER_TR_UPDATE
+          if [[ "$optimizer" == "lssr1_tr" ]]; then
+            update_config paper_tr_update "$PAPER_TR_UPDATE"
+          elif [[ "$optimizer" == *apts_* ]] &&
+            ([[ "$APTS_GLOB_OPT" == "lssr1_tr" ]] || [[ "$APTS_LOC_OPT" == "lssr1_tr" ]]); then
+            update_config paper_tr_update "$PAPER_TR_UPDATE"
+          fi
+
           for kv in "${APTS_PARAMS[@]}"; do
             IFS="=" read -r key val <<<"$kv"
             update_config "$key" "$val"
@@ -221,7 +239,8 @@ for num_stages in "${NUM_STAGES[@]}"; do
 
           # Submit
           export nccl_debug=WARN job_name SCRIPT use_wandb=1 \
-            num_stages num_subd num_rep world_size ntasks_per_node config_file optimizer trial PROJECT
+            num_stages num_subd num_rep world_size ntasks_per_node \
+            config_file optimizer trial PROJECT
           submit_job "$template"
 
         done
