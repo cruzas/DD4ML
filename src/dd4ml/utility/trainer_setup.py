@@ -63,9 +63,6 @@ def get_config_model_and_trainer(args, wandb_config):
         all_config.trainer.loc_opt = all_config.trainer.subdomain_opt
         delattr(all_config.trainer, "subdomain_opt")
     all_config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
-    print(
-        f"all_config tol type={type(all_config.trainer.tol)} after merging and cleaning up"
-    )
 
     # Instantiate dataset.
     dataset = dataset_factory.create(all_config.dataset_name, all_config.data)
@@ -256,6 +253,7 @@ def get_config_model_and_trainer(args, wandb_config):
             second_order=all_config.trainer.glob_second_order,
             mem_length=all_config.trainer.mem_length,
             max_wolfe_iters=all_config.trainer.max_wolfe_iters,
+            max_zoom_iters=all_config.trainer.max_zoom_iters,
             mu=all_config.trainer.mu,
             tau_1=all_config.trainer.tau_1,
             tau_2=all_config.trainer.tau_2,
@@ -266,7 +264,11 @@ def get_config_model_and_trainer(args, wandb_config):
             nu_4=all_config.trainer.nu_4,
             tol=all_config.trainer.tol,
             norm_type=all_config.trainer.norm_type,
+            c_1=all_config.trainer.c_1,
+            c_2=all_config.trainer.c_2,
+            alpha_max=all_config.trainer.alpha_max,
             sync=True,
+            paper_tr_update=all_config.trainer.paper_tr_update,
         )
 
     elif optimizer_name == "asntr":

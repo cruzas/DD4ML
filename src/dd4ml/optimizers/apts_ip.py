@@ -34,12 +34,11 @@ class APTS_IP(APTS_Base):
             except KeyError:
                 raise ValueError(f"Unknown glob_opt: {config.glob_opt}")
             config.glob_opt_hparams = hp_fn(config)
-        # else:
-        #     config.glob_opt, config.glob_opt_hparams = (
-        #         (LSSR1_TR, get_lssr1_tr_hparams(config))
-        #         if config.glob_second_order
-        #         else (TR, get_tr_hparams(config))
-        #     )
+        else:
+            raise ValueError(
+                f"glob_opt must be a string (e.g., 'tr', 'lssr1_tr'), got {type(config.glob_opt)}"
+            )
+
         # Disable gradient broadcast in the global optimizer as each rank
         # holds only a shard of the model when running APTS_IP.
         config.glob_opt_hparams["sync"] = False

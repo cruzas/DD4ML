@@ -3,6 +3,8 @@ metric:
   name: train_loss
   goal: minimize
 parameters:
+  optimizer: 
+    value: "tr"
   delta:
     values: [0.01]
   batch_size:
@@ -11,8 +13,6 @@ parameters:
     value: 2 # used for any other model other than LLMs
   max_iters:
     value: 10 # used for LLMs
-  optimizer: 
-    value: "tr"
   dataset_name: 
     value: "mnist"
   model_name: 
@@ -24,6 +24,8 @@ parameters:
   overlap:
     value: 0
   max_wolfe_iters:
-    value: 20
+    value: 5
+  max_zoom_iters:
+    value: 5
   batch_inc_factor:
     value: 1.0

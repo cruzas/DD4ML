@@ -27,9 +27,9 @@ from dd4ml.utility import (
     trainable_params_to_vector,
 )
 
+from .asntr import ASNTR
 from .lssr1_tr import LSSR1_TR
 from .tr import TR
-from .asntr import ASNTR
 
 
 class APTS_Base(Optimizer):
@@ -58,12 +58,10 @@ class APTS_Base(Optimizer):
             except KeyError:
                 raise ValueError(f"Unknown glob_opt: {config.glob_opt}")
             config.glob_opt_hparams = hp_fn(config)
-        # else:
-        #     config.glob_opt, config.glob_opt_hparams = (
-        #         (LSSR1_TR, get_lssr1_tr_hparams(config))
-        #         if config.glob_second_order
-        #         else (TR, get_tr_hparams(config))
-            # )
+        else:
+            raise ValueError(
+                "glob_opt must be a string specifying the optimizer type, e.g., 'tr' or 'lssr1_tr'."
+            )
 
         loc_value = getattr(config, "loc_opt", None)
         if isinstance(loc_value, str):
@@ -73,12 +71,10 @@ class APTS_Base(Optimizer):
             except KeyError:
                 raise ValueError(f"Unknown loc_opt: {loc_value}")
             config.loc_opt_hparams = hp_fn(config)
-        # else:
-        #     config.loc_opt, config.loc_opt_hparams = (
-        #         (LSSR1_TR, get_lssr1_loc_tr_hparams(config))
-        #         if config.loc_second_order
-        #         else (TR, get_loc_tr_hparams(config))
-        #     )
+        else:
+            raise ValueError(
+                "loc_opt must be a string specifying the optimizer type, e.g., 'tr', 'lssr1_tr', or 'sgd'."
+            )
 
         config.apts_params = get_apts_hparams(config)
         return config

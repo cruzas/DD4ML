@@ -19,6 +19,8 @@ parameters:
     value: True
   max_wolfe_iters:
     value: 20
+  max_zoom_iters:
+    value: 20
   mem_length:
     value: 3
   max_iters:
@@ -55,3 +57,5 @@ parameters:
     value: 0.33
   adjust_batch_size_every_iters:
     value: 1e99
+  paper_tr_update:
+    value: True

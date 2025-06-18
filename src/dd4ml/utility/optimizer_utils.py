@@ -36,7 +36,7 @@ def get_apts_hparams(config):
     }
 
 
-def get_lssr1_tr_hparams(config):    
+def get_lssr1_tr_hparams(config):
     return {
         "delta": config.delta,
         "min_delta": config.min_delta,
@@ -45,6 +45,7 @@ def get_lssr1_tr_hparams(config):
         "second_order": config.glob_second_order,
         "mem_length": config.mem_length,
         "max_wolfe_iters": config.max_wolfe_iters,
+        "max_zoom_iters": config.max_zoom_iters,
         "mu": 0.9,
         "tau_1": 0.1,
         "tau_2": 0.25,
@@ -55,7 +56,11 @@ def get_lssr1_tr_hparams(config):
         "nu_4": 1.2,
         "tol": config.tol,
         "norm_type": config.norm_type,
+        "c_1": 1e-4,
+        "c_2": 0.9,
+        "alpha_max": 2.0,
         "sync": True,
+        "paper_tr_update": config.paper_tr_update,
     }
 
 
@@ -72,6 +77,7 @@ def get_lssr1_loc_tr_hparams(config):
         "second_order": config.loc_second_order,
         "mem_length": config.mem_length,
         "max_wolfe_iters": config.max_wolfe_iters,
+        "max_zoom_iters": config.max_zoom_iters,
         "mu": 0.9,
         "tau_1": 0.1,
         "tau_2": 0.25,
@@ -82,7 +88,11 @@ def get_lssr1_loc_tr_hparams(config):
         "nu_4": 1.2,
         "tol": config.tol,
         "norm_type": config.norm_type,
+        "c_1": 1e-4,
+        "c_2": 0.9,
+        "alpha_max": 2.0,
         "sync": False,
+        "paper_tr_update": config.paper_tr_update,
     }
 
 

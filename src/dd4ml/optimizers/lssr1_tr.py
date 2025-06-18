@@ -40,7 +40,8 @@ class LSSR1_TR(Optimizer):
         gamma: float = 1e-3,
         second_order: bool = True,
         mem_length: int = 10,
-        max_wolfe_iters: int = 20,
+        max_wolfe_iters: int = 5,
+        max_zoom_iters: int = 5,
         mu: float = 0.9,
         tau_1: float = 0.1,
         tau_2: float = 0.25,
@@ -55,6 +56,7 @@ class LSSR1_TR(Optimizer):
         c_2: float = 0.9,
         alpha_max: float = 10.0,
         sync: bool = False,
+        paper_tr_update: bool = True,
         flat_grads_fn=None,
         flat_params_fn=None,
         flat_params=None,  # only passed by APTS_IP
@@ -75,6 +77,7 @@ class LSSR1_TR(Optimizer):
         self.second_order = second_order
         self.mem_length = mem_length
         self.max_wolfe_iters = max_wolfe_iters
+        self.max_zoom_iters = max_zoom_iters
         self.mu = mu
         self.tau_1 = tau_1
         self.tau_2 = tau_2
@@ -148,8 +151,9 @@ class LSSR1_TR(Optimizer):
             tol=self.tol,
         )
 
-        # Flags for distributed synchronisation
+        # Flags for distributed synchronization
         self.sync = bool(sync)
+        self.paper_tr_update = bool(paper_tr_update)
         self.rank = dist.get_rank() if dist.is_initialized() else 0
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
 
@@ -167,8 +171,8 @@ class LSSR1_TR(Optimizer):
         """
         if not (self.sync and self.world_size > 1):
             return value
-        # Use float64 accumulation for precision
-        buf = value.detach().to(torch.float32)
+
+        buf = value.detach().to(torch.float64)
         dist.reduce(buf, dst=0, op=dist.ReduceOp.SUM)
         if self.rank == 0:
             buf /= self.world_size
@@ -227,7 +231,7 @@ class LSSR1_TR(Optimizer):
         """
         Move to trial point w = wk + alpha * p, evaluate loss and gradient.
         Return loss value, flattened gradient, and directional derivative along p.
-        Synchronise scalars and gradient if in distributed mode.
+        Synchronize scalars and gradient if in distributed mode.
         """
         # Update parameters to the trial point
         self._unflatten_update(wk + alpha * p)
@@ -236,14 +240,15 @@ class LSSR1_TR(Optimizer):
         loss = closure(compute_grad=True)
         grad = self._flat_grads_fn()
 
-        # Synchronise loss and gradient if needed
+        # Compute directional derivative along p
+        deriv = grad.dot(p)
+
+        # Synchronize loss and gradient if needed
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
-            deriv = grad.dot(p)
             deriv = self._avg_scalar(deriv)
             dist.broadcast(grad, src=0)
-        else:
-            deriv = grad.dot(p)
+
         return loss, grad, deriv
 
     def _zoom(
@@ -260,16 +265,16 @@ class LSSR1_TR(Optimizer):
         closure: Callable,
         c_1: float,
         c_2: float,
-        max_iter: int = 20,
+        max_iter: int = 1,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
         Perform the zoom phase of the strong Wolfe line search,
         narrowing the interval [alpha_lo, alpha_hi] until conditions are met
         or maximum iterations exceeded. Returns (alpha_j, loss, gradient).
         """
-        for _ in range(max_iter):
+        for i in range(max_iter):
             # Interpolate new trial alpha within [alpha_lo, alpha_hi]
-            if _ == 0:
+            if i == 0:
                 alpha_j = 0.5 * (alpha_lo + alpha_hi)
             else:
                 denom = 2 * (phi_hi - phi_lo - dphi_lo * (alpha_hi - alpha_lo))
@@ -277,7 +282,7 @@ class LSSR1_TR(Optimizer):
                 if not cond:
                     interp = 0.5 * (alpha_lo + alpha_hi)
                 else:
-                    interp = alpha_lo - dphi_lo * (alpha_hi - alpha_lo).square() / denom
+                    interp = alpha_lo - dphi_lo * (alpha_hi - alpha_lo) ** 2 / denom
                 safe_low = alpha_lo + 0.1 * (alpha_hi - alpha_lo)
                 safe_high = alpha_hi - 0.1 * (alpha_hi - alpha_lo)
                 alpha_j = torch.where(
@@ -290,6 +295,9 @@ class LSSR1_TR(Optimizer):
             phi_j, grad_j, dphi_j = self._evaluate_function_and_gradient(
                 wk, p, alpha_j, closure
             )
+
+            # Store the most recent gradient
+            grad_j_last = grad_j
 
             # Check Armijo condition or if phi_j >= phi_lo
             armijo = phi_j > phi_0 + c_1 * alpha_j * dphi_0
@@ -311,7 +319,8 @@ class LSSR1_TR(Optimizer):
                 break
 
         # If maximum iterations exceeded, return best lower bound
-        return alpha_lo, phi_lo, self._flat_grads_fn()
+        # return alpha_lo, phi_lo, self._flat_grads_fn()
+        return alpha_lo, phi_lo, grad_j_last
 
     def _strong_wolfe_line_search(
         self,
@@ -324,23 +333,23 @@ class LSSR1_TR(Optimizer):
         c_1: float = 1e-4,
         c_2: float = 0.9,
         alpha_max: float = 10.0,
-        max_iter: int = 10,
+        max_iter: int = 1,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
         Conduct strong Wolfe line search to find step size alpha
         that satisfies both Armijo and curvature conditions.
         Returns chosen alpha, new loss, and new gradient.
         """
-        alpha_prev = torch.tensor(alpha_0, device=wk.device)
+        alpha_prev = alpha_0
         phi_prev = phi_0
         dphi_prev = dphi_0
 
-        # Choose the halfway value between 0 and alpha_max
-        alpha_i = torch.tensor(0.5 * alpha_max, device=wk.device, dtype=wk.dtype)
+        # Initial trial step length (half of alpha_max)
+        alpha_i = 0.5 * alpha_max
 
         for i in range(max_iter):
             phi_i, grad_i, dphi_i = self._evaluate_function_and_gradient(
-                wk, p, alpha_i.item(), closure
+                wk, p, alpha_i, closure
             )
 
             cond1 = phi_i > phi_0 + c_1 * alpha_i * dphi_0
@@ -360,6 +369,7 @@ class LSSR1_TR(Optimizer):
                     closure,
                     c_1,
                     c_2,
+                    max_iter=self.max_zoom_iters,
                 )
 
             # If curvature condition satisfied, accept alpha_i
@@ -381,19 +391,17 @@ class LSSR1_TR(Optimizer):
                     closure,
                     c_1,
                     c_2,
+                    max_iter=self.max_zoom_iters,
                 )
 
             # Update previous iterate values and double alpha_i (capped at alpha_max)
-            alpha_prev, phi_prev, dphi_prev = alpha_i, phi_i, dphi_i
-            alpha_i = torch.min(2 * alpha_i, torch.tensor(alpha_max, device=wk.device))
+            alpha_prev, phi_prev, dphi_prev, grad_prev = alpha_i, phi_i, dphi_i, grad_i
+            alpha_i = min(1.25 * alpha_i, alpha_max)
             if alpha_i >= alpha_max:
                 break
 
         # Fallback: return best known step (alpha_prev)
-        phi_fin, grad_fin, _ = self._evaluate_function_and_gradient(
-            wk, p, alpha_prev.item(), closure
-        )
-        return alpha_prev, phi_fin, grad_fin
+        return alpha_prev, phi_prev, grad_prev
 
     def _backtracking_line_search(
         self,
@@ -405,7 +413,7 @@ class LSSR1_TR(Optimizer):
         alpha_0: float = 1.0,
         c_1: float = 1e-4,
         c_2: float = 0.9,
-        max_iter: int = 10,
+        max_iter: int = 1,
     ) -> Tuple[float, float, Tensor]:
         """
         Simple backtracking line search to satisfy Armijo and curvature.
@@ -421,7 +429,7 @@ class LSSR1_TR(Optimizer):
             if armijo_ok and curvature_ok:
                 return alpha, phi_alpha, grad_alpha
             alpha *= 0.5
-            if alpha < self.tol.item():
+            if alpha < self.tol:
                 break
         # If line search fails, return zero step
         return 0.0, phi_0, self._flat_grads_fn()
@@ -434,38 +442,38 @@ class LSSR1_TR(Optimizer):
         # Evaluate or retrieve precomputed loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
         g = _["grad"] if "grad" in _ else self._flat_grads_fn()
-
         gn = torch.norm(g, p=self.norm_type)
+
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
             dist.broadcast(g, src=0)
             gn = self._avg_scalar(gn)
-        # If gradient norm below tolerance, skip update
+
         if gn <= self.tol:
             return loss, g
 
         # Flatten current parameters and preserve a copy for updates
-        wk_flat = self._flat_params_fn()  # self._flatten_params()
-        wk = wk_flat.clone() #.detach()
+        wk = self._flat_params_fn()
         st = self.state
-        sec = self.second_order
 
         # Update LSR1 memory if second-order is enabled and previous gradient exists
-        if sec and st["prev_grad"] is not None:
+        if self.second_order and st["prev_grad"] is not None:
             sk = wk - st["old_wk"]
             yk = g - st["prev_grad"]
-            if sk.norm() > self.tol and yk.norm() > self.tol:
+            if (
+                sk.norm(p=self.norm_type) > self.tol
+                and yk.norm(p=self.norm_type) > self.tol
+            ):
                 self.hess.update_memory(sk, yk)
                 den = sk.dot(yk)
                 if den > self.tol:
                     self.hess.gamma = (yk.dot(yk) / den).to(self.hess.device)
                     self.gamma = self.hess.gamma
 
-        # st["old_wk"], st["prev_grad"] = wk.clone().detach(), g.clone().detach()
         st["old_wk"], st["prev_grad"] = wk.clone(), g.clone()
 
         # Solve trust-region subproblem: second-order if memory available, otherwise first-order
-        if sec and len(self.hess._S) > 0:
+        if self.second_order and len(self.hess._S) > 0:
             # pred_red = -(g*p + 0.5*p*B*p)
             p_star, pred_red = solve_tr_second_order(
                 g, gn, self.delta, self.hess, self.obs, self.tol
@@ -474,27 +482,23 @@ class LSSR1_TR(Optimizer):
             # pred_red = -g*p
             p_star, pred_red = solve_tr_first_order(g, gn, self.delta, self.tol)
 
-        # Since pred_red is the classical pred_redicted TR reduction, here we multiply it by -1
-        # to abide by Q_k(p) specified in Equation (10) in the paper
-        pred_red *= -1
-
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
         # Print shapes
         vk.mul_(self.mu).add_(wk - st["old_wk"])
         vk_norm_sq = vk.dot(vk)
-        if vk_norm_sq > 0.0:
+        if vk_norm_sq > self.tol:
             vk_norm = math.sqrt(float(vk_norm_sq))
             scale = min(1.0, self.delta / vk_norm)
             vk.mul_(scale)
         # Combine p_star and vk, then bound combined step to trust-region radius
         p_comb = p_star + vk
         p_comb_norm_sq = p_comb.dot(p_comb)
-        if p_comb_norm_sq > 0.0:
+        if p_comb_norm_sq > self.tol:
             p_comb_norm = math.sqrt(float(p_comb_norm_sq))
             scale = min(1.0, self.delta / p_comb_norm)
             p_comb.mul_(scale)
-        st["flat_vk"] = vk.clone()#.detach()  # Store updated vk for next iteration
+        st["flat_vk"] = vk.clone()  # .detach()  # Store updated vk for next iteration
 
         # Prepare line search with initial loss and directional derivative
         phi_0 = loss
@@ -502,9 +506,9 @@ class LSSR1_TR(Optimizer):
 
         # Assumption 3 in paper
         if dphi_0.item() > 0:
-            p_comb *= -1
+            p_comb.mul_(-1)
             pred_red *= -1
-            dphi_0 *= -1
+            dphi_0.mul_(-1)
 
         # Perform strong Wolfe line search to compute step length alpha
         alpha, new_loss, new_g = self._strong_wolfe_line_search(
@@ -525,28 +529,45 @@ class LSSR1_TR(Optimizer):
         self._unflatten_update(wk + p_step)
 
         # Compute trust-region ratio ρ = (f(new) − f(old)) / pred_redicted
-        rho = (new_loss - loss) / pred_red if (alpha > 0 and pred_red < 0) else 0.0
+        if abs(float(pred_red)) < self.tol:
+            rho = float("inf")
+        else:
+            rho = (loss - new_loss) / pred_red if (alpha > 0 and pred_red < 0) else 0.0
         s_norm_sq = p_step.dot(p_step)
         s_norm = math.sqrt(float(s_norm_sq))
-        delta_old = self.delta
 
         # Adjust trust-region radius based on ρ and step norm
-        if rho < self.tau_2:
-            # Shrink trust region if poor agreement
-            delta_new = min(
-                self.nu_1 * delta_old,
-                self.nu_2 * s_norm**2,
-            )
-        elif rho >= self.tau_3 and s_norm >= self.nu_3 * delta_old:
-            # Expand trust region if very successful
-            delta_new = self.nu_4 * delta_old
-        else:
-            delta_new = delta_old
+        if self.paper_tr_update:
+            delta_old = self.delta
+            if rho < self.tau_2:
+                # Shrink trust region if poor agreement
+                delta_new = min(
+                    self.nu_1 * delta_old,
+                    self.nu_2 * s_norm,
+                )
+            elif rho >= self.tau_3 and s_norm >= self.nu_3 * delta_old:
+                # Expand trust region if very successful
+                delta_new = self.nu_4 * delta_old
+            else:
+                delta_new = delta_old
 
-        # Clip trust-region radius between [min_delta, max_delta]
-        self.delta = max(
-            self.min_delta,
-            min(delta_new, self.max_delta),
-        )
+            # Clip trust-region radius between [min_delta, max_delta]
+            self.delta = max(
+                self.min_delta,
+                min(delta_new, self.max_delta),
+            )
+        else:
+            if rho > self.tau_2 and rho > self.tau_3 and s_norm >= 0.9 * self.delta:
+                # Accept the step and increase delta
+                self.delta = min(
+                    self.max_delta,
+                    self.nu_4 * self.delta,
+                )
+            else:
+                # Reject the step and decrease delta
+                self.delta = max(
+                    self.min_delta,
+                    self.nu_3 * self.delta,
+                )
 
         return new_loss, new_g

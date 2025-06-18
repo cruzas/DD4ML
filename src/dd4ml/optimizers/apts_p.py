@@ -151,7 +151,7 @@ class APTS_P(APTS_Base):
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)
 
         # Account for local gradient evaluations across all models
-        self.grad_evals += self.loc_grad_evals * self.nr_models
+        self.grad_evals += self.loc_grad_evals
 
         # Synchronize parameters from local models to global model
         self.sync_loc_to_glob()

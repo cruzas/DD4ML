@@ -1,19 +1,19 @@
 from __future__ import annotations
+
 from typing import Iterable, Tuple
+
 import torch
 from torch.optim import Optimizer
-from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
+
 from dd4ml.optimizers.lsr1 import LSR1
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.solvers.obs import OBS
-from dd4ml.utility import (
-    get_tr_hparams,
-    solve_tr_first_order,
-    solve_tr_second_order,
-)
+from dd4ml.utility import get_tr_hparams, solve_tr_first_order, solve_tr_second_order
+
 
 class TR(Optimizer):
     __name__ = "TR"
-    
+
     @staticmethod
     def setup_TR_hparams(cfg):
         # Add trust-region hyperparameters to the config
@@ -57,11 +57,13 @@ class TR(Optimizer):
         if self.second_order:
             mem_len = self.mem_length
             device = self.ps[0].device
-            self.hess = LSR1(gamma=1.0, memory_length=mem_len, device=device, tol=self.tol)
+            self.hess = LSR1(
+                gamma=1.0, memory_length=mem_len, device=device, tol=self.tol
+            )
             self.obs = OBS()
         else:
             self.hess = None  # type: ignore
-            self.obs = None   # type: ignore
+            self.obs = None  # type: ignore
 
     def _flat_grad(self) -> torch.Tensor:
         """Return the current gradient as a single flat vector."""
@@ -101,21 +103,19 @@ class TR(Optimizer):
 
         # First- or second-order TR step
         use_second = (
-            self.second_order
-            and self.hess
-            and len(self.hess._S) > 0  # type: ignore
+            self.second_order and self.hess and len(self.hess._S) > 0  # type: ignore
         )
         if use_second:
-            self._step_buf, predicted = solve_tr_second_order(
+            self._step_buf, pred_red = solve_tr_second_order(
                 grad,
                 gn,
                 self.delta,
-                self.hess,      # type: ignore[arg-type]
-                self.obs,       # type: ignore[arg-type]
+                self.hess,  # type: ignore[arg-type]
+                self.obs,  # type: ignore[arg-type]
                 self.tol,
             )
         else:
-            self._step_buf, predicted = solve_tr_first_order(
+            self._step_buf, pred_red = solve_tr_first_order(
                 grad, gn, self.delta, self.tol
             )
 
@@ -125,20 +125,27 @@ class TR(Optimizer):
         trial_grad = self._flat_grad()
 
         # Acceptance ratio ρ
-        actual = (loss - trial_loss)
-        rho = actual / (predicted + 1e-12)
+        if abs(float(pred_red)) < self.tol:
+            rho = float("inf")  # Avoid division by zero
+        else:
+            rho = (loss - trial_loss) / pred_red
 
-        if actual > 0 and rho >= self.nu_dec:
+        if rho > self.nu_dec:
             # Accept
             if use_second:
-                self.hess.update_memory(  # type: ignore[union-attr]
-                    self._step_buf.clone(), (trial_grad - grad).clone()
-                )
-            # Optional expansion of trust region 
-            if (
-                rho >= self.nu_inc
-                and self._step_buf.norm() >= 0.9 * self.delta
-            ):
+                # Update Hessian memory
+                sk = self._step_buf.clone()
+                yk = (trial_grad - grad).clone()
+                if (
+                    sk.norm(p=self.norm_type) > self.tol
+                    and yk.norm(p=self.norm_type) > self.tol
+                ):
+                    self.hess.update_memory(sk, yk)
+                    den = sk.dot(yk)
+                    if den > self.tol:
+                        self.hess.gamma = (yk.dot(yk) / den).to(self.hess.device)
+
+            if rho > self.nu_inc and self._step_buf.norm() >= 0.9 * self.delta:
                 self.delta = min(
                     self.max_delta,
                     self.inc_factor * self.delta,

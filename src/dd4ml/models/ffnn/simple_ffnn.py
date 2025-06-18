@@ -14,7 +14,7 @@ class SimpleFFNN(BaseFFNN):
         # e.g. for MNIST: 1×28×28 → 784
         C.input_features = 1 * 28 * 28
         C.output_classes = 10
-        C.fc_layers = [128, 64]  # two hidden layers
+        C.fc_layers = [350, 250, 150]
         C.dropout_p = 0.5
         return C
 
@@ -30,6 +30,7 @@ class SimpleFFNN(BaseFFNN):
             in_feats = h
 
         layers["out"] = nn.Linear(in_feats, config.output_classes)
+        layers["softmax"] = nn.Softmax(dim=1)
         self.net = nn.Sequential(layers)
 
     def forward(self, x):

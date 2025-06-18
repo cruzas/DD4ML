@@ -1,167 +1,181 @@
 #!/bin/bash
 
-# Current working directory
-current_dir=$(pwd)
-script="run_config_file.py" # Python script to run
+# --- Constants & Defaults --- #
+SCRIPT="run_config_file.py"
+TRIALS=1
+USE_PMW=false
+GRAD_ACC=false
 
-# --- General parameter settings ---#
-optimizer="apts_d"
-dataset="mnist"
-model="simple_resnet"
-trials=1
-num_subd_arr=(2) # For data-parallel executions
-mem_length=8
-max_wolfe_iters=20
-if [[ "$model" == "nanogpt" ]]; then
-    max_iters=2000000
-    epochs=0
-    criterion="cross_entropy_transformers"
-    batch_sizes=(128)
-else
-    max_iters=0
-    epochs=15
-    criterion="cross_entropy"
-    batch_sizes=(15000)
-fi
+# Default arrays
+NUM_SUBD=(2)
+NUM_STAGES=(1)
+NUM_REP=(1)
+BATCH_SIZES=(15000)
 
-if [[ "$optimizer" == "apts_d" || "$optimizer" == "apts_p" || "$optimizer" == "apts_ip" || "$optimizer" == "LSSR1_TR" ]]; then
-    batch_inc_factor=1.5
-    overlap=0.33
-    max_loc_iters=1
-else
-    batch_inc_factor=1.0
-    overlap=0.0
-    max_loc_iters=0
-fi
+# Default general parameters
+OPT_PARAMS=(
+  optimizer=lssr1_tr
+  dataset=mnist
+  model=simple_ffnn
+)
 
-# --- Optimizer-specific settings ---#
-use_pmw="false"
-if [[ "$optimizer" == "apts_ip" ]]; then
-    use_pmw="true"
-    num_subd_arr=(1) # For data-parallel executions
-    num_stages_arr=(2)
-    num_rep_arr=(1)
-fi
+EVAL_PARAMS=(
+  epochs=50
+  max_iters=0
+  criterion=cross_entropy
+)
 
-gradient_accumulation="False"
-if [[ "$gradient_accumulation" == "True" ]]; then
-    accumulation_steps=3
-fi
+APTS_PARAMS=(
+  batch_inc_factor=1.0
+  overlap=0.0
+  glob_second_order=false
+)
 
-# Check if optimizer is apts_d
-if [[ "$optimizer" == "apts_d" ]]; then
-    glob_pass="True"
-    foc="False"
-fi
+# --- Functions to override defaults --- #
 
-if [[ "$current_dir" == *"home"* ]]; then
-    max_ngpu_per_node=1 # 2 only for multi-gpu on USI Rosa
-else
-    max_ngpu_per_node=4 # each node has 4 GPUs on Daint Alps
-fi
+set_optimizer_params() {
+  local opt="$1"
+  if [[ "$opt" == "apts_ip" ]]; then
+    USE_PMW=true
+    NUM_SUBD=(1)
+    NUM_STAGES=(2)
+    NUM_REP=(1)
+  fi
+}
 
-# --- Helper function for job submission ---#
+set_model_params() {
+  if [[ "${OPT_PARAMS[2]#*=}" == "nanogpt" ]]; then
+    EVAL_PARAMS=(epochs=0 max_iters=2000000 criterion=cross_entropy_transformers)
+    BATCH_SIZES=(128)
+  fi
+}
+
+set_grad_acc_params() {
+  if $GRAD_ACC; then
+    ACCUM_STEPS=1
+  fi
+}
+
+set_hardware_params() {
+  if [[ "$(pwd)" == *"/home/"* ]]; then
+    MAX_GPUS=1
+  else
+    MAX_GPUS=4
+  fi
+}
+
+set_apts_lssr1_tr_params() {
+  local opt="${OPT_PARAMS[0]#*=}"
+  if [[ "$opt" =~ ^(apts_d|apts_p|apts_ip|lssr1_tr)$ ]]; then
+    APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.33 max_wolfe_iters=5 max_zoom_iters=5 mem_length=5)
+    if [[ "$opt" != "lssr1_tr" ]]; then
+      APTS_PARAMS+=(glob_opt=tr max_glob_iters=1 glob_second_order=false loc_opt=tr max_loc_iters=1 loc_second_order=false)
+      if [[ "$opt" == "apts_d" ]]; then
+        APTS_PARAMS+=(glob_pass=true foc=true)
+      elif [[ "$opt" == "apts_p" ]]; then
+        APTS_PARAMS+=(glob_pass=true foc=false)
+      elif [[ "$opt" == "apts_ip" ]]; then
+        APTS_PARAMS+=(loc_opt=sgd loc_second_order=false glob_pass=true)
+      fi
+    else
+      APTS_PARAMS+=(glob_second_order=false)
+    fi
+  fi
+}
+
+# --- Helpers --- #
+
 submit_job() {
-    local template="$1"
-    local temp_job
-    temp_job=$(mktemp)
-    sed -e "s|\${job_name}|${job_name}|g" \
-        -e "s|\${world_size}|${world_size}|g" \
-        -e "s|\${script}|${script}|g" \
-        -e "s|\${num_stages}|${num_stages}|g" \
-        -e "s|\${num_subd}|${num_subd}|g" \
-        -e "s|\${num_rep}|${num_rep}|g" \
-        -e "s|\${ntasks_per_node}|${ntasks_per_node}|g" \
-        "${template}" >"${temp_job}"
-    sbatch --nodes=${nodes} "${temp_job}"
-    rm "${temp_job}"
+  local template=$1 jobfile
+  jobfile=$(mktemp)
+  sed -e "s|\${job_name}|${job_name}|g" \
+    -e "s|\${world_size}|${world_size}|g" \
+    -e "s|\${script}|${SCRIPT}|g" \
+    -e "s|\${num_stages}|${num_stages}|g" \
+    -e "s|\${num_subd}|${num_subd}|g" \
+    -e "s|\${num_rep}|${num_rep}|g" \
+    -e "s|\${ntasks_per_node}|${ntasks_per_node}|g" \
+    "$template" >"$jobfile"
+  sbatch --nodes="${nodes}" "$jobfile"
+  rm "$jobfile"
 }
 
-# --- Determine homogeneous node allocation ---#
 calc_nodes() {
-    for n in $(seq 1 $world_size); do
-        if [ $((world_size % n)) -eq 0 ]; then
-            tasks_per_node=$((world_size / n))
-            if [ $tasks_per_node -le $max_ngpu_per_node ]; then
-                echo "$n"
-                return
-            fi
-        fi
-    done
-    # Fallback: one task per node
-    echo "$world_size"
+  for n in $(seq 1 $world_size); do
+    local tpn=$((world_size / n))
+    if ((world_size % n == 0 && tpn <= MAX_GPUS)); then
+      echo $n
+      return
+    fi
+  done
+  echo "$world_size"
 }
 
-# --- Helper to update config file parameters ---#
 update_config() {
-    local key="$1" value="$2"
-    sed -i "/${key}:/ {n; s/value: .*/value: ${value}/}" "${config_file}"
+  sed -i "/$1:/ {n; s/value: .*/value: $2/}" "$config_file"
 }
 
-# --- Main job submission loop ---#
-for num_stages in "${num_stages_arr[@]:-1}"; do
-    for num_subd in "${num_subd_arr[@]}"; do
-        for num_rep in "${num_rep_arr[@]:-1}"; do
-            for batch_size in "${batch_sizes[@]}"; do
-                for trial in $(seq 1 "${trials}"); do
-                    job_name="${optimizer}_${dataset}_${batch_size}_nst_${num_stages}_nsd_${num_subd}_nrpsd_${num_rep}_trial_${trial}"
-                    world_size=$((num_stages * num_subd * num_rep))
-                    nodes=$(calc_nodes)
-                    ntasks_per_node=$((world_size / nodes))
+# --- Initialise all params --- #
+eval "${OPT_PARAMS[@]}"
+set_optimizer_params "$optimizer"
+set_model_params
+set_grad_acc_params
+set_hardware_params
+set_apts_lssr1_tr_params
 
-                    config_file="./config_files/config_${job_name}.yaml"
-                    cp ./config_files/config_${optimizer}.yaml "${config_file}"
+# --- Main loop --- #
+for num_stages in "${NUM_STAGES[@]}"; do
+  for num_subd in "${NUM_SUBD[@]}"; do
+    for num_rep in "${NUM_REP[@]}"; do
+      for batch_size in "${BATCH_SIZES[@]}"; do
+        for trial in $(seq 1 "$TRIALS"); do
+          job_name="${optimizer}_${dataset}_${batch_size}_nst_${num_stages}_nsd_${num_subd}_nrpsd_${num_rep}_trial_${trial}"
+          world_size=$((num_stages * num_subd * num_rep))
+          nodes=$(calc_nodes)
+          ntasks_per_node=$((world_size / nodes))
+          config_file="./config_files/config_${job_name}.yaml"
+          cp "./config_files/config_${optimizer}.yaml" "$config_file"
 
-                    update_config "dataset_name" "${dataset}"
-                    update_config "model_name" "${model}"
-                    update_config "criterion" "${criterion}"
-                    update_config "epochs" "${epochs}"
-                    update_config "num_subdomains" "${num_subd}"
-                    update_config "batch_inc_factor" "${batch_inc_factor}"
-                    update_config "overlap" "${overlap}"
-                    update_config "optimizer" "${optimizer}"
-                    update_config "max_iters" "${max_iters}"
-                    update_config "max_loc_iters" "${max_loc_iters}"
+          # Core updates
+          update_config dataset_name "$dataset"
+          update_config model_name "$model"
+          update_config criterion "${EVAL_PARAMS[2]#*=}"
+          update_config epochs "${EVAL_PARAMS[0]#*=}"
+          update_config max_iters "${EVAL_PARAMS[1]#*=}"
+          update_config num_subdomains "$num_subd"
 
-                    if [[ "$use_pmw" == "true" ]]; then
-                        update_config "num_stages" "${num_stages}"
-                        update_config "num_replicas_per_subdomain" "${num_rep}"
-                    fi
+          # APTS/LSSR1_TR updates
+          for kv in "${APTS_PARAMS[@]}"; do
+            IFS="=" read -r key val <<<"$kv"
+            update_config "$key" "$val"
+          done
 
-                    # Check that optimize is not SGD or Adam
-                    if [[ "$optimizer" != "sgd" && "$optimizer" != "adam" ]]; then
-                        update_config "mem_length" "${mem_length}"
-                        update_config "max_wolfe_iters" "${max_wolfe_iters}"
-                    fi
+          # PMW and gradient accumulation
+          if $USE_PMW; then
+            update_config num_stages "$num_stages"
+            update_config num_replicas_per_subdomain "$num_rep"
+          fi
+          if $GRAD_ACC; then
+            update_config gradient_accumulation true
+            update_config accumulation_steps "$ACCUM_STEPS"
+          fi
 
-                    # Check if gradient accumulation is enabled
-                    if [[ "$gradient_accumulation" == "True" ]]; then
-                        update_config "gradient_accumulation" "${gradient_accumulation}"
-                        update_config "accumulation_steps" "${accumulation_steps}"
-                    fi
+          # Batch‐size logic
+          if [[ "$optimizer" =~ ^(apts_p|apts_ip)$ ]]; then
+            update_config batch_size "$batch_size"
+          else
+            eff_bs=$batch_size
+            update_config effective_batch_size "$eff_bs"
+            update_config batch_size $((eff_bs * num_subd))
+          fi
 
-                    if [[ "$optimizer" == "apts_p" || "$optimizer" == "apts_ip" ]]; then
-                        update_config "batch_size" "${batch_size}"
-                    else
-                        effective_batch_size=${batch_size}
-                        actual_batch_size=$((effective_batch_size * num_subd))
-                        update_config "batch_size" "${actual_batch_size}"
-                        update_config "effective_batch_size" "${effective_batch_size}"
-                    fi
-
-                    if [[ "$optimizer" == "apts_d" ]]; then
-                        update_config "glob_pass" "${glob_pass}"
-                        update_config "foc" "${foc}"
-                    fi
-
-                    export nccl_debug=WARN job_name script use_wandb=1 num_stages num_subd num_rep world_size ntasks_per_node config_file optimizer trial
-                    if [[ "$current_dir" == *"home"* ]]; then
-                        submit_job rosa.job
-                    else
-                        submit_job daintalps.job
-                    fi
-                done
-            done
+          # Submit
+          export nccl_debug=WARN job_name SCRIPT use_wandb=1 \
+            num_stages num_subd num_rep world_size ntasks_per_node config_file optimizer trial
+          template=$([[ "$(pwd)" == *"/home/"* ]] && echo rosa.job || echo daintalps.job)
+          submit_job "$template"
         done
+      done
     done
+  done
 done

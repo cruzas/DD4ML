@@ -46,7 +46,7 @@ class Trainer:
         # initial batch size and adaptive params
         C.batch_size = 128  # max batch size is lenght of dataset
         C.batch_inc_factor = 1  # factor to increase batch size
-        C.loss_tol = 1e-3  # loss tolerance for adaptive batch size
+        C.loss_tol = 1e-2  # loss tolerance for adaptive batch size
         # APTS and TR
         C.delta = 0.1  # for trust region methods
         C.min_delta = 1e-3
@@ -60,7 +60,9 @@ class Trainer:
         C.max_loc_iters = 3  # for APTS*
         C.glob_second_order = False  # for APTS*
         C.loc_second_order = False  # for APTS*
-        C.max_wolfe_iters = 20  # for APTS*
+        C.max_wolfe_iters = 5  # for APTS*
+        C.max_zoom_iters = 5
+        C.paper_tr_update = False  # for LSSR1_TR
         C.gradient_accumulation = True  # for APTS*
         C.accumulation_steps = 1  # for APTS*
         C.mem_length = 3  # for TR methods
@@ -70,7 +72,7 @@ class Trainer:
         C.loc_opt = None
         C.glob_opt = None
         C.overlap = 0.0
-        C.adjust_batch_size_every_iters = 10000 # for use with LLMs and LSSR1_TR
+        C.adjust_batch_size_every_iters = 10000  # for use with LLMs and LSSR1_TR
         return C
 
     def __init__(
@@ -86,7 +88,7 @@ class Trainer:
 
         # determine the device we'll train on
         if config.device == "auto":
-            print("Doing auto device selection...")
+            # print("Doing auto device selection...")
             self.device = (
                 f"cuda:{torch.cuda.current_device()}"
                 if dist.get_backend() != "gloo"
@@ -283,7 +285,11 @@ class Trainer:
         lssr1_tr_cond = self._lssr1_tr_present() and loss_inc_and_still_not_max_bs
 
         # Condition that must be satisfied for ASNTR to increase batch size
-        asntr_cond = self._asntr_present() and self._inc_batch_size()
+        asntr_cond = (
+            self._asntr_present()
+            and self._inc_batch_size()
+            and not self.max_batch_size_reached
+        )
 
         if lssr1_tr_cond or asntr_cond:
             new_bs = min(
@@ -295,6 +301,9 @@ class Trainer:
                 dprint(
                     f"Current loss: {loss}. Previous loss: {self.last_loss}. Batch size is already at maximum ({new_bs})."
                 )
+                if self.current_batch_size != new_bs:
+                    self.current_batch_size = new_bs
+                    self.setup_data_loaders()
                 return
 
             dprint(
@@ -404,6 +413,13 @@ class Trainer:
             self.model.train()
         return total / n
 
+    def _tr_or_apts_present(self):
+        """Check if the optimizer is a trust-region or APTS optimizer."""
+        return (
+            "tr" in self.optimizer.__class__.__name__.lower()
+            or "apts" in self.optimizer.__class__.__name__.lower()
+        )
+
     def compute_epoch_loss(self):
         model, cfg = self.model, self.config
         model.train()
@@ -413,11 +429,19 @@ class Trainer:
         data_iter = iter(self.train_loader)
         batch_idx = 0
         num_batches = len(self.train_loader)
+        batch_loss, batch_grad = None, None
+        stay_on_batch = False
         while batch_idx < num_batches:
             try:
                 x, y = next(data_iter)
             except StopIteration:
                 break
+
+            step_args = {}
+            if stay_on_batch and batch_loss is not None and self._tr_or_apts_present():
+                step_args.update({"loss": batch_loss})
+            if stay_on_batch and batch_grad is not None and self._tr_or_apts_present():
+                step_args.update({"grad": batch_grad})
 
             curr_batch_count = batch_idx + 1
             batch_time_start = time.time()
@@ -449,7 +473,6 @@ class Trainer:
                 )
                 if not hasattr(self.optimizer, "grad_evals"):
                     general_closure = self._wrap_grad_counter(general_closure)
-                step_args = {}
                 sig = inspect.signature(self.optimizer.step).parameters
                 # Check if final_subdomain_closure is part of self.optimizer arguments
                 if "final_subdomain_closure" in sig:
@@ -460,21 +483,25 @@ class Trainer:
                             self.criterion(o, yc) for o, yc in zip(outputs, y_chunks)
                         ]
 
-                    step_args = {
-                        "closure": general_closure,
-                        "final_subdomain_closure": final_subdomain_closure,
-                    }
+                    step_args.update(
+                        {
+                            "closure": general_closure,
+                            "final_subdomain_closure": final_subdomain_closure,
+                        }
+                    )
                 elif any(
                     k in self.optimizer.__class__.__name__.lower()
                     for k in ("apts_d", "apts_p")
                 ):
-                    step_args = {
-                        "inputs": x,
-                        "labels": y,
-                        "inputs_d": x_d,
-                        "labels_d": y_d,
-                        "hNk": self._compute_hNk(),
-                    }
+                    step_args.update(
+                        {
+                            "inputs": x,
+                            "labels": y,
+                            "inputs_d": x_d,
+                            "labels_d": y_d,
+                            "hNk": self._compute_hNk(),
+                        }
+                    )
                 elif "asntr" in self.optimizer.__class__.__name__.lower():
                     closure_d = closure(
                         x_d,
@@ -489,13 +516,15 @@ class Trainer:
                     if not hasattr(self.optimizer, "grad_evals"):
                         closure_d = self._wrap_grad_counter(closure_d)
 
-                    step_args = {
-                        "closure_main": general_closure,
-                        "closure_d": closure_d,
-                        "hNk": self._compute_hNk(),
-                    }
+                    step_args.update(
+                        {
+                            "closure_main": general_closure,
+                            "closure_d": closure_d,
+                            "hNk": self._compute_hNk(),
+                        }
+                    )
                 else:
-                    step_args = {"closure": general_closure}
+                    step_args.update({"closure": general_closure})
 
                 result = self.optimizer.step(**step_args)
                 self.grad_evals += (
@@ -509,21 +538,22 @@ class Trainer:
                     batch_loss = result
                 # otherwise assume it's a sequence
                 else:
-                    batch_loss, *__ = result
+                    batch_loss, batch_grad = result
 
                 total_loss += batch_loss
 
             self.loss = total_loss / curr_batch_count
             # print(f"Loss after batch {batch_idx + 1}: {self.loss:.4f}")
 
-            if self._stay_here():
+            stay_on_batch = self._stay_here()
+            if stay_on_batch:
                 dprint(f"Staying on batch with index {batch_idx}.")
                 data_iter = chain([(x, y)], data_iter)
             else:
                 batch_idx += 1
 
             # Adjust batch size if needed (checks done automatically within the function)
-            if self._asntr_present():
+            if not stay_on_batch and self._asntr_present():
                 self._adjust_batch_size(self.loss)
 
             # Print progress within the epoch
@@ -534,9 +564,10 @@ class Trainer:
             self.trigger_callbacks("on_batch_end")
             self.iter_num += 1
 
-        if self._lssr1_tr_present():
+        if self._lssr1_tr_present() and num_batches > 1:
             full_loss = self._eval_full_objective()
             self._adjust_batch_size(full_loss)
+            num_batches = len(self.train_loader)
 
         tnow = time.time()
         self.epoch_dt = tnow - self.epoch_time
@@ -597,13 +628,17 @@ class Trainer:
 
     def run_by_iter(self):
         model, cfg = self.model, self.config
-        cfg.adjust_batch_size_every_iters = int(float(cfg.adjust_batch_size_every_iters))   
+        cfg.adjust_batch_size_every_iters = int(
+            float(cfg.adjust_batch_size_every_iters)
+        )
         model.train()
         self.total_start_time = time.time()
         self.iter_time = time.time()
         self.data_iter = iter(self.train_loader)
         # Compute the number of batches in the train_loader
         num_batches = self._get_num_batches()
+        batch_grad = None
+        stay_on_batch = False
         dprint(f"Number of batches in train_loader: {num_batches}")
 
         for self.iter_num in range(
@@ -615,6 +650,12 @@ class Trainer:
             except StopIteration:
                 self.data_iter = iter(self.train_loader)
                 batch = next(self.data_iter)
+
+            step_args = {}
+            if stay_on_batch and batch_loss is not None and self._tr_or_apts_present():
+                step_args.update({"loss": batch_loss})
+            if stay_on_batch and batch_grad is not None and self._tr_or_apts_present():
+                step_args.update({"grad": batch_grad})
 
             x, y = (t.to(self.device) for t in batch)
             if self._asntr_present():
@@ -647,7 +688,6 @@ class Trainer:
                     general_closure = self._wrap_grad_counter(general_closure)
 
                 # build step_args
-                step_args = {}
                 sig = inspect.signature(self.optimizer.step).parameters
 
                 if "final_subdomain_closure" in sig:
@@ -656,22 +696,26 @@ class Trainer:
                         ys = y.chunk(len(outputs))
                         return [self.criterion(o, yc) for o, yc in zip(outputs, ys)]
 
-                    step_args = {
-                        "closure": general_closure,
-                        "final_subdomain_closure": final_subdomain_closure,
-                    }
+                    step_args.update(
+                        {
+                            "closure": general_closure,
+                            "final_subdomain_closure": final_subdomain_closure,
+                        }
+                    )
 
                 elif any(
                     k in self.optimizer.__class__.__name__.lower()
                     for k in ("apts_d", "apts_p")
                 ):
-                    step_args = {
-                        "inputs": x,
-                        "labels": y,
-                        "inputs_d": x_d,
-                        "labels_d": y_d,
-                        "hNk": self._compute_hNk(),
-                    }
+                    step_args.update(
+                        {
+                            "inputs": x,
+                            "labels": y,
+                            "inputs_d": x_d,
+                            "labels_d": y_d,
+                            "hNk": self._compute_hNk(),
+                        }
+                    )
 
                 elif "asntr" in self.optimizer.__class__.__name__.lower():
                     closure_d = closure(
@@ -685,18 +729,20 @@ class Trainer:
                     )
                     if not hasattr(self.optimizer, "grad_evals"):
                         closure_d = self._wrap_grad_counter(closure_d)
-                    step_args = {
-                        "inputs": x,
-                        "labels": y,
-                        "closure_main": general_closure,
-                        "closure_d": closure_d,
-                        "inputs_d": x_d,
-                        "labels_d": y_d,
-                        "hNk": self._compute_hNk(),
-                    }
+                    step_args.update(
+                        {
+                            "inputs": x,
+                            "labels": y,
+                            "closure_main": general_closure,
+                            "closure_d": closure_d,
+                            "inputs_d": x_d,
+                            "labels_d": y_d,
+                            "hNk": self._compute_hNk(),
+                        }
+                    )
 
                 else:
-                    step_args = {"closure": general_closure}
+                    step_args.update({"closure": general_closure})
 
                 # perform optimization step
                 result = self.optimizer.step(**step_args)
@@ -710,19 +756,26 @@ class Trainer:
                 ):
                     self.loss = result
                 else:
-                    self.loss, *_ = result
+                    self.loss, batch_grad = result
 
             # possibly repeat batch
-            if self._stay_here():
+            stay_on_batch = self._stay_here()
+            if stay_on_batch:
                 dprint("Staying on batch.")
                 self.data_iter = chain([(x, y)], self.data_iter)
 
             # adaptive batch‐size
             if self._asntr_present():
                 self._adjust_batch_size(self.loss)
-            elif self._lssr1_tr_present() and self.iter_num > 0 and self.iter_num % cfg.adjust_batch_size_every_iters == 0:
+            elif (
+                self._lssr1_tr_present()
+                and self.iter_num > 0
+                and self.iter_num % cfg.adjust_batch_size_every_iters == 0
+                and num_batches > 1
+            ):
                 full_loss = self._eval_full_objective()
                 self._adjust_batch_size(full_loss)
+                num_batches = len(self.train_loader)
 
             self.curr_train_perplexity = self.compute_current_train_perplexity()
 
@@ -739,7 +792,6 @@ class Trainer:
         # self.loss may be a float or a zero‐dim tensor
         loss_val = self.loss.item() if torch.is_tensor(self.loss) else float(self.loss)
         return math.exp(loss_val)
-        
 
     @torch.no_grad()
     def compute_test_perplexity(self):

@@ -206,9 +206,13 @@ def main(
         trainer, save_model: bool = False, save_frequency: int = 5
     ) -> None:
 
-        # delta = trainer.optimizer.param_groups[0]["lr"]
-        delta = trainer.optimizer.delta
-        thing_to_print = "lr"
+        # Check if delta is present in the optimizer's attributes
+        if not hasattr(trainer.optimizer, "delta"):
+            delta = trainer.optimizer.param_groups[0]["lr"]
+            thing_to_print = "lr"
+        else:
+            delta = trainer.optimizer.delta
+            thing_to_print = "delta"
 
         dprint(
             f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
@@ -223,6 +227,7 @@ def main(
                     "accuracy": trainer.accuracy,
                     "running_time": trainer.running_time,
                     "grad_evals": trainer.grad_evals,
+                    f"{thing_to_print}": delta,
                 }
             )
         if save_model:
@@ -240,6 +245,14 @@ def main(
     def batch_end_callback(
         trainer, save_model: bool = True, save_frequency: int = 10000
     ) -> None:
+        # Check if delta is present in the optimizer's attributes
+        if not hasattr(trainer.optimizer, "delta"):
+            delta = trainer.optimizer.param_groups[0]["lr"]
+            thing_to_print = "lr"
+        else:
+            delta = trainer.optimizer.delta
+            thing_to_print = "delta"
+
         if trainer.iter_num % 50 == 0:
             if rank == 0 and use_wandb:
                 log_fn(
@@ -249,11 +262,12 @@ def main(
                         "train_perplexity": trainer.curr_train_perplexity,
                         "running_time": trainer.running_time,
                         "grad_evals": trainer.grad_evals,
+                        f"{thing_to_print}": delta,
                     }
-                )   
-            
+                )
+
             dprint(
-                f"Iter {trainer.iter_num}, g-evals: {trainer.grad_evals}, time {trainer.iter_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, loss {trainer.loss:.5f}"
+                f"Iter {trainer.iter_num}, g-evals: {trainer.grad_evals}, time {trainer.iter_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, loss {trainer.loss:.5f}, train perplexity: {trainer.curr_train_perplexity:.5f}, {thing_to_print}: {delta:.6e}"
             )
             if save_model:
                 proj = wandb_config.get("project", trial_args["project"])
