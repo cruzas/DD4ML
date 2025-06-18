@@ -228,6 +228,7 @@ def main(
                     "running_time": trainer.running_time,
                     "grad_evals": trainer.grad_evals,
                     f"{thing_to_print}": delta,
+                    "batch_size": trainer.current_batch_size,
                 }
             )
         if save_model:
@@ -263,6 +264,7 @@ def main(
                         "running_time": trainer.running_time,
                         "grad_evals": trainer.grad_evals,
                         f"{thing_to_print}": delta,
+                        "batch_size": trainer.current_batch_size,
                     }
                 )
 
