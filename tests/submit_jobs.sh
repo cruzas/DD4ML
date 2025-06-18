@@ -136,14 +136,8 @@ calc_nodes() {
   echo "$world_size"
 }
 
-# --- Improved update_config: replace or append if missing --- #
 update_config() {
-  local key=$1 val=$2
-  if grep -qE "^${key}:" "$config_file"; then
-    sed -i "/^${key}:/ {n; s/value: .*/value: ${val}/}" "$config_file"
-  else
-    printf "\n%s:\n  value: %s\n" "$key" "$val" >>"$config_file"
-  fi
+  sed -i "/$1:/ {n; s/value: .*/value: $2/}" "$config_file"
 }
 
 # --- Initialise all params --- #
@@ -211,13 +205,13 @@ for num_stages in "${NUM_STAGES[@]}"; do
           # Conditionally apply PAPER_TR_UPDATE
           if [[ "$optimizer" == "lssr1_tr" ]]; then
             update_config paper_tr_update "$PAPER_TR_UPDATE"
-          elif [[ "$optimizer" == *apts_* ]] &&
-            ([[ "$APTS_GLOB_OPT" == "lssr1_tr" ]] || [[ "$APTS_LOC_OPT" == "lssr1_tr" ]]); then
+          elif [[ "$optimizer" == *apts_* && ("$APTS_GLOB_OPT" == "lssr1_tr" || "$APTS_LOC_OPT" == "lssr1_tr") ]]; then
             update_config paper_tr_update "$PAPER_TR_UPDATE"
           fi
 
           for kv in "${APTS_PARAMS[@]}"; do
             IFS="=" read -r key val <<<"$kv"
+            echo "→ Updating config: $key = $val"
             update_config "$key" "$val"
           done
 

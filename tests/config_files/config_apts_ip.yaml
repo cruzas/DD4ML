@@ -65,3 +65,5 @@ parameters:
     value: "tr"
   loc_opt:
     value: "sgd"
+  paper_tr_update:
+    value: False
