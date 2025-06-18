@@ -162,7 +162,7 @@ class APTS_P(APTS_Base):
         pred = None
         if not self.dogleg:
             # Aggregate local losses
-            pred = loc_loss - self.init_loc_loss
+            pred = self.init_loc_loss - loc_loss
             if self.nr_models > 1:
                 dist.all_reduce(pred, op=dist.ReduceOp.SUM)
 
