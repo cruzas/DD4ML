@@ -136,6 +136,7 @@ calc_nodes() {
   echo "$world_size"
 }
 
+# TODO: make more robust
 update_config() {
   sed -i "/$1:/ {n; s/value: .*/value: $2/}" "$config_file"
 }
@@ -211,7 +212,7 @@ for num_stages in "${NUM_STAGES[@]}"; do
 
           for kv in "${APTS_PARAMS[@]}"; do
             IFS="=" read -r key val <<<"$kv"
-            echo "→ Updating config: $key = $val"
+            # echo "→ Updating config: $key = $val"
             update_config "$key" "$val"
           done
 
