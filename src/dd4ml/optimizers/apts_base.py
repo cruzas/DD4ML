@@ -251,7 +251,8 @@ class APTS_Base(Optimizer):
         self.loc_opt.delta = self.glob_opt.delta
         if self.norm_type != math.inf and self.nr_models > 1:
             self.loc_opt.delta /= self.nr_models
-        self.loc_opt.update_pytorch_lr()
+        if hasattr(self.loc_opt, "update_pytorch_lr"):
+            self.loc_opt.update_pytorch_lr()
 
         # Ensure local model matches global model for next iteration
         self.loc_model.load_state_dict(get_state_dict(self.model))

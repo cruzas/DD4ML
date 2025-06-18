@@ -65,7 +65,7 @@ srun --kill-on-bad-exit python -u "${script}" \
     --num_stages=${num_stages} \
     --num_subdomains=${num_subd} \
     --num_replicas_per_subdomain=${num_rep} \
-    --project=debug_${optimizer}_tests \
+    --project=${PROJECT} \
     --trial_num=${trial} \
     --use_seed
 echo "Test done $(date)"

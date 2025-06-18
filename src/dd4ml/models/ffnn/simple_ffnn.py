@@ -3,6 +3,7 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .base_ffnn import BaseFFNN
 
@@ -11,11 +12,10 @@ class SimpleFFNN(BaseFFNN):
     @staticmethod
     def get_default_config():
         C = BaseFFNN.get_default_config()
-        # e.g. for MNIST: 1×28×28 → 784
         C.input_features = 1 * 28 * 28
         C.output_classes = 10
-        C.fc_layers = [350, 250, 150]
-        C.dropout_p = 0.5
+        C.fc_layers = [128, 64]
+        C.dropout_p = 0.2
         return C
 
     def __init__(self, config):
@@ -30,9 +30,9 @@ class SimpleFFNN(BaseFFNN):
             in_feats = h
 
         layers["out"] = nn.Linear(in_feats, config.output_classes)
-        layers["softmax"] = nn.Softmax(dim=1)
         self.net = nn.Sequential(layers)
 
     def forward(self, x):
         x = x.view(x.size(0), -1)
-        return self.net(x)
+        x = self.net(x)
+        return F.log_softmax(x, dim=1)

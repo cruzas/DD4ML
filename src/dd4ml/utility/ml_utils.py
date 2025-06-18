@@ -110,6 +110,11 @@ def closure(
 
         # Distributed processing (only if model_handler is present)
         if has_model_handler:
+            # Determine original data type
+            orig_dtype = loss.dtype
+            # Cast to float64 for all_reduce
+            loss_64 = loss.to(torch.float64)
+
             if sync_loss == "global":
                 if model.model_handler.is_last_stage():
                     dist.all_reduce(

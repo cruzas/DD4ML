@@ -13,7 +13,6 @@ from itertools import chain
 
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
@@ -44,7 +43,7 @@ class Trainer:
         C.weight_decay = 0.1  # only applied on matmul weights
         C.grad_norm_clip = None
         # initial batch size and adaptive params
-        C.batch_size = 128  # max batch size is lenght of dataset
+        C.batch_size = 128  # max batch size is length of dataset
         C.batch_inc_factor = 1  # factor to increase batch size
         C.loss_tol = 1e-2  # loss tolerance for adaptive batch size
         # APTS and TR
@@ -299,22 +298,20 @@ class Trainer:
             if new_bs == len(self.train_dataset):
                 self.max_batch_size_reached = True
                 dprint(
-                    f"Current loss: {loss}. Previous loss: {self.last_loss}. Batch size is already at maximum ({new_bs})."
+                    f"Batch size is already at maximum ({new_bs}). No more increases allowed."
                 )
                 if self.current_batch_size != new_bs:
                     self.current_batch_size = new_bs
                     self.setup_data_loaders()
                 return
 
-            dprint(
-                f"Current loss: {loss}. Previous loss: {self.last_loss}. Increasing batch size from {self.current_batch_size} to {new_bs}."
-            )
+            dprint(f"Increasing batch size from {self.current_batch_size} to {new_bs}.")
+
             self.current_batch_size = new_bs
+
             # Rebuild data loaders to reflect the new batch size
             self.setup_data_loaders()
-            dprint(
-                f"Rebuilt data loaders with new batch size: {self.current_batch_size}."
-            )
+
             # Invalidate cached shapes for any WeightParallelizedTensor parameters
             for p in self.model.parameters():
                 if isinstance(p, WeightParallelizedTensor):
@@ -353,7 +350,6 @@ class Trainer:
 
         Works for both cfg.use_pmw = {False, True}.
         """
-        dprint("Evaluating full objective function over the training set...")
         was_training = self.model.training
         self.model.eval()
 
@@ -555,6 +551,9 @@ class Trainer:
             # Adjust batch size if needed (checks done automatically within the function)
             if not stay_on_batch and self._asntr_present():
                 self._adjust_batch_size(self.loss)
+                if len(self.train_loader) > num_batches:
+                    data_iter = iter(self.train_loader)
+                    batch_idx = 0
 
             # Print progress within the epoch
             self.epoch_progress = 100.0 * (batch_idx + 1) / num_batches
@@ -567,7 +566,9 @@ class Trainer:
         if self._lssr1_tr_present() and num_batches > 1:
             full_loss = self._eval_full_objective()
             self._adjust_batch_size(full_loss)
-            num_batches = len(self.train_loader)
+            if len(self.train_loader) > num_batches:
+                data_iter = iter(self.train_loader)
+                batch_idx = 0
 
         tnow = time.time()
         self.epoch_dt = tnow - self.epoch_time
@@ -639,7 +640,6 @@ class Trainer:
         num_batches = self._get_num_batches()
         batch_grad = None
         stay_on_batch = False
-        dprint(f"Number of batches in train_loader: {num_batches}")
 
         for self.iter_num in range(
             cfg.max_iters + 1 if cfg.max_iters is not None else float("inf")
@@ -775,11 +775,11 @@ class Trainer:
             ):
                 full_loss = self._eval_full_objective()
                 self._adjust_batch_size(full_loss)
-                num_batches = len(self.train_loader)
 
             self.curr_train_perplexity = self.compute_current_train_perplexity()
 
             # timing & callbacks
+            num_batches = len(self.train_loader)  # in case it was changed
             tnow = time.time()
             self.iter_dt = tnow - self.iter_time
             self.running_time = tnow - self.total_start_time
