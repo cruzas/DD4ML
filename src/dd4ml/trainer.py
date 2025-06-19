@@ -55,7 +55,8 @@ class Trainer:
         C.glob_pass = False
         C.foc = False  # for APTS_D
         C.soc = False  # for APTS_D
-        C.dogleg = False  # for APTS_D
+        C.glob_dogleg = False  # for APTS_*, *TR
+        C.loc_dogleg = False  # for APTS_*, *TR
         C.max_glob_iters = 1  # for APTS*
         C.max_loc_iters = 3  # for APTS*
         C.glob_second_order = False  # for APTS*

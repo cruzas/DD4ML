@@ -17,6 +17,8 @@ parameters:
     value: 1
   glob_second_order:
     value: True
+  glob_dogleg:
+    value: False
   max_wolfe_iters:
     value: 20
   max_zoom_iters:

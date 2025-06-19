@@ -27,6 +27,11 @@ class TR(Optimizer):
         self.norm_type = kwargs.pop("norm_type", 2)
         self.tol = float(kwargs.pop("tol", 1e-6))
         self.second_order = bool(kwargs.pop("second_order", False))
+        self.dogleg = bool(
+            kwargs.pop("dogleg", False)
+        )  # only used if second_order is True
+        if self.dogleg and not self.second_order:
+            raise ValueError("Dogleg is only applicable in second-order mode")
         self.mem_length = int(kwargs.pop("mem_length", 10))
         self.nu_dec = kwargs.pop("nu_dec")
         self.nu_inc = kwargs.pop("nu_inc")
@@ -102,16 +107,19 @@ class TR(Optimizer):
             return loss, grad
 
         # First- or second-order TR step
-        if self.second_order and self.hess and len(self.hess._S) > 0:
+        if self.second_order and len(self.hess._S) > 0:
+            # pred_red = -(g*p + 0.5*p*B*p)
             self._step_buf, pred_red = solve_tr_second_order(
-                grad,
-                gn,
-                self.delta,
-                self.hess,  # type: ignore[arg-type]
-                self.obs,  # type: ignore[arg-type]
-                self.tol,
+                gradient=grad,
+                grad_norm=gn,
+                trust_radius=self.delta,
+                lsr1_hessian=self.hess,  # type: ignore[arg-type]
+                obs_solver=self.obs,  # type: ignore[arg-type]
+                tol=self.tol,
+                dogleg=self.dogleg,
             )
         else:
+            # pred_red = -g*p
             self._step_buf, pred_red = solve_tr_first_order(
                 grad, gn, self.delta, self.tol
             )
@@ -133,7 +141,7 @@ class TR(Optimizer):
                 # Update Hessian memory
                 sk = self._step_buf.clone()
                 yk = (trial_grad - grad).clone()
-                
+
                 if sk.norm() > self.tol and yk.norm() > self.tol:
                     # Also takes care of updating gamma
                     self.hess.update_memory(sk, yk)

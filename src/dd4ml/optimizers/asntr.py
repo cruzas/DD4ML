@@ -38,6 +38,7 @@ class ASNTR(Optimizer):
         max_delta: float = 10.0,
         gamma: float = 1e-3,
         second_order: bool = True,
+        dogleg: bool = False,
         mem_length: int = 30,
         # controls
         eta: float = 1e-4,
@@ -66,6 +67,9 @@ class ASNTR(Optimizer):
         self.max_delta = float(max_delta)
         self.tol = float(tol)
         self.second_order = bool(second_order)
+        self.dogleg = bool(dogleg)  # dogleg is only used in second-order mode
+        if self.dogleg and not self.second_order:
+            raise ValueError("Dogleg is only applicable in second-order mode")
 
         # SR1 memory and OBS solver
         self.hess = LSR1(
@@ -182,7 +186,13 @@ class ASNTR(Optimizer):
             print("(INFO) Using second-order ASNTR step.")
             # pred_red = -(g*p + 0.5*p*B*p)
             step, pred_red = solve_tr_second_order(
-                g, gn, self.delta, self.hess, self.obs, self.tol
+                gradient=g,
+                grad_norm=gn,
+                trust_radius=self.delta,
+                lsr1_hessian=self.hess,
+                obs_solver=self.obs,
+                tol=self.tol,
+                dogleg=self.dogleg,
             )
         else:
             print("(INFO) Using first-order ASNTR step.")

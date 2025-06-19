@@ -21,7 +21,11 @@ parameters:
     value: False
   glob_second_order:
     value: True
+  glob_dogleg:
+    value: False
   loc_second_order:
+    value: False
+  loc_dogleg:
     value: False
   norm_type:
     value: inf

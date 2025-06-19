@@ -17,6 +17,8 @@ parameters:
     value: 1
   glob_second_order:
     value: False
+  dogleg:
+    value: False
   mem_length:
     value: 3
   max_iters:

@@ -28,7 +28,6 @@ class APTS_P(APTS_Base):
         loc_opt_hparams=None,
         *,
         glob_pass=True,
-        dogleg=False,
         norm_type=2,
         max_loc_iters=3,
         max_glob_iters=3,
@@ -57,9 +56,6 @@ class APTS_P(APTS_Base):
             max_glob_iters=max_glob_iters,
             tol=tol,
         )
-
-        # Subclass‐specific state
-        self.dogleg = bool(dogleg)
 
         # Clone model for local updates; avoids overwriting global params
         self.loc_model = mark_trainable(clone_model(model))
@@ -159,12 +155,10 @@ class APTS_P(APTS_Base):
         # Compute trial step and ensure it is within trust region
         step = self.glob_params_to_vector() - self.init_glob_flat
 
-        pred = None
-        if not self.dogleg:
-            # Aggregate local losses
-            pred = self.init_loc_loss - loc_loss
-            if self.nr_models > 1:
-                dist.all_reduce(pred, op=dist.ReduceOp.SUM)
+        # Aggregate local losses
+        pred = self.init_loc_loss - loc_loss
+        if self.nr_models > 1:
+            dist.all_reduce(pred, op=dist.ReduceOp.SUM)
 
         # Else, pred will be computed as second-order approximation
         loss, grad, self.glob_opt.delta = self.control_step(step, pred)

@@ -65,7 +65,6 @@ class APTS_IP(APTS_Base):
         norm_type=2,
         max_loc_iters=0,
         max_glob_iters=3,
-        dogleg=False,
         tol=1e-6,
         APTS_in_data_sync_strategy="average",
         step_strategy="mean",

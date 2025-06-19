@@ -43,6 +43,7 @@ def get_lssr1_tr_hparams(config):
         "max_delta": config.max_delta,
         "gamma": 1e-3,
         "second_order": config.glob_second_order,
+        "dogleg": config.glob_dogleg,
         "mem_length": config.mem_length,
         "max_wolfe_iters": config.max_wolfe_iters,
         "max_zoom_iters": config.max_zoom_iters,
@@ -75,6 +76,7 @@ def get_lssr1_loc_tr_hparams(config):
         "max_delta": config.max_delta,  # Lower maximum for local updates
         "gamma": 1e-3,
         "second_order": config.loc_second_order,
+        "dogleg": config.loc_dogleg,
         "mem_length": config.mem_length,
         "max_wolfe_iters": config.max_wolfe_iters,
         "max_zoom_iters": config.max_zoom_iters,
@@ -109,6 +111,7 @@ def get_tr_hparams(config):
         "mem_length": 5,
         "norm_type": config.norm_type,
         "second_order": config.glob_second_order,
+        "dogleg": config.glob_dogleg,
         "tol": config.tol,
     }
 
@@ -134,6 +137,7 @@ def get_loc_tr_hparams(config):
         "mem_length": 5,
         "norm_type": config.norm_type,
         "second_order": config.loc_second_order,
+        "dogleg": config.loc_dogleg,
         "tol": config.tol,
     }
 
@@ -149,6 +153,7 @@ def get_asntr_hparams(config):
         "max_delta": config.max_delta,
         "gamma": 1e-3,
         "second_order": config.glob_second_order,
+        "dogleg": config.glob_dogleg,
         "mem_length": config.mem_length,
         "eta": 1e-4,
         "nu": 1e-4,
@@ -175,7 +180,11 @@ def solve_tr_first_order(
     Closed-form first-order TR: step = -gradient * (trust_radius / grad_norm).
     Predicted reduction = trust_radius * grad_norm. If grad_norm <= tol, returns zeros.
     """
-    # gradient = gradient.detach() if isinstance(gradient, WeightParallelizedTensor) else gradient
+    """
+    Closed-form first-order TR (steepest-descent on ball).
+    If ‖g‖ <= tol, returns zero; else p = -(delta/||g||)*g.
+    Predicted reduction = delta * ||g||.
+    """
 
     if grad_norm <= tol:
         return torch.zeros_like(gradient), 0.0
@@ -186,36 +195,81 @@ def solve_tr_first_order(
 
 
 def solve_tr_second_order(
-    gradient: Tensor,
+    gradient: torch.Tensor,
     grad_norm: float,
     trust_radius: float,
-    lsr1_hessian,  # an object exposing .precompute(), .gamma, .Psi, .Minv, .B(v)
-    obs_solver,  # an object exposing .solve_tr_subproblem(g, delta, γ, Ψ, Minv)
+    lsr1_hessian,  # exposes .precompute(), .B(v), .gamma, .Psi, .Minv
+    obs_solver,  # exposes .solve_tr_subproblem(g, δ, γ, Ψ, Minv)
     tol: float,
-) -> Tuple[Tensor, float]:
+    dogleg: bool = False,  # if True, use dogleg between Cauchy and OBS
+) -> Tuple[torch.Tensor, float]:
     """
-    TR via LSR1+OBS:
-    - If grad_norm <= tol, returns zeros.
-    - Otherwise calls lsr1_hessian.precompute(), then obs_solver.solve_tr_subproblem(...)
-    - Computes predicted reduction = -(gᵀp + 0.5 pᵀ B p).
+    TR via LSR1+OBS, with optional dogleg:
+      1. If ||g|| <= tol, return zero.
+      2. Precompute LSR1 factors.
+      3. Build Cauchy point p_c on the model m(p) = gᵀp + ½ pᵀ B p:
+         alpha_c = (gᵀg)/(gᵀBg),  p_c = -alpha_c g  (clipped to ball).
+      4. Let p_b = OBS-solver's unconstrained minimiser.
+      5. If dogleg:
+           • if ‖p_b‖ ≤ δ, p = p_b
+           • elif ‖p_c‖ ≥ δ, p = p_c
+           • else find τ∈[0,1] s.t. ‖p_c + τ(p_b-p_c)‖ = δ and set
+             p = p_c + τ (p_b-p_c)
+         else:
+           p = p_b
+      6. pred ≔ -(gᵀp + ½ pᵀ B p).
     """
-    # gradient = gradient.detach() if isinstance(gradient, WeightParallelizedTensor) else gradient
-
     if grad_norm <= tol:
         return torch.zeros_like(gradient), 0.0
 
-    # (Re)compute any LSR1 factors
+    # 1. Precompute and helpers
     lsr1_hessian.precompute()
-    device = gradient.device
-    dtype = gradient.dtype
-    delta = torch.tensor(trust_radius, device=device, dtype=dtype)
-    p = obs_solver.solve_tr_subproblem(
-        gradient, delta, lsr1_hessian.gamma, lsr1_hessian.Psi, lsr1_hessian.Minv
+    B = lambda v: lsr1_hessian.B(v)
+    delta = trust_radius
+
+    # 2. OBS (full step)
+    p_b = obs_solver.solve_tr_subproblem(
+        gradient,
+        torch.tensor(delta, device=gradient.device, dtype=gradient.dtype),
+        lsr1_hessian.gamma,
+        lsr1_hessian.Psi,
+        lsr1_hessian.Minv,
     )
-    # predicted reduction = -(gᵀp + 0.5 pᵀ B p)
+
+    # 3. Cauchy point along -g
+    Bg = B(gradient)
+    gBg = gradient.dot(Bg)
+    # safe guard if gᵀBg ≤ 0
+    alpha = grad_norm**2 / gBg if gBg > 0 else 0.0
+    p_cand = -gradient * alpha
+    # clip to ball
+    if torch.norm(p_cand) >= delta:
+        p_c = -gradient * (delta / grad_norm)
+    else:
+        p_c = p_cand
+
+    # 4. Dogleg combination
+    if dogleg:
+        if torch.norm(p_b) <= delta:
+            p = p_b
+        elif torch.norm(p_c) >= delta:
+            p = p_c
+        else:
+            # solve ‖p_c + τ(p_b-p_c)‖ = δ
+            d = p_b - p_c
+            a = d.dot(d)
+            b = 2 * p_c.dot(d)
+            c = p_c.dot(p_c) - delta**2
+            tau = (-b + torch.sqrt(b * b - 4 * a * c)) / (2 * a)
+            p = p_c + tau * d
+    else:
+        p = p_b
+
+    # 5. Predicted reduction
     g_dot_p = gradient.dot(p)
-    p_B_p = p.dot(lsr1_hessian.B(p))
+    p_B_p = p.dot(B(p))
     predicted = -(g_dot_p + 0.5 * p_B_p)
+
     return p, predicted
 
 

@@ -11,7 +11,8 @@ from torch.optim.optimizer import Optimizer
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.solvers.obs import OBS
 from dd4ml.utility import get_lssr1_tr_hparams
-from dd4ml.utility.optimizer_utils import solve_tr_first_order, solve_tr_second_order
+from dd4ml.utility.optimizer_utils import (solve_tr_first_order,
+                                           solve_tr_second_order)
 
 from .lsr1 import LSR1
 
@@ -39,6 +40,7 @@ class LSSR1_TR(Optimizer):
         max_delta: float = 2.0,
         gamma: float = 1e-3,
         second_order: bool = True,
+        dogleg: bool = False,  # only used if second_order is True
         mem_length: int = 10,
         max_wolfe_iters: int = 5,
         max_zoom_iters: int = 5,
@@ -75,6 +77,9 @@ class LSSR1_TR(Optimizer):
         self.max_delta = max_delta
         self.gamma = gamma
         self.second_order = second_order
+        self.dogleg = dogleg  # dogleg is only used in second-order mode
+        if self.dogleg and not self.second_order:
+            raise ValueError("Dogleg is only applicable in second-order mode")
         self.mem_length = mem_length
         self.max_wolfe_iters = max_wolfe_iters
         self.max_zoom_iters = max_zoom_iters
@@ -470,7 +475,13 @@ class LSSR1_TR(Optimizer):
         if self.second_order and len(self.hess._S) > 0:
             # pred_red = -(g*p + 0.5*p*B*p)
             p_star, pred_red = solve_tr_second_order(
-                g, gn, self.delta, self.hess, self.obs, self.tol
+                gradient=g,
+                grad_norm=gn,
+                trust_radius=self.delta,
+                lsr1_hessian=self.hess,
+                obs_solver=self.obs,
+                tol=self.tol,
+                dogleg=self.dogleg,
             )
         else:
             # pred_red = -g*p

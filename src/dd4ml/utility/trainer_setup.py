@@ -164,6 +164,7 @@ def get_config_model_and_trainer(args, wandb_config):
             norm_type=all_config.trainer.norm_type,
             mem_length=all_config.trainer.mem_length,
             second_order=all_config.trainer.glob_second_order,
+            dogleg=all_config.trainer.dogleg,
         )
     elif optimizer_name == "apts_ip":
         from dd4ml.optimizers.apts_ip import APTS_IP
@@ -231,7 +232,6 @@ def get_config_model_and_trainer(args, wandb_config):
             loc_opt=all_config.trainer.loc_opt,
             loc_opt_hparams=all_config.trainer.loc_opt_hparams,
             glob_pass=all_config.trainer.glob_pass,
-            dogleg=all_config.trainer.dogleg,
             norm_type=all_config.trainer.norm_type,
             max_loc_iters=all_config.trainer.max_loc_iters,
             max_glob_iters=all_config.trainer.max_glob_iters,
@@ -251,6 +251,7 @@ def get_config_model_and_trainer(args, wandb_config):
             max_delta=all_config.trainer.max_delta,
             gamma=all_config.trainer.gamma,
             second_order=all_config.trainer.glob_second_order,
+            dogleg=all_config.trainer.dogleg,
             mem_length=all_config.trainer.mem_length,
             max_wolfe_iters=all_config.trainer.max_wolfe_iters,
             max_zoom_iters=all_config.trainer.max_zoom_iters,
@@ -285,6 +286,7 @@ def get_config_model_and_trainer(args, wandb_config):
             max_delta=all_config.trainer.max_delta,
             gamma=all_config.trainer.gamma,
             second_order=all_config.trainer.glob_second_order,
+            dogleg=all_config.trainer.dogleg,
             mem_length=all_config.trainer.mem_length,
             eta=all_config.trainer.eta,
             nu=all_config.trainer.nu,
