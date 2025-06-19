@@ -44,11 +44,11 @@ parameters:
   criterion:
     value: "cross_entropy"
   gradient_accumulation:
-    value: True
+    value: False
   accumulation_steps:
     value: 1
   seed:
-    values: [42]
+    value: 42
   tol:
     value: 1e-6
   batch_inc_factor:

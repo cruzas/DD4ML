@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # --- Constants and Defaults --- #
-SCRIPT="run_config_file.py"   # Python script
-PROJECT="debugging"           # Scheduler project name
-PAPER_TR_UPDATES=(false true) # For LSSR1-TR (inside or outside of APTS), whether to use the TR updates from the paper
-TRIALS=3                      # Repetitions per configuration
-USE_PMW=false                 # PMW optimizer flag
-GRAD_ACC=false                # Gradient accumulation flag
-SCALING_TYPE="weak"           # "weak": scale up batch; "strong": scale down
+SCRIPT="run_config_file.py"      # Python script
+PROJECT="tr_variants_assessment" # Scheduler project name
+PAPER_TR_UPDATES=(false true)    # For LSSR1-TR (inside or outside of APTS), whether to use the TR updates from the paper
+TRIALS=3                         # Repetitions per configuration
+USE_PMW=false                    # PMW optimizer flag
+GRAD_ACC=false                   # Gradient accumulation flag
+SCALING_TYPE="weak"              # "weak": scale up batch; "strong": scale down
 
 # Parallelism sweep settings
 NUM_SUBD=(1)
@@ -17,7 +17,7 @@ NUM_REP=(1)
 BATCH_SIZES=(15000)
 
 # Configuration sweeps
-OPTIMIZERS=(lssr1_tr)
+OPTIMIZERS=(tr)
 DATASETS=(mnist)
 MODELS=(simple_ffnn)
 
