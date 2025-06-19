@@ -9,7 +9,7 @@ import numbers
 import os
 import time
 from collections import defaultdict
-from itertools import chain
+from itertools import chain, count
 
 import torch
 import torch.distributed as dist
@@ -54,6 +54,7 @@ class Trainer:
         C.norm_type = 2  # for APTS_D (and possibly APTS_IP)
         C.glob_pass = False
         C.foc = False  # for APTS_D
+        C.soc = False # for APTS_D
         C.dogleg = False  # for APTS_D
         C.max_glob_iters = 1  # for APTS*
         C.max_loc_iters = 3  # for APTS*
@@ -133,7 +134,6 @@ class Trainer:
         Return a closure that increments grad_evals by 1/num_batches each call,
         so that after num_batches batches, grad_evals += 1.
         """
-        num_batches = None
 
         def wrapper(*args, **kwargs):
             num_batches = len(self.train_loader)
@@ -172,6 +172,11 @@ class Trainer:
         else:
             # Per-process batch size
             pp_bs = bs // world_size
+            if pp_bs < 1:
+                raise ValueError(
+                    f"Per-process batch size {pp_bs} is less than 1. "
+                    "Please increase the global batch size."
+                )
 
             base_train_sampler = DistributedSampler(
                 ds_train,
@@ -641,9 +646,10 @@ class Trainer:
         batch_grad = None
         stay_on_batch = False
 
-        for self.iter_num in range(
-            cfg.max_iters + 1 if cfg.max_iters is not None else float("inf")
-        ):
+        iter_range = range(cfg.max_iters + 1) if cfg.max_iters is not None else count()
+        # When max_iters is None, iter_range is an infinite counter and the
+        # loop will run indefinitely until manually stopped or interrupted
+        for self.iter_num in iter_range:
             # fetch next batch
             try:
                 batch = next(self.data_iter)

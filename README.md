@@ -65,6 +65,7 @@ Note:
 - The code works with or without wandb. If you need it, make sure to install wandb accordingly. 
 - In a cluster environment, you can set wandb usage by setting ```export USE_WANDB=1``` in ```./tests/submit_job.sh```.
 - The ```Factory``` class defined in ```src/dd4ml/utility/factory.py``` allows you to dynamically add new classes, datasets, etc.
+- Ensure that the configured ```batch_size``` is at least the number of processes (```world_size```). If it is smaller, each process defaults to a per-process batch size of 1.
 
 ## Structure
 This library is meant to be general. 

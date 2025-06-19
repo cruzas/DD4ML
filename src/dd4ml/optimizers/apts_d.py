@@ -29,6 +29,7 @@ class APTS_D(APTS_Base):
         *,
         glob_pass=True,
         foc=True,
+        soc=True,
         norm_type=2,
         max_loc_iters=3,
         max_glob_iters=3,
@@ -60,6 +61,7 @@ class APTS_D(APTS_Base):
 
         # Subclass-specific state
         self.foc = bool(foc)
+        self.soc = bool(soc)
 
         # Clone model for local updates; avoids overwriting global params
         self.loc_model = clone_model(model)
@@ -130,7 +132,10 @@ class APTS_D(APTS_Base):
         )
 
         # Calculate residual between global and local gradients
-        self.resid = self.init_glob_grad - self.init_loc_grad
+        if self.foc:
+            self.resid = self.init_glob_grad - self.init_loc_grad
+        if self.soc:
+            self.resid_so = self.init_glob_hess - self.init_loc_hess
 
         # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)

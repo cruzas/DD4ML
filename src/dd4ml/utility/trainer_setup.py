@@ -358,9 +358,6 @@ def generic_run(
         args["use_pmw"] = False
         args["num_subdomains"] = dist.get_world_size() if dist.is_initialized() else 1
 
-    if "apts_d" in wandb_config.get("optimizer", "").lower():
-        pass
-
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)
     dprint(f"Using device: {trainer.device}")

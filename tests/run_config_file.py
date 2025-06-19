@@ -126,7 +126,7 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Number of replicas per subdomain",
     )
 
-    temp_args, _ = parser.parse_known_args()
+    # temp_args, _ = parser.parse_known_args()
     return parser.parse_args()
 
 
