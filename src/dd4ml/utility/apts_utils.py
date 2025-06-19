@@ -17,16 +17,18 @@ def flatten_params(model, out=None):
         numel = param.numel()
         out[offset : offset + numel].copy_(param.data.view(-1))
         offset += numel
-    return out
+    return out.clone()
 
 
 def restore_params(model, flat_params):
     vector_to_parameters(flat_params, model.parameters())
 
+
 @torch.no_grad()
 def apts_ip_restore_params(model, flat_params):
     for i, p in enumerate(model.parameters()):
         p.copy_(flat_params.tensor[i])
+
 
 def clone_model(model):
     base_model = model.module if hasattr(model, "module") else model

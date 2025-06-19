@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT="run_config_file.py"      # Python script
 PROJECT="tr_variants_assessment" # Scheduler project name
 PAPER_TR_UPDATES=(false true)    # For LSSR1-TR (inside or outside of APTS), whether to use the TR updates from the paper
-TRIALS=3                         # Repetitions per configuration
+TRIALS=1                         # Repetitions per configuration
 USE_PMW=false                    # PMW optimizer flag
 GRAD_ACC=false                   # Gradient accumulation flag
 SCALING_TYPE="weak"              # "weak": scale up batch; "strong": scale down
@@ -22,12 +22,12 @@ DATASETS=(mnist)
 MODELS=(simple_ffnn)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(false true)
+GLOB_SECOND_ORDERS=(true)
 LOC_SECOND_ORDERS=(false true)
 
 # Evaluation parameters: epochs, max iterations, loss
 EVAL_PARAMS=(
-  epochs=15
+  epochs=10
   max_iters=0
   criterion=cross_entropy
 )

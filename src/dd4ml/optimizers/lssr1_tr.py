@@ -190,7 +190,7 @@ class LSSR1_TR(Optimizer):
             self._offsets[1:],
         ):
             buf[start:end].copy_(p.data.view(-1))
-        return buf
+        return buf.clone()
 
     def _flatten_grads(self) -> Tensor:
         """
@@ -203,7 +203,7 @@ class LSSR1_TR(Optimizer):
             self._offsets[1:],
         ):
             buf[start:end].copy_(p.grad.view(-1))
-        return buf
+        return buf.clone()
 
     def _unflatten_update(self, vec: Tensor) -> None:
         """
@@ -460,15 +460,9 @@ class LSSR1_TR(Optimizer):
         if self.second_order and st["prev_grad"] is not None:
             sk = wk - st["old_wk"]
             yk = g - st["prev_grad"]
-            if (
-                sk.norm(p=self.norm_type) > self.tol
-                and yk.norm(p=self.norm_type) > self.tol
-            ):
-                self.hess.update_memory(sk, yk)
-                den = sk.dot(yk)
-                if den > self.tol:
-                    self.hess.gamma = (yk.dot(yk) / den).to(self.hess.device)
-                    self.gamma = self.hess.gamma
+            if sk.norm() > self.tol and yk.norm() > self.tol:
+                self.hess.update_memory(sk, yk)  # Also takes care of updating gamma
+                self.gamma = self.hess.gamma
 
         st["old_wk"], st["prev_grad"] = wk.clone(), g.clone()
 
@@ -570,4 +564,4 @@ class LSSR1_TR(Optimizer):
                     self.nu_3 * self.delta,
                 )
 
-        return new_loss, new_g
+        return new_loss, new_g.clone()

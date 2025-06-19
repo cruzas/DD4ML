@@ -75,7 +75,7 @@ class TR(Optimizer):
                 if isinstance(g, WeightParallelizedTensor):
                     g = g.detach()
                 self._grad_buf[s:e].copy_(g.view(-1))
-        return self._grad_buf
+        return self._grad_buf.clone()
 
     def _apply_update(self, sign: float = 1.0) -> None:
         """Add sign * step to each parameter tensor in-place."""
@@ -92,7 +92,7 @@ class TR(Optimizer):
     def step(self, closure, **_) -> Tuple[float, torch.Tensor]:
         # Evaluate loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
-        grad = _["grad"] if "grad" in _ else self._flat_grad()
+        grad = _["grad"].clone() if "grad" in _ else self._flat_grad()
         if isinstance(grad, WeightParallelizedTensor):
             grad = grad.detach()
         gn = torch.norm(grad, p=self.norm_type)
@@ -102,10 +102,7 @@ class TR(Optimizer):
             return loss, grad
 
         # First- or second-order TR step
-        use_second = (
-            self.second_order and self.hess and len(self.hess._S) > 0  # type: ignore
-        )
-        if use_second:
+        if self.second_order and self.hess and len(self.hess._S) > 0:
             self._step_buf, pred_red = solve_tr_second_order(
                 grad,
                 gn,
@@ -132,18 +129,14 @@ class TR(Optimizer):
 
         if rho > self.nu_dec:
             # Accept
-            if use_second:
+            if self.second_order:
                 # Update Hessian memory
                 sk = self._step_buf.clone()
                 yk = (trial_grad - grad).clone()
-                if (
-                    sk.norm(p=self.norm_type) > self.tol
-                    and yk.norm(p=self.norm_type) > self.tol
-                ):
+                
+                if sk.norm() > self.tol and yk.norm() > self.tol:
+                    # Also takes care of updating gamma
                     self.hess.update_memory(sk, yk)
-                    den = sk.dot(yk)
-                    if den > self.tol:
-                        self.hess.gamma = (yk.dot(yk) / den).to(self.hess.device)
 
             if rho > self.nu_inc and self._step_buf.norm() >= 0.9 * self.delta:
                 self.delta = min(

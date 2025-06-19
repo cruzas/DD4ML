@@ -8,12 +8,24 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
-from dd4ml.utility import (Timer, apts_ip_restore_params, clone_model, dprint,
-                           ensure_tensor, flatten_params, get_apts_hparams,
-                           get_device, get_loc_tr_hparams,
-                           get_lssr1_loc_tr_hparams, get_lssr1_tr_hparams,
-                           get_state_dict, get_tr_hparams, mark_trainable,
-                           restore_params, trainable_params_to_vector)
+from dd4ml.utility import (
+    Timer,
+    apts_ip_restore_params,
+    clone_model,
+    dprint,
+    ensure_tensor,
+    flatten_params,
+    get_apts_hparams,
+    get_device,
+    get_loc_tr_hparams,
+    get_lssr1_loc_tr_hparams,
+    get_lssr1_tr_hparams,
+    get_state_dict,
+    get_tr_hparams,
+    mark_trainable,
+    restore_params,
+    trainable_params_to_vector,
+)
 
 from .asntr import ASNTR
 from .lssr1_tr import LSSR1_TR
@@ -197,9 +209,11 @@ class APTS_Base(Optimizer):
         Converts the local model's gradients to a flattened vector.
         Returns a tensor containing the gradients of the local model parameters.
         """
-        return parameters_to_vector(
-            [p.grad for p in self.loc_model.parameters()]
-        ).detach()
+        return (
+            parameters_to_vector([p.grad for p in self.loc_model.parameters()])
+            .clone()
+            .detach()
+        )
 
     @torch.no_grad()
     def glob_params_to_vector(self):
@@ -207,7 +221,7 @@ class APTS_Base(Optimizer):
         Converts the global model's parameters to a flattened vector.
         Returns a tensor containing the parameters of the global model.
         """
-        return flatten_params(self.model, self._flat_params_buffer).detach()
+        return flatten_params(self.model, self._flat_params_buffer).clone().detach()
 
     @torch.no_grad()
     def loc_params_to_vector(self):
@@ -215,7 +229,7 @@ class APTS_Base(Optimizer):
         Converts the local model's parameters to a flattened vector.
         Returns a tensor containing the parameters of the local model.
         """
-        return flatten_params(self.loc_model, self._loc_flat_buffer).detach()
+        return flatten_params(self.loc_model, self._loc_flat_buffer).clone().detach()
 
     @torch.no_grad()
     def ensure_step_within_tr(self, step):

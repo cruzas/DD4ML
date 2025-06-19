@@ -5,9 +5,10 @@
 from __future__ import annotations
 
 from typing import List, Optional
-from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 import torch
+
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 
 class LSR1:
@@ -55,6 +56,7 @@ class LSR1:
         Add a curvature pair  (s = x_{k+1}-x_k,  y = ∇f_{k+1}-∇f_k)  if it
         satisfies the SR1 curvature condition  |yᵀs| ≥ ε‖s‖‖y‖.
         """
+
         def _prepare(vec: torch.Tensor) -> torch.Tensor:
             if isinstance(vec, WeightParallelizedTensor):
                 vec = vec.detach()
@@ -62,11 +64,13 @@ class LSR1:
 
         s = _prepare(s)
         y = _prepare(y)
-        if s.norm() < self.tol or y.norm() < self.tol:
+        if s.norm() <= self.tol or y.norm() <= self.tol:
             return
 
         curvature = y.dot(s)
-        if abs(curvature) <= self.tol * (torch.norm(s) * torch.norm(y)): # <= in case of 0 compared against 0
+        if abs(curvature) <= self.tol * (
+            torch.norm(s) * torch.norm(y)
+        ):  # <= in case of 0 compared against 0
             # reject pair – insufficient curvature information
             return
 

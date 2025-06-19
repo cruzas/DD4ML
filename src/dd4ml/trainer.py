@@ -617,12 +617,12 @@ class Trainer:
         self.epoch_time = time.time()
         self.epoch_num = 0
 
-        while self.epoch_num < self.config.epochs:
+        while self.epoch_num <= self.config.epochs:
             total_loss = 0.0
             total_samples = 0
             it = iter(self.train_loader)
             stay = False
-            first = True
+            first = self.epoch_num == 0
 
             while total_samples < N:
                 try:
@@ -632,7 +632,6 @@ class Trainer:
                     x, y = next(it)
 
                 batch_loss, batch_grad, bs = self._train_one_batch(x, y, first)
-                first = False
 
                 total_loss += batch_loss * bs
                 total_samples += bs

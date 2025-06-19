@@ -130,7 +130,7 @@ class ASNTR(Optimizer):
             self.param_groups[0]["params"], self._offsets, self._offsets[1:]
         ):
             buf[start:end].copy_(p.data.view(-1))
-        return buf
+        return buf.clone()
 
     def _flatten_grads(self) -> Tensor:
         buf = self.state["flat_gk"]
@@ -138,7 +138,7 @@ class ASNTR(Optimizer):
             self.param_groups[0]["params"], self._offsets, self._offsets[1:]
         ):
             buf[start:end].copy_(p.grad.view(-1))
-        return buf
+        return buf.clone()
 
     def _unflatten_update(self, vec: Tensor) -> None:
         with torch.no_grad():
