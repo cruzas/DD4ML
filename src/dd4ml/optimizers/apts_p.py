@@ -76,12 +76,12 @@ class APTS_P(APTS_Base):
     def sync_loc_to_glob(self) -> None:
         """
         Make the global model identical on every rank by merging the
-        sub-domain (trainable) updates held in `self.loc_model`.
+        sub-domain (trainable) updates held in ``self.loc_model".
 
-        Assumption: `mark_trainable` assigned disjoint index sets, i.e.
+        Assumption: ``mark_trainable" assigned disjoint index sets, i.e.
         each parameter tensor is owned by exactly one rank.
         """
-        # -------- single-process fallback ------------------------------------
+        # Single-process fallback
         if (
             not (dist.is_available() and dist.is_initialized())
             or dist.get_world_size() == 1
@@ -93,16 +93,16 @@ class APTS_P(APTS_Base):
             self.loc_model.load_state_dict(self.model.state_dict())
             return
 
-        # -------- multi-process merge ----------------------------------------
+        # Multi-process merge
         with torch.no_grad():
-            # 1. Copy owned slices; zero the others
+            # Copy owned slices; zero the others
             for pg, pl in zip(self.model.parameters(), self.loc_model.parameters()):
                 if pl.requires_grad:
                     pg.copy_(pl.data)  # owner rank writes its update
                 else:
                     pg.zero_()  # non-owners write zeros
 
-            # 2. Sum across all ranks – only the owner contributes a non-zero value
+            # Sum across all ranks - only the owner contributes a non-zero value
             for pg in self.model.parameters():
                 dist.all_reduce(pg.data, op=dist.ReduceOp.SUM)
 
@@ -116,7 +116,7 @@ class APTS_P(APTS_Base):
         run local iterations, propose a step, test acceptance, and possibly
         run additional global iterations.
 
-        inputs_d, labels_d are only used in case we are using ASNTR as the global/local optimizer.
+        inputs_d, labels_d are only used in case ASNTR is the global or local optimizer.
         """
 
         # Store inputs and labels for closures
@@ -124,15 +124,14 @@ class APTS_P(APTS_Base):
         self.inputs_d, self.labels_d = inputs_d, labels_d
         self.hNk = hNk
 
-        # Reset gradient evaluation counters (as Python floats)
-        # Note: closures will increment these
-        self.grad_evals = 0.0
-        self.loc_grad_evals = 0.0  # track local grad evals as Python int
+        # Reset gradient evaluation counters (as Python floats).
+        # Note: closures will increment these.
+        self.grad_evals, self.loc_grad_evals = 0.0, 0.0
 
         # Save initial global parameters (flattened, cloned to avoid in-place)
         self.init_glob_flat = self.glob_params_to_vector()
 
-        # Compute initial global/local loss and gradient
+        # Compute initial global and local losses and gradients
         self.init_glob_loss, self.init_loc_loss = self.glob_closure_main(
             compute_grad=True
         ), self.loc_closure(compute_grad=True)
@@ -152,7 +151,7 @@ class APTS_P(APTS_Base):
         # Synchronize parameters from local models to global model
         self.sync_loc_to_glob()
 
-        # Compute trial step and ensure it is within trust region
+        # Compute trial step
         step = self.glob_params_to_vector() - self.init_glob_flat
 
         # Aggregate local losses
@@ -160,7 +159,7 @@ class APTS_P(APTS_Base):
         if self.nr_models > 1:
             dist.all_reduce(pred, op=dist.ReduceOp.SUM)
 
-        # Else, pred will be computed as second-order approximation
+        # Perform global control on step and update delta
         loss, grad, self.glob_opt.delta = self.control_step(step, pred)
 
         # Optional global pass

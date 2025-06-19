@@ -5,7 +5,8 @@ import torch.distributed as dist
 import torch.nn.functional as F
 
 from .base_pmw_model import BasePMWModel
-from .data_and_weight_parallelized_subdomain import DataAndWeightParallelizedSubdomain
+from .data_and_weight_parallelized_subdomain import \
+    DataAndWeightParallelizedSubdomain
 
 
 class ParallelizedModel(BasePMWModel):
@@ -129,13 +130,13 @@ class ParallelizedModel(BasePMWModel):
     def subdomain_grad_norm(self, p=2):
         return self.subdomain.weight_parallelized_model.subdomain.grad_norm(p=p)
 
-    def parameters(self, clone=False):  # Returns the global parameters of the model
+    def parameters(self, clone=True):  # Returns the global parameters of the model
         return self.subdomain.weight_parallelized_model.parameters(clone=clone)
 
     def parameters_norm(self, p=2):  # Returns the global parameters norm of the model
         return self.subdomain.weight_parallelized_model.parameters().norm(p=p)
 
-    def grad(self, clone=False):  # Returns the global gradient of the model
+    def grad(self, clone=True):  # Returns the global gradient of the model
         return self.subdomain.weight_parallelized_model.grad(clone=clone)
 
     def grad_norm(self, p=2):  # Returns the global gradient norm of the model

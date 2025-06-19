@@ -398,7 +398,7 @@ class Trainer:
         for x, y in eval_loader:
             x, y = x.to(self.device), y.to(self.device)
             out = self.model(x)
-            if not cond_std:  # pipeline → extract the shard
+            if not cond_std:  # pipeline -> extract the shard
                 out = out[0]
             if cond_std or (cond_d_a and cond_d_b):
                 loss = crit(out, y).item()

@@ -150,7 +150,7 @@ class APTS_IP(APTS_Base):
         self.loc_steps(final_subdomain_closure)
 
         # Compute global trial step
-        step = self.model.parameters(clone=False) - self.init_glob_flat
+        step = self.model.parameters(clone=True) - self.init_glob_flat
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
         flat_grads_fn = self.model.grad

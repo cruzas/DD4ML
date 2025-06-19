@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # --- Constants and Defaults --- #
-SCRIPT="run_config_file.py"      # Python script
-PROJECT="tr_variants_assessment" # Scheduler project name
-TRIALS=1                         # Repetitions per configuration
-USE_PMW=false                    # PMW optimiser flag
+SCRIPT="run_config_file.py"      # Python script to execute
+PROJECT="tr_variants_assessment" # wandb project name
+TRIALS=10                        # Repetitions per configuration
+USE_PMW=false                    # PMW optimizer flag
 GRAD_ACC=false                   # Gradient accumulation flag
 SCALING_TYPE="weak"              # "weak": scale up batch; "strong": scale down
 
@@ -13,7 +13,7 @@ SCALING_TYPE="weak"              # "weak": scale up batch; "strong": scale down
 NUM_SUBD=(1)
 NUM_STAGES=(1)
 NUM_REP=(1)
-BATCH_SIZES=(15000)
+BATCH_SIZES=(15000 30000 60000)
 
 # Configuration sweeps
 OPTIMIZERS=(tr lssr1_tr)
@@ -43,7 +43,6 @@ APTS_PARAMS=(
 )
 
 # --- Functions to Adjust Defaults --- #
-
 set_optimizer_params() {
   local opt="$1"
   if [[ "$opt" == "apts_ip" ]]; then
@@ -173,7 +172,7 @@ for optimizer in "${OPTIMIZERS[@]}"; do
             for ldg in "${loc_doglegs[@]}"; do
               # Skip invalid local dogleg
               if [[ "$ldg" == "true" && "$lso" == "false" ]]; then
-                echo "→ Skipping: local dogleg requires lso=true"
+                echo "-> Skipping: local dogleg requires lso=true"
                 continue
               fi
 
@@ -245,7 +244,7 @@ for optimizer in "${OPTIMIZERS[@]}"; do
 
                           config_file="./config_files/config_${job_name}.yaml"
                           if [[ -e "$config_file" ]]; then
-                            echo "→ Skipping existing config: $config_file"
+                            echo "-> Skipping existing config: $config_file"
                             continue
                           fi
                           cp "./config_files/config_${optimizer}.yaml" "$config_file"

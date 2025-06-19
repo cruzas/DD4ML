@@ -29,12 +29,19 @@ class WeightParallelizedSubdomain(BasePMWModel):
         if self.DEBUG:
             print(f'(INIT) rank={self.rank} Layer order: {self.stage_data["layers"]}')
         if any(self.connector_symbol in name for name in self.stage_data["layers"]):
-            raise ValueError(f"Layer names cannot contain the connector symbol {self.connector_symbol}.")
+            raise ValueError(
+                f"Layer names cannot contain the connector symbol {self.connector_symbol}."
+            )
         self.sharded_layers = (
-            [ShardedLayer(layer_dict=model_handler.net_dict[name],
-                          layer_ranks=self.stage_data["ranks"])
-             for name in self.stage_data["layers"]]
-            if self.rank in self.stage_data["ranks"] else []
+            [
+                ShardedLayer(
+                    layer_dict=model_handler.net_dict[name],
+                    layer_ranks=self.stage_data["ranks"],
+                )
+                for name in self.stage_data["layers"]
+            ]
+            if self.rank in self.stage_data["ranks"]
+            else []
         )
 
     def _key(self, a, b):
@@ -66,13 +73,23 @@ class WeightParallelizedSubdomain(BasePMWModel):
         return [p for layer in self.sharded_layers for p in layer.parameters()]
 
     def named_parameters(self):
-        return [(name, p) for name, layer in zip(self.stage_data["layers"], self.sharded_layers)
-                for p in layer.parameters()]
+        return [
+            (name, p)
+            for name, layer in zip(self.stage_data["layers"], self.sharded_layers)
+            for p in layer.parameters()
+        ]
 
     def configure_params(self, train_config):
         return [layer.configure_params(train_config) for layer in self.sharded_layers]
 
-    def forward(self, x=None, num_chunks=None, num_samples_in_chunk=None, chunk_id=None, is_in_pipeline=False):
+    def forward(
+        self,
+        x=None,
+        num_chunks=None,
+        num_samples_in_chunk=None,
+        chunk_id=None,
+        is_in_pipeline=False,
+    ):
         if not is_in_pipeline:
             return self._forward_non_pipeline()
         return self._forward_pipeline(x, num_chunks, num_samples_in_chunk, chunk_id)
@@ -111,30 +128,30 @@ class WeightParallelizedSubdomain(BasePMWModel):
                     else:
                         reverse_key = self._key(dst_name, layer_name)
                         empty_at_the_end.append(reverse_key)
-                        self._ensure_list(
-                            self.inputs, reverse_key, num_chunks_local
-                        )
+                        self._ensure_list(self.inputs, reverse_key, num_chunks_local)
                         self.inputs[reverse_key][chunk] = temp
         for key in empty_at_the_end:
             num_chunks_local = len(self.inputs[key])
             del self.inputs[key]
             self.inputs[key] = [None] * num_chunks_local
-        return (
-            self.outputs["finish"] if self.model_handler.is_last_stage() else [True]
-        )
-    
-    def _forward_pipeline(self, x=None, num_chunks=None, num_samples_in_chunk=None, chunk_id=None, ):
+        return self.outputs["finish"] if self.model_handler.is_last_stage() else [True]
+
+    def _forward_pipeline(
+        self,
+        x=None,
+        num_chunks=None,
+        num_samples_in_chunk=None,
+        chunk_id=None,
+    ):
         self.DEBUG = False
         empty_at_the_end = []
-        
+
         backend_dev = self.backend_device()
         tensor_dev = self.tensor_device
         for i, layer_name in enumerate(self.stage_data["layers"]):
             net_dict = self.model_handler.net_dict[layer_name]
             if layer_name == "start":
-                self._ensure_list(
-                    self.inputs, self._key("start", "start"), num_chunks
-                )
+                self._ensure_list(self.inputs, self._key("start", "start"), num_chunks)
                 self.inputs[self._key("start", "start")][chunk_id] = x
             for src_name in net_dict["fwd_rcv"]["src"]:
                 key = self._key(layer_name, src_name)
@@ -152,9 +169,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
                             src=src_rank, device=backend_dev
                         )
                         self.shapes[key] = (
-                            lambda z, temp_shape=copy.deepcopy(
-                                list(rcv_shape)[1:]
-                            ): [z]
+                            lambda z, temp_shape=copy.deepcopy(list(rcv_shape)[1:]): [z]
                             + temp_shape
                         )
                         if self.DEBUG:
@@ -238,10 +253,8 @@ class WeightParallelizedSubdomain(BasePMWModel):
             num_chunks_local = len(self.inputs[key])
             del self.inputs[key]
             self.inputs[key] = [None] * num_chunks_local
-        return (
-            self.outputs["finish"] if self.model_handler.is_last_stage() else [True]
-        )    
-    
+        return self.outputs["finish"] if self.model_handler.is_last_stage() else [True]
+
     def backward(self, loss=None, chunk_id=0, is_in_pipeline=False):
         if not is_in_pipeline:
             self._backward_non_pipeline(loss)
@@ -264,16 +277,12 @@ class WeightParallelizedSubdomain(BasePMWModel):
                         reverse_name = self.connector_symbol.join(
                             reversed(name.split(self.connector_symbol))
                         )
-                        self._ensure_list(
-                            self.grad_outputs, reverse_name, len(inputs)
-                        )
-                        self.grad_outputs[reverse_name][chunk] = (
-                            torch.autograd.grad(
-                                outputs=loss_,
-                                inputs=inputs[chunk],
-                                retain_graph=True,
-                            )[0]
-                        )
+                        self._ensure_list(self.grad_outputs, reverse_name, len(inputs))
+                        self.grad_outputs[reverse_name][chunk] = torch.autograd.grad(
+                            outputs=loss_,
+                            inputs=inputs[chunk],
+                            retain_graph=True,
+                        )[0]
             else:
                 for name, outputs in self.outputs.items():
                     _, rcv_name = name.split(self.connector_symbol)
@@ -285,7 +294,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
                         outputs[chunk].backward(
                             self.grad_outputs[name][chunk], retain_graph=True
                         )
-                        
+
     def _backward_pipeline(self, loss, chunk_id):
         backend_dev = self.backend_device()
         tensor_dev = self.tensor_device
@@ -295,19 +304,16 @@ class WeightParallelizedSubdomain(BasePMWModel):
                 if i == 0:
                     loss.backward(retain_graph=True)
                 for current_layer in reversed(consecutive_block):
-                    dst_names = self.model_handler.net_dict[current_layer][
-                        "bwd_dst"
-                    ]["to"]
+                    dst_names = self.model_handler.net_dict[current_layer]["bwd_dst"][
+                        "to"
+                    ]
                     for dst_name in dst_names:
                         dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
                         assert (
                             len(dst_ranks) == 1
                         ), "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
                         if self.rank != dst_ranks[0] and any(
-                            [
-                                element in current_layer
-                                for element in consecutive_block
-                            ]
+                            [element in current_layer for element in consecutive_block]
                         ):
                             inputs = self.inputs[self._key(current_layer, dst_name)]
                             reverse_name = self._key(dst_name, current_layer)
@@ -346,20 +352,15 @@ class WeightParallelizedSubdomain(BasePMWModel):
                             send_handle.wait()
             else:
                 for current_layer in reversed(consecutive_block):
-                    rcv_names = self.model_handler.net_dict[current_layer][
-                        "bwd_rcv"
-                    ]["src"]
+                    rcv_names = self.model_handler.net_dict[current_layer]["bwd_rcv"][
+                        "src"
+                    ]
                     for rcv_name in rcv_names:
                         key = self._key(current_layer, rcv_name)
                         if any(
-                            [
-                                element in current_layer
-                                for element in consecutive_block
-                            ]
+                            [element in current_layer for element in consecutive_block]
                         ):
-                            rcv_ranks = self.model_handler.layer_name_to_ranks(
-                                rcv_name
-                            )
+                            rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
                             assert (
                                 len(rcv_ranks) == 1
                             ), "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
@@ -395,9 +396,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
                                 )
                                 recv_handle.wait()
                                 grad_output = grad_output.to(tensor_dev).detach()
-                                self._ensure_list(
-                                    self.grad_outputs, key, len(outputs)
-                                )
+                                self._ensure_list(self.grad_outputs, key, len(outputs))
                                 self.grad_outputs[key][chunk_id] = grad_output
                                 if outputs[chunk_id].requires_grad:
                                     outputs[chunk_id].backward(
@@ -414,19 +413,16 @@ class WeightParallelizedSubdomain(BasePMWModel):
                     if any([element in key for element in consecutive_block])
                 ]
                 for current_layer in reversed(consecutive_block):
-                    dst_names = self.model_handler.net_dict[current_layer][
-                        "bwd_dst"
-                    ]["to"]
+                    dst_names = self.model_handler.net_dict[current_layer]["bwd_dst"][
+                        "to"
+                    ]
                     for dst_name in dst_names:
                         dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
                         assert (
                             len(dst_ranks) == 1
                         ), "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
                         if self.rank != dst_ranks[0] and any(
-                            [
-                                element in current_layer
-                                for element in consecutive_block
-                            ]
+                            [element in current_layer for element in consecutive_block]
                         ):
                             inputs = self.inputs[self._key(current_layer, dst_name)]
                             grad_output = torch.autograd.grad(
@@ -454,9 +450,9 @@ class WeightParallelizedSubdomain(BasePMWModel):
                                 dst=dst_ranks[0],
                             )
                             send_handle.wait()
-                            
+
     def grad(self):
-        return [p.grad for p in self.sharded_layers.parameters()]
+        return [p.grad.clone() for p in self.sharded_layers.parameters()]
 
     def grad_norm(self):
         return torch.norm(

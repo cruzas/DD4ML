@@ -66,7 +66,7 @@ class APTS_D(APTS_Base):
         # Clone model for local updates; avoids overwriting global params
         self.loc_model = clone_model(model)
 
-        # Instantiate local optimiser (trust-region or LSSR1_TR)
+        # Instantiate local optimizer (trust-region or LSSR1_TR)
         self.loc_opt = loc_opt(self.loc_model.parameters(), **loc_opt_hparams)
 
         # Choose local closure based on first-order correction flag

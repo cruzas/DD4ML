@@ -8,23 +8,19 @@ from torch import Tensor
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 
-class Timer:
-    def __init__(self, timings, key):
-        self.timings = timings
-        self.key = key
-
-    def __enter__(self):
-        self.start = time.time()
-
-    def __exit__(self, *args):
-        self.timings[self.key] += time.time() - self.start
-
-
 def get_state_dict(model):
+    """
+    Returns the state dictionary of the model, handling both single and distributed models.
+    If the model is wrapped in a DataParallel or DistributedDataParallel, it extracts the state_dict
+    from the underlying module.
+    """
     return model.module.state_dict() if hasattr(model, "module") else model.state_dict()
 
 
 def get_apts_hparams(config):
+    """
+    Returns default hyperparameters for the Additively Preconditioned Trust-Region Strategy (APTS).
+    """
     return {
         "delta": config.delta,
         "min_delta": config.min_delta,
@@ -37,6 +33,10 @@ def get_apts_hparams(config):
 
 
 def get_lssr1_tr_hparams(config):
+    """
+    Returns default hyperparameters for the L-S-SR1 Trust-Region optimizer.
+    (Also when used as the global optimizer for APTS.)
+    """
     return {
         "delta": config.delta,
         "min_delta": config.min_delta,
@@ -66,6 +66,10 @@ def get_lssr1_tr_hparams(config):
 
 
 def get_lssr1_loc_tr_hparams(config):
+    """
+    Returns default hyperparameters for the L-S-SR1 Trust-Region optimizer,
+    when used as the local optimizer for APTS.
+    """
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     norm_type = config.norm_type
     delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
@@ -99,6 +103,10 @@ def get_lssr1_loc_tr_hparams(config):
 
 
 def get_tr_hparams(config):
+    """
+    Returns default hyperparameters for the Trust-Region optimizer.
+    (Also when used as the global optimizer for APTS.)
+    """
     return {
         "delta": config.delta,
         "max_delta": config.max_delta,
@@ -117,6 +125,10 @@ def get_tr_hparams(config):
 
 
 def get_loc_tr_hparams(config):
+    """
+    Returns default hyperparameters for the Trust-Region optimizer,
+    when used as the local optimizer for APTS.
+    """
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     norm_type = config.norm_type
     delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
@@ -143,7 +155,9 @@ def get_loc_tr_hparams(config):
 
 
 def get_asntr_hparams(config):
-    """Return default hyperparameters for the ASNTR optimizer."""
+    """
+    Return default hyperparameters for the Adaptive Sub-sample Non-monotone Trust-Region (ASNTR) optimizer.
+    """
     return {
         "device": config.device if hasattr(config, "device") else "cpu",
         "learning_rate": (
@@ -177,15 +191,12 @@ def solve_tr_first_order(
     tol: float,
 ) -> Tuple[Tensor, float]:
     """
-    Closed-form first-order TR: step = -gradient * (trust_radius / grad_norm).
-    Predicted reduction = trust_radius * grad_norm. If grad_norm <= tol, returns zeros.
+    If grad_norm <= tol
+        - returns zeros
+    Else:
+        - Closed-form first-order TR: step = -gradient * (trust_radius / grad_norm)
+        - Predicted reduction = trust_radius * grad_norm
     """
-    """
-    Closed-form first-order TR (steepest-descent on ball).
-    If ‖g‖ <= tol, returns zero; else p = -(delta/||g||)*g.
-    Predicted reduction = delta * ||g||.
-    """
-
     if grad_norm <= tol:
         return torch.zeros_like(gradient), 0.0
 
@@ -199,35 +210,35 @@ def solve_tr_second_order(
     grad_norm: float,
     trust_radius: float,
     lsr1_hessian,  # exposes .precompute(), .B(v), .gamma, .Psi, .Minv
-    obs_solver,  # exposes .solve_tr_subproblem(g, δ, γ, Ψ, Minv)
+    obs_solver,  # exposes .solve_tr_subproblem(g, delta, gamma, Psi, Minv)
     tol: float,
     dogleg: bool = False,  # if True, use dogleg between Cauchy and OBS
 ) -> Tuple[torch.Tensor, float]:
     """
     TR via LSR1+OBS, with optional dogleg:
-      1. If ||g|| <= tol, return zero.
-      2. Precompute LSR1 factors.
-      3. Build Cauchy point p_c on the model m(p) = gᵀp + ½ pᵀ B p:
-         alpha_c = (gᵀg)/(gᵀBg),  p_c = -alpha_c g  (clipped to ball).
-      4. Let p_b = OBS-solver's unconstrained minimiser.
+      1. If ||g|| <= tol, return zero
+      2. Precompute LSR1 factors
+      3. Build Cauchy point p_c on the model m(p) = g^T*p + 0.5 * p^T * B * p:
+         alpha_c = (g^T * g)/(g^T * B * g),  p_c = -alpha_c g  (clipped to trust-region radius).
+      4. Let p_b = OBS-solver's unconstrained minimizer.
       5. If dogleg:
-           • if ‖p_b‖ ≤ δ, p = p_b
-           • elif ‖p_c‖ ≥ δ, p = p_c
-           • else find τ∈[0,1] s.t. ‖p_c + τ(p_b-p_c)‖ = δ and set
-             p = p_c + τ (p_b-p_c)
-         else:
+           - If ||p_b|| <= delta, p = p_b
+           - Elif ||p_c|| >= delta, p = p_c
+           - Else find tau in [0,1] s.t. ||p_c + tau*(p_b-p_c)|| = delta and set
+             p = p_c + tau*(p_b-p_c)
+         Else:
            p = p_b
-      6. pred ≔ -(gᵀp + ½ pᵀ B p).
+      6. pred ≔ -(g^T*p + 0.5*p^T*B*p).
     """
     if grad_norm <= tol:
         return torch.zeros_like(gradient), 0.0
 
-    # 1. Precompute and helpers
+    # Precompute and helpers
     lsr1_hessian.precompute()
     B = lambda v: lsr1_hessian.B(v)
     delta = trust_radius
 
-    # 2. OBS (full step)
+    # OBS (full step)
     p_b = obs_solver.solve_tr_subproblem(
         gradient,
         torch.tensor(delta, device=gradient.device, dtype=gradient.dtype),
@@ -236,26 +247,26 @@ def solve_tr_second_order(
         lsr1_hessian.Minv,
     )
 
-    # 3. Cauchy point along -g
+    # Cauchy point along -g
     Bg = B(gradient)
     gBg = gradient.dot(Bg)
-    # safe guard if gᵀBg ≤ 0
+    # Safe guard it if g^T*B*g <= 0
     alpha = grad_norm**2 / gBg if gBg > 0 else 0.0
     p_cand = -gradient * alpha
-    # clip to ball
+    # Clip to trust-region radius
     if torch.norm(p_cand) >= delta:
         p_c = -gradient * (delta / grad_norm)
     else:
         p_c = p_cand
 
-    # 4. Dogleg combination
+    # Dogleg combination
     if dogleg:
         if torch.norm(p_b) <= delta:
             p = p_b
         elif torch.norm(p_c) >= delta:
             p = p_c
         else:
-            # solve ‖p_c + τ(p_b-p_c)‖ = δ
+            # solve ||p_c + tau*(p_b-p_c)‖ = delta
             d = p_b - p_c
             a = d.dot(d)
             b = 2 * p_c.dot(d)
@@ -265,7 +276,7 @@ def solve_tr_second_order(
     else:
         p = p_b
 
-    # 5. Predicted reduction
+    # Compute the predicted reduction
     g_dot_p = gradient.dot(p)
     p_B_p = p.dot(B(p))
     predicted = -(g_dot_p + 0.5 * p_B_p)
@@ -274,6 +285,10 @@ def solve_tr_second_order(
 
 
 def ensure_tensor(d, device):
+    """
+    Ensures that the input "d" is a tensor on the specified device.
+    If "d" is an int or float, it converts it to a tensor.
+    """
     if isinstance(d, (int, float)):
         d = torch.tensor(d, device=device)
         return d
