@@ -213,7 +213,7 @@ for optimizer in "${OPTIMIZERS[@]}"; do
                           IFS="=" read -r _ EPOCH_COUNT <<<"${EVAL_PARAMS[0]}"
 
                           # job_name="${optimizer}_${dataset}_${actual_bs}_epochs_${EPOCH_COUNT}_nst_${num_stages}_nsd_${num_subd}_nrpsd_${num_rep}"
-                          job_name="${optimizer}_${dataset}_${actual_bs}_epochs_${EPOCH_COUNT}_nsd_${num_subd}"
+                          job_name="${optimizer}_${dataset}_${model}_${actual_bs}_epochs_${EPOCH_COUNT}_nsd_${num_subd}"
                           if $USE_PMW; then
                             job_name+="_nst_${num_stages}_nrpsd_${num_rep}"Y
                           fi

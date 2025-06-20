@@ -1,3 +1,7 @@
+import os
+import pprint
+from itertools import product
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -107,7 +111,7 @@ def analyze_wandb_runs_advanced(
         rows.append({"run_id": run.id, **cfg, **sm})
     df = pd.DataFrame(rows)
     if df.empty:
-        print("No runs found with the given filters")
+        pprint.pprint("No runs found with the given filters")
         return df, None
 
     if isinstance(group_by, str):
@@ -123,7 +127,7 @@ def analyze_wandb_runs_advanced(
     if group_by:
         cols = [f"config_{k}" for k in group_by if f"config_{k}" in df.columns]
         if not cols:
-            print("No valid grouping columns found")
+            pprint.pprint("No valid grouping columns found")
             return df, None
 
         metric_cols = [f"summary_{m}" for m in (metrics or [])]
@@ -154,11 +158,16 @@ def analyze_wandb_runs_advanced(
 
 
 def plot_grouped_metrics(
-    grouped_df, metrics, show_variance=True, plot_type="bar", aggregate="mean"
+    grouped_df,
+    metrics,
+    show_variance=True,
+    plot_type="bar",
+    aggregate="mean",
+    save_path="~/OneDrive/Documents/PhD/thesis_plots",
 ):
     """Plot grouped metrics with optional variance—uses `group_label` for ticks"""
     if grouped_df is None or grouped_df.empty:
-        print("No grouped data to plot")
+        pprint.pprint("No grouped data to plot")
         return
 
     n = len(metrics)
@@ -171,7 +180,7 @@ def plot_grouped_metrics(
         std_c = f"summary_{m}_std"
         cnt_c = f"summary_{m}_count"
         if mean_c not in grouped_df:
-            print(f"Column {mean_c} not found")
+            pprint.pprint(f"Column {mean_c} not found")
             continue
 
         labels = grouped_df["group_label"]
@@ -199,52 +208,72 @@ def plot_grouped_metrics(
         axes[i].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.show()
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight", format="pdf")
+    # plt.show()
 
 
 def main(
     entity="cruzas-universit-della-svizzera-italiana",
     project="tr_variants_assessment",
 ):
-    filters = {
-        "config.dataset_name": "mnist",
-        "config.batch_size": 60000,
-    }
-    group_by_map = {
-        "batch_size": "bs",
-        "optimizer": "opt",
-        "glob_second_order": "so",
-        "glob_dogleg": "dleg",
-    }
+    base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
+    datasets = ["mnist"]
+    optimizers = ["lssr1_tr", "tr"]
+    batch_sizes = [15000, 30000, 60000]
+    group_by_map = {"glob_second_order": "so", "glob_dogleg": "dleg"}
 
-    # then, whenever you need the ordered lists:
-    group_by = list(group_by_map.keys())
-    group_by_abbr = list(group_by_map.values())
-    metrics = ["accuracy", "loss"]
-
-    df, gdf = analyze_wandb_runs_advanced(
-        f"{entity}/{project}",
-        filters=filters,
-        group_by=group_by,
-        group_by_abbr=group_by_abbr,
-        metrics=metrics,
-        show_variance=True,
-        aggregate="mean",
-        mad_threshold=3,
-    )
-
-    if gdf is not None:
-        print(
-            gdf[
-                [
-                    "group_label",
-                    "summary_loss_mean",
-                    "summary_loss_std",
-                    "summary_loss_count",
-                ]
-            ]
+    experiments = [
+        (
+            {
+                "config.optimizer": opt,
+                "config.model_name": "simple_ffnn",
+                "config.dataset_name": ds,
+                "config.batch_size": bs,
+            },
+            group_by_map,
+            os.path.join(base_save, f"{opt}_{ds}_{bs}"),
         )
-        plot_grouped_metrics(gdf, metrics, show_variance=True, plot_type="bar")
+        for ds, opt, bs in product(datasets, optimizers, batch_sizes)
+    ]
+
+    pprint.pprint(experiments)
+
+    for i, (filters, group_by_map, save_path) in enumerate(experiments, start=1):
+        pprint.pprint(f"\n=== Experiment {i} ===")
+        group_by = list(group_by_map.keys())
+        group_by_abbr = list(group_by_map.values())
+        metrics = ["accuracy", "loss"]
+
+        df, gdf = analyze_wandb_runs_advanced(
+            f"{entity}/{project}",
+            filters=filters,
+            group_by=group_by,
+            group_by_abbr=group_by_abbr,
+            metrics=metrics,
+            show_variance=True,
+            aggregate="mean",
+            mad_threshold=3,
+        )
+
+        if gdf is not None:
+            pprint.pprint(
+                gdf[
+                    [
+                        "group_label",
+                        "summary_loss_mean",
+                        "summary_loss_std",
+                        "summary_loss_count",
+                    ]
+                ]
+            )
+            plot_grouped_metrics(
+                gdf,
+                metrics,
+                show_variance=True,
+                plot_type="bar",
+                save_path=save_path,
+            )
 
 
 if __name__ == "__main__":
