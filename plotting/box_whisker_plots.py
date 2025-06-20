@@ -83,15 +83,15 @@ def main(
                 "config.batch_size": bs,
             },
             group_by_map,
-            os.path.join(base_save, f"{opt}_{ds}_{bs}"),
+            os.path.join(base_save, f"{opt}_{ds}_{bs}.pdf"),
         )
         for ds, opt, bs in product(datasets, optimizers, batch_sizes)
     ]
 
-    pprint.pprint(experiments)
-
     for i, (filters, group_by_map, save_path) in enumerate(experiments, start=1):
-        pprint.pprint(f"\n=== Experiment {i} ===")
+        pprint.pprint(f"\n=== Experiment {save_path} ===")
+        txt_path = os.path.splitext(save_path)[0] + ".txt"
+
         group_by = list(group_by_map.keys())
         group_by_abbr = list(group_by_map.values())
         metrics = ["accuracy", "loss"]
@@ -108,16 +108,19 @@ def main(
         )
 
         if gdf is not None:
-            pprint.pprint(
-                gdf[
-                    [
-                        "group_label",
-                        "summary_loss_mean",
-                        "summary_loss_std",
-                        "summary_loss_count",
-                    ]
+            subset = gdf[
+                [
+                    "group_label",
+                    "summary_loss_mean",
+                    "summary_loss_std",
+                    "summary_loss_count",
                 ]
-            )
+            ]
+
+            # pprint.pprint(subset)
+            with open(txt_path, "w") as f:
+                f.write(pprint.pformat(subset.to_dict(orient="records")))
+
             plot_box_whisker(
                 gdf,
                 metrics,
