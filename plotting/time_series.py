@@ -83,3 +83,45 @@ def plot_averaged_time_series(
     axes[1].legend(loc="best")
     plt.tight_layout()
     plt.show()
+
+
+def main(
+    entity="cruzas-universit-della-svizzera-italiana",
+    project="tr_variants_assessment",
+):
+    base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
+    datasets = ["mnist"]
+    optimizers = ["lssr1_tr", "tr"]
+    batch_sizes = [15000, 30000, 60000]
+    group_by_map = {"glob_second_order": "so", "glob_dogleg": "dleg"}
+
+    experiments = [
+        (
+            {
+                "config.optimizer": opt,
+                "config.model_name": "simple_ffnn",
+                "config.dataset_name": ds,
+                "config.batch_size": bs,
+            },
+            group_by_map,
+            os.path.join(base_save, f"{opt}_{ds}_{bs}.pdf"),
+        )
+        for ds, opt, bs in product(datasets, optimizers, batch_sizes)
+    ]
+
+    for i, (filters, group_by_map, save_path) in enumerate(experiments, start=1):
+        pprint.pprint(f"\n=== Experiment {save_path} ===")
+        txt_path = os.path.splitext(save_path)[0] + ".txt"
+
+        group_by = list(group_by_map.keys())
+        group_by_abbr = list(group_by_map.values())
+        metrics = ["accuracy", "loss"]
+
+        # Plotting the time series
+        #...
+
+if __name__ == "__main__":
+    main(
+        entity="cruzas-universit-della-svizzera-italiana",
+        project="tr_variants_assessment",
+    )
