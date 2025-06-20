@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy.stats import median_abs_deviation
 
 import wandb
 
@@ -89,6 +90,9 @@ def plot_averaged_time_series(
     plt.show()
 
 
+from scipy.stats import median_abs_deviation
+
+
 def analyze_wandb_runs_advanced(
     project_path,
     filters=None,
@@ -97,30 +101,28 @@ def analyze_wandb_runs_advanced(
     plot_type="scatter",
     show_variance=True,
     aggregate="mean",
+    mad_threshold=3,
 ):
     """
-    Analyze wandb runs with multi-key grouping, averaging, and variance
+    Analyze wandb runs with multi-key grouping, robust filtering, and variance analysis.
 
     Args:
         project_path: "username/project-name"
         filters: Dict of filters to apply
         group_by: String or list of config parameters to group by
-        metrics: List of metrics to plot
+        metrics: List of metrics to plot (e.g. ["accuracy", "train_loss"])
         plot_type: 'scatter', 'box', 'line', 'bar'
-        show_variance: Whether to show error bars/variance
+        show_variance: Whether to show error bars
         aggregate: 'mean', 'median', 'max', 'min'
+        mad_threshold: threshold (in MADs) for filtering outliers
     """
     api = wandb.Api()
-
-    # Get filtered runs
     runs = api.runs(project_path, filters=filters or {})
 
-    # Convert to DataFrame
     data = []
     for run in runs:
         config = {f"config_{k}": v for k, v in run.config.items()}
         summary = {f"summary_{k}": v for k, v in run.summary.items()}
-
         row = {
             "run_id": run.id,
             "run_name": run.name,
@@ -136,14 +138,13 @@ def analyze_wandb_runs_advanced(
         print("No runs found with the given filters")
         return df, None
 
-    # Handle grouping by multiple keys
     if isinstance(group_by, str):
         group_by = [group_by]
 
     if group_by:
         group_cols = [f"config_{key}" for key in group_by]
 
-        # Check if all group columns exist
+        # Check valid grouping keys
         missing_cols = [col for col in group_cols if col not in df.columns]
         if missing_cols:
             print(f"Warning: Missing columns: {missing_cols}")
@@ -153,17 +154,24 @@ def analyze_wandb_runs_advanced(
             print("No valid grouping columns found")
             return df, None
 
-        # Create aggregated DataFrame
-        metric_cols = [f"summary_{metric}" for metric in (metrics or [])]
-        metric_cols = [col for col in metric_cols if col in df.columns]
+        # Ensure metric columns exist and are numeric
+        metric_cols = [f"summary_{m}" for m in metrics or []]
+        for col in metric_cols:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        if not metric_cols:
-            print("No valid metric columns found")
-            return df, None
+        df.dropna(subset=metric_cols, inplace=True)
 
-        # Group and aggregate
-        agg_funcs = {col: [aggregate, "std", "count"] for col in metric_cols}
+        # Remove outliers using robust z-score (MAD) per metric
+        for col in metric_cols:
+            median = df[col].median()
+            mad = median_abs_deviation(df[col], scale="normal")
+            if mad == 0:
+                continue  # skip if constant
+            z = abs(df[col] - median) / mad
+            df = df[z <= mad_threshold]
 
+        # Aggregate
+        agg_funcs = {f"summary_{m}": [aggregate, "std", "count"] for m in metrics}
         grouped_df = df.groupby(group_cols).agg(agg_funcs).reset_index()
 
         # Flatten column names
@@ -172,16 +180,14 @@ def analyze_wandb_runs_advanced(
             for col in grouped_df.columns.values
         ]
 
-        # Create group labels for plotting
+        # Create group label
         if len(group_cols) == 1:
             grouped_df["group_label"] = grouped_df[group_cols[0]].astype(str)
         else:
             grouped_df["group_label"] = grouped_df[group_cols].apply(
-                lambda x: " | ".join(
-                    [
-                        f"{col.replace('config_', '')}={val}"
-                        for col, val in zip(group_cols, x)
-                    ]
+                lambda row: " | ".join(
+                    f"{col.replace('config_', '')}={val}"
+                    for col, val in zip(group_cols, row)
                 ),
                 axis=1,
             )
@@ -276,6 +282,7 @@ def main(
 
     # Group by multiple keys
     group_by = ["glob_second_order", "glob_dogleg"]
+    group_by_abbr = ["so", "dleg"]
     metrics = ["accuracy", "loss"]
 
     df, grouped_df = analyze_wandb_runs_advanced(
@@ -285,6 +292,18 @@ def main(
         metrics=metrics,
         show_variance=True,
         aggregate="mean",
+        mad_threshold=3,  # adjustable sensitivity
+    )
+
+    print(
+        grouped_df[
+            [
+                "group_label",
+                "summary_loss_mean",
+                "summary_loss_std",
+                "summary_loss_count",
+            ]
+        ]
     )
 
     if grouped_df is not None:
