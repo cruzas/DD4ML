@@ -16,7 +16,7 @@ NUM_REP=(1)
 BATCH_SIZES=(15000)
 
 # Configuration sweeps
-OPTIMIZERS=(apts_d)
+OPTIMIZERS=(apts_p)
 PAPER_TR_UPDATES=(false) # For LSSR1-TR: use TR updates from paper
 DATASETS=(mnist)
 MODELS=(simple_ffnn)
@@ -30,9 +30,9 @@ GLOB_DOGLEGS=(true false)
 LOC_DOGLEGS=(true false)
 
 # APTS solver options to sweep
-APTS_GLOB_OPTS=(lssr1_tr tr)
-APTS_LOC_OPTS=(lssr1_tr tr)
-FOC_OPTS=(true false)
+APTS_GLOB_OPTS=(lssr1_tr)
+APTS_LOC_OPTS=(lssr1_tr)
+FOC_OPTS=(false)
 
 # Evaluation parameters: epochs, max iterations, loss
 EVAL_PARAMS=(epochs=10 max_iters=0 criterion=cross_entropy)
@@ -88,7 +88,7 @@ set_apts_lssr1_tr_params() {
         loc_opt=lssr1_tr max_loc_iters=3 loc_second_order=true)
       case "$opt" in
       apts_d) APTS_PARAMS+=(glob_pass=true foc=true) ;;
-      apts_p) APTS_PARAMS+=(glob_pass=true foc=false) ;;
+      apts_p) APTS_PARAMS+=(glob_pass=true) ;;
       apts_ip) APTS_PARAMS+=(loc_opt=sgd loc_second_order=false glob_pass=true) ;;
       tr) APTS_PARAMS+=(glob_second_order=false) ;;
       esac

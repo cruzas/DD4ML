@@ -105,3 +105,19 @@ def trainable_params_to_vector(model: nn.Module) -> torch.Tensor:
             for p in model.parameters()
         ]
     ).detach()
+
+
+def trainable_grads_to_vector(model: nn.Module) -> torch.Tensor:
+    """
+    Returns a vector containing only the trainable gradients of the model.
+    """
+    return torch.cat(
+        [
+            (
+                p.grad.view(-1)
+                if p.requires_grad and p.grad is not None
+                else p.new_zeros(p.numel())
+            )
+            for p in model.parameters()
+        ]
+    ).detach()

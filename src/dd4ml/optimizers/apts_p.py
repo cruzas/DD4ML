@@ -63,7 +63,8 @@ class APTS_P(APTS_Base):
         # Instantiate local optimizer (trust‐region or LSSR1_TR)
         self.loc_opt = loc_opt(
             self.loc_model.parameters(),
-            flat_params_fn=self.loc_grad_to_vector,
+            flat_grads_fn=self.loc_grad_to_vector,
+            flat_params_fn=self.loc_params_to_vector,
             **loc_opt_hparams,
         )
 
@@ -111,8 +112,16 @@ class APTS_P(APTS_Base):
                 dist.all_reduce(pg.data, op=dist.ReduceOp.SUM)
 
     @torch.no_grad()
-    def loc_grad_to_vector(self):
+    def loc_params_to_vector(self):
         return trainable_params_to_vector(self.loc_model)
+
+    @torch.no_grad()
+    def loc_grad_to_vector(self):
+        """
+        Returns the local model's gradients as a single flat vector.
+        This is used by the local optimizer to compute the step.
+        """
+        return trainable_grads_to_vector(self.loc_model)
 
     def step(self, inputs, labels, inputs_d=None, labels_d=None, hNk=None):
         """

@@ -46,8 +46,10 @@ tests/log_files/
 /src/utility
 /tests/pinns
 
- tests/config_files/config_files/config_apts_d_*
- tests/config_files/config_files/config_apts_*
+tests/config_files/
+
+tests/config_files/config_files/config_apts_d_*
+tests/config_files/config_files/config_apts_*
 tests/config_files/config_apts_cifar10_128_nst_2_nsd_1_nrpsd_1_trial_1.yaml
 tests/config_files/config_apts_d_cifar10_1024_nst_1_nsd_16_nrpsd_1_trial_1.yaml
 tests/config_files/config_apts_d_cifar10_1024_nst_1_nsd_16_nrpsd_1_trial_2.yaml
