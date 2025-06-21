@@ -123,7 +123,7 @@ def plot_box_whisker(
 def main(
     entity="cruzas-universit-della-svizzera-italiana",
     project="tr_variants_assessment",
-    recompute=True,
+    recompute=False,
 ):
     base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     datasets = ["mnist"]
@@ -131,11 +131,14 @@ def main(
     batch_sizes = [30000]
     paper_tr_update = False
     group_by_map = {
-        "glob_second_order": "so",
-        "glob_dogleg": "dleg",
-        "paper_tr_update": "ptru",
-        "glob_opt": "gopt",
-        "loc_opt": "lopt",
+        # "glob_second_order": "so",
+        # "glob_dogleg": "gdleg",
+        # "loc_second_order": "lso",
+        # "loc_dogleg": "ldleg",
+        # "paper_tr_update": "ptru",
+        # "glob_opt": "gopt",
+        # "loc_opt": "lopt",
+        "foc": "foc",
     }
 
     experiments = [
@@ -145,6 +148,13 @@ def main(
                 "config.model_name": "simple_ffnn",
                 "config.dataset_name": ds,
                 "config.batch_size": bs,
+                "config.glob_opt": "lssr1_tr",
+                "config.loc_opt": "lssr1_tr",
+                "config.paper_tr_update": paper_tr_update,
+                "config.glob_second_order": False,
+                "config.loc_second_order": False,
+                "config.glob_dogleg": False,
+                "config.loc_dogleg": False,
             },
             group_by_map,
             os.path.join(base_save, f"{opt}_{ds}_{bs}.pdf"),

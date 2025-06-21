@@ -61,7 +61,11 @@ class APTS_P(APTS_Base):
         self.loc_model = mark_trainable(clone_model(model))
 
         # Instantiate local optimizer (trust‐region or LSSR1_TR)
-        self.loc_opt = loc_opt(self.loc_model.parameters(), **loc_opt_hparams)
+        self.loc_opt = loc_opt(
+            self.loc_model.parameters(),
+            flat_params_fn=self.loc_grad_to_vector,
+            **loc_opt_hparams,
+        )
 
         self.loc_closure = self.non_foc_loc_closure
         if isinstance(self.loc_opt, ASNTR):

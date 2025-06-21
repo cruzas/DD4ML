@@ -50,7 +50,7 @@ class Trainer:
         C.delta = 0.1  # for trust region methods
         C.min_delta = 1e-3
         C.max_delta = 2.0
-        C.data_parallel = False
+        C.data_parallel = True
         C.norm_type = 2  # for APTS_D (and possibly APTS_IP)
         C.glob_pass = False
         C.foc = False  # for APTS_D
