@@ -127,13 +127,15 @@ def main(
 ):
     base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     datasets = ["mnist"]
-    optimizers = ["tr"]
-    batch_sizes = [15000]
+    optimizers = ["apts_d"]
+    batch_sizes = [30000]
     paper_tr_update = False
     group_by_map = {
         "glob_second_order": "so",
         "glob_dogleg": "dleg",
         "paper_tr_update": "ptru",
+        "glob_opt": "gopt",
+        "loc_opt": "lopt",
     }
 
     experiments = [
