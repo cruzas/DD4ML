@@ -11,7 +11,8 @@ from torch.optim.optimizer import Optimizer
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.solvers.obs import OBS
 from dd4ml.utility import get_lssr1_tr_hparams
-from dd4ml.utility.optimizer_utils import solve_tr_first_order, solve_tr_second_order
+from dd4ml.utility.optimizer_utils import (solve_tr_first_order,
+                                           solve_tr_second_order)
 
 from .lsr1 import LSR1
 
@@ -255,6 +256,37 @@ class LSSR1_TR(Optimizer):
 
         return loss, grad, deriv
 
+    @staticmethod
+    def _cubic_interpolate(
+        x1: Tensor,
+        f1: Tensor,
+        g1: Tensor,
+        x2: Tensor,
+        f2: Tensor,
+        g2: Tensor,
+        bounds: Optional[Tuple[Tensor, Tensor]] = None,
+    ) -> Tensor:
+        """
+        Full cubic interpolation between (x1,f1,g1) and (x2,f2,g2),
+        clamped to bounds if provided.
+        """
+        if bounds is not None:
+            xmin, xmax = bounds
+        else:
+            xmin, xmax = (x1, x2) if x1 <= x2 else (x2, x1)
+
+        d1 = g1 + g2 - 3 * (f1 - f2) / (x1 - x2)
+        d2_sq = d1.pow(2) - g1 * g2
+        if d2_sq >= 0:
+            d2 = d2_sq.sqrt()
+            if x1 <= x2:
+                pos = x2 - (x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2))
+            else:
+                pos = x1 - (x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2 * d2))
+            return torch.clamp(pos, xmin, xmax)
+        # fallback to bisection
+        return (xmin + xmax) / 2
+
     def _zoom(
         self,
         wk: Tensor,
@@ -264,66 +296,59 @@ class LSSR1_TR(Optimizer):
         phi_lo: Tensor,
         phi_hi: Tensor,
         dphi_lo: Tensor,
+        dphi_hi: Tensor,
         phi_0: Tensor,
         dphi_0: Tensor,
         closure: Callable,
         c_1: float,
         c_2: float,
-        max_iter: int = 1,
+        max_iter: int = 5,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
-        Perform the zoom phase of the strong Wolfe line search,
-        narrowing the interval [alpha_lo, alpha_hi] until conditions are met
-        or maximum iterations exceeded. Returns (alpha_j, loss, gradient).
+        Zoom phase using full cubic interpolation between (alpha_lo, phi_lo, dphi_lo)
+        and (alpha_hi, phi_hi, dphi_hi), clamped to a safe interval.
+        Returns (alpha_best, phi_best, grad_best).
         """
+        grad_j_last = None
         for i in range(max_iter):
-            # Interpolate new trial alpha within [alpha_lo, alpha_hi]
             if i == 0:
                 alpha_j = 0.5 * (alpha_lo + alpha_hi)
             else:
-                denom = 2 * (phi_hi - phi_lo - dphi_lo * (alpha_hi - alpha_lo))
-                cond = abs(denom) > self.tol
-                if not cond:
-                    interp = 0.5 * (alpha_lo + alpha_hi)
-                else:
-                    interp = alpha_lo - dphi_lo * (alpha_hi - alpha_lo) ** 2 / denom
                 safe_low = alpha_lo + 0.1 * (alpha_hi - alpha_lo)
                 safe_high = alpha_hi - 0.1 * (alpha_hi - alpha_lo)
-                alpha_j = torch.where(
-                    cond,
-                    torch.clamp(interp, safe_low, safe_high),
-                    0.5 * (alpha_lo + alpha_hi),
+                alpha_j = self._cubic_interpolate(
+                    alpha_lo,
+                    phi_lo,
+                    dphi_lo,
+                    alpha_hi,
+                    phi_hi,
+                    dphi_hi,
+                    bounds=(safe_low, safe_high),
                 )
 
-            # Evaluate function, gradient, and derivative at alpha_j
             phi_j, grad_j, dphi_j = self._evaluate_function_and_gradient(
                 wk, p, alpha_j, closure
             )
-
-            # Store the most recent gradient
             grad_j_last = grad_j
 
-            # Check Armijo condition or if phi_j >= phi_lo
-            armijo = phi_j > phi_0 + c_1 * alpha_j * dphi_0
-            if armijo or (phi_j >= phi_lo):
-                alpha_hi, phi_hi = alpha_j, phi_j
+            # Check Armijo or bracket lower
+            if phi_j > (phi_0 + c_1 * alpha_j * dphi_0) or phi_j >= phi_lo:
+                alpha_hi, phi_hi, dphi_hi = alpha_j, phi_j, dphi_j
             else:
-                # Check strong Wolfe curvature condition
-                strong_wolfe = abs(dphi_j) <= -c_2 * dphi_0
-                if strong_wolfe:
+                # Check curvature condition
+                if abs(dphi_j) <= -c_2 * dphi_0:
                     return alpha_j, phi_j, grad_j
-                switch = dphi_j * (alpha_hi - alpha_lo) >= 0
-                if switch:
-                    alpha_hi, phi_hi = alpha_lo, phi_lo
-                # Update lower bound
+                # If derivative signs imply we passed the minimiser
+                if dphi_j * (alpha_hi - alpha_lo) >= 0:
+                    alpha_hi, phi_hi, dphi_hi = alpha_lo, phi_lo, dphi_lo
+                # Move lower bound up
                 alpha_lo, phi_lo, dphi_lo = alpha_j, phi_j, dphi_j
 
             # Terminate if interval is sufficiently small
-            if abs(alpha_hi - alpha_lo) < self.tol:
+            if (alpha_hi - alpha_lo) * p.abs().max() < self.tol:
                 break
 
-        # If maximum iterations exceeded, return best lower bound
-        # return alpha_lo, phi_lo, self._flat_grads_fn()
+        # Fallback: return best lower bound
         return alpha_lo, phi_lo, grad_j_last
 
     def _strong_wolfe_line_search(
@@ -337,18 +362,17 @@ class LSSR1_TR(Optimizer):
         c_1: float = 1e-4,
         c_2: float = 0.9,
         alpha_max: float = 10.0,
-        max_iter: int = 1,
+        max_iter: int = 5,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
-        Conduct strong Wolfe line search to find step size alpha
-        that satisfies both Armijo and curvature conditions.
-        Returns chosen alpha, new loss, and new gradient.
+        Conduct strong Wolfe line search with cubic-zoom.
+        Returns (alpha, new_loss, new_grad).
         """
         alpha_prev = alpha_0
         phi_prev = phi_0
         dphi_prev = dphi_0
 
-        # Initial trial step length (half of alpha_max)
+        # initial trial
         alpha_i = 0.5 * alpha_max
 
         for i in range(max_iter):
@@ -356,55 +380,62 @@ class LSSR1_TR(Optimizer):
                 wk, p, alpha_i, closure
             )
 
-            cond1 = phi_i > phi_0 + c_1 * alpha_i * dphi_0
-            cond2 = (i > 1) and (phi_i >= phi_prev)
-            # If either condition triggers, enter zoom phase
-            if cond1 or cond2:
+            armijo = phi_i > (phi_0 + c_1 * alpha_i * dphi_0)
+            bracket_cond = (i > 1) and (phi_i >= phi_prev)
+
+            if armijo or bracket_cond:
                 return self._zoom(
-                    wk,
-                    p,
-                    alpha_prev,
-                    alpha_i,
-                    phi_prev,
-                    phi_i,
-                    dphi_prev,
-                    phi_0,
-                    dphi_0,
-                    closure,
-                    c_1,
-                    c_2,
+                    wk=wk,
+                    p=p,
+                    alpha_lo=alpha_prev,
+                    alpha_hi=alpha_i,
+                    phi_lo=phi_prev,
+                    phi_hi=phi_i,
+                    dphi_lo=dphi_prev,
+                    dphi_hi=dphi_i,
+                    phi_0=phi_0,
+                    dphi_0=dphi_0,
+                    closure=closure,
+                    c_1=c_1,
+                    c_2=c_2,
                     max_iter=self.max_zoom_iters,
                 )
 
-            # If curvature condition satisfied, accept alpha_i
+            # curvature condition
             if abs(dphi_i) <= -c_2 * dphi_0:
                 return alpha_i, phi_i, grad_i
 
-            # If derivative becomes positive, perform zoom with swapped bounds
+            # derivative positive => reverse bracket
             if dphi_i >= 0:
                 return self._zoom(
-                    wk,
-                    p,
-                    alpha_i,
-                    alpha_prev,
-                    phi_i,
-                    phi_prev,
-                    dphi_i,
-                    phi_0,
-                    dphi_0,
-                    closure,
-                    c_1,
-                    c_2,
+                    wk=wk,
+                    p=p,
+                    alpha_lo=alpha_i,
+                    alpha_hi=alpha_prev,
+                    phi_lo=phi_i,
+                    phi_hi=phi_prev,
+                    dphi_lo=dphi_i,
+                    dphi_hi=dphi_prev,
+                    phi_0=phi_0,
+                    dphi_0=dphi_0,
+                    closure=closure,
+                    c_1=c_1,
+                    c_2=c_2,
                     max_iter=self.max_zoom_iters,
                 )
 
-            # Update previous iterate values and double alpha_i (capped at alpha_max)
-            alpha_prev, phi_prev, dphi_prev, grad_prev = alpha_i, phi_i, dphi_i, grad_i
+            # update and expand
+            alpha_prev, phi_prev, dphi_prev, grad_prev = (
+                alpha_i,
+                phi_i,
+                dphi_i,
+                grad_i,
+            )
             alpha_i = min(1.25 * alpha_i, alpha_max)
             if alpha_i >= alpha_max:
                 break
 
-        # Fallback: return best known step (alpha_prev)
+        # fallback
         return alpha_prev, phi_prev, grad_prev
 
     def _backtracking_line_search(

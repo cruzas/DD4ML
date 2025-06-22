@@ -10,8 +10,8 @@ import scipy
 import scipy.linalg
 import torch
 from numpy import linalg as LA
-from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 try:
     from scipy import array, dot
@@ -28,7 +28,9 @@ class OBS:
         super(OBS, self).__init__()
         self.tol = 1e-6
 
-    def _vec_to_wpt(self, vec: torch.Tensor, like: WeightParallelizedTensor) -> WeightParallelizedTensor:
+    def _vec_to_wpt(
+        self, vec: torch.Tensor, like: WeightParallelizedTensor
+    ) -> WeightParallelizedTensor:
         """Convert flat tensor ``vec`` to a ``WeightParallelizedTensor`` with
         the same sharding as ``like``."""
         shards = []
@@ -37,7 +39,9 @@ class OBS:
             n = t.numel()
             shards.append(vec[offset : offset + n].view_as(t))
             offset += n
-        return WeightParallelizedTensor(shards, like.backend, like.master_group, like.rank)
+        return WeightParallelizedTensor(
+            shards, like.backend, like.master_group, like.rank
+        )
 
     def solve_tr_subproblem(self, g, delta, gamma, Psi, Minv):
         # Check that g, delta, gamma, Psi, and Minv do not have NaN or Inf values
@@ -54,7 +58,16 @@ class OBS:
         if delta < 0:
             raise ValueError(f"Delta must be non-negative. Delta: {delta}")
 
+        # if Psi is None or Psi.numel() == 0 or torch.norm(Psi) <= self.tol:
+        #     # Unconstrained minimizer
+        #     p_unc = -g / gamma
+        #     # If inside trust‐region, return it; otherwise Cauchy‐step on boundary
+        #     if torch.norm(p_unc) <= delta:
+        #         return p_unc
+        #     return -delta / g.norm() * g
+
         PsiPsi = torch.matmul(Psi.transpose(0, 1), Psi)
+        # print(f"PsiPsi norm: {torch.norm(PsiPsi)}")
         R = torch.linalg.cholesky(PsiPsi, upper=True)
 
         MR = torch.linalg.solve(Minv, R.transpose(0, 1))

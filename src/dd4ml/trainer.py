@@ -150,6 +150,18 @@ class Trainer:
         overlap = (
             cfg.overlap if hasattr(cfg, "overlap") else 0
         )  # Overlap between consecutive batches
+
+        # Check if batch size is length of dataset
+        if bs >= len(ds_train):
+            print(
+                f"Batch size {bs} is greater than or equal to the dataset size {len(ds_train)}. Using the entire dataset as a single batch and setting overlap to 0."
+            )
+            self.current_batch_size = len(ds_train)
+            self.config.overlap = 0
+            cfg = self.config  # Update config to reflect the new batch size
+            bs = self.current_batch_size
+            overlap = 0
+
         world_size = dist.get_world_size() if dist.is_initialized() else 1
         rank = dist.get_rank() if dist.is_initialized() else 0
         if cfg.use_pmw:
@@ -173,6 +185,14 @@ class Trainer:
         else:
             # Per-process batch size
             pp_bs = bs // world_size
+            shard_N = math.ceil(len(ds_train) / world_size)
+            if pp_bs >= shard_N:
+                dprint(
+                    f"Per-process batch size {pp_bs} is greater than or equal to the shard size {shard_N}. "
+                    "Using the entire shard as a single batch and setting overlap to 0."
+                )
+                overlap = 0
+
             if pp_bs < 1:
                 raise ValueError(
                     f"Per-process batch size {pp_bs} is less than 1. "
@@ -221,6 +241,9 @@ class Trainer:
                 num_workers=cfg.num_workers,
                 pin_memory=True,
             )
+
+            # Print number of batches in the train loader
+            dprint(f"Number of batches in train_loader: {self._get_num_batches()}")
 
     def _asntr_present(self):
         # Check if ASNTR is the optimizer itself...
@@ -613,10 +636,13 @@ class Trainer:
         return batch_loss, batch_grad, bs
 
     def run_by_epoch(self):
-        N = len(self.train_dataset)
+        world_size = dist.get_world_size() if dist.is_initialized() else 1
+        N = len(self.train_dataset) / world_size
         self.total_start_time = time.time()
         self.epoch_time = time.time()
         self.epoch_num = 0
+
+        print("Total number of training samples:", N)
 
         while self.epoch_num <= self.config.epochs:
             total_loss = 0.0
@@ -636,6 +662,8 @@ class Trainer:
 
                 total_loss += batch_loss * bs
                 total_samples += bs
+
+                print(f"Total samples processed: {total_samples}/{N}, ")
                 self.loss = total_loss / total_samples
 
                 stay = self._stay_here()

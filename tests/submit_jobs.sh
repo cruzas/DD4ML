@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # --- Constants and Defaults --- #
-SCRIPT="run_config_file.py"      # Python script to execute
-PROJECT="tr_variants_assessment" # wandb project name
-TRIALS=3                         # Repetitions per configuration
-USE_PMW=false                    # PMW optimizer flag
-GRAD_ACC=false                   # Gradient accumulation flag
-SCALING_TYPE="weak"              # "weak": scale up batch; "strong": scale down
+SCRIPT="run_config_file.py" # Python script to execute
+PROJECT="debugging"         # wandb project name
+TRIALS=1                    # Repetitions per configuration
+USE_PMW=false               # PMW optimizer flag
+GRAD_ACC=false              # Gradient accumulation flag
+SCALING_TYPE="weak"         # "weak": scale up batch; "strong": scale down
 
 # Parallelism sweep settings
 NUM_SUBD=(2)
@@ -16,23 +16,23 @@ NUM_REP=(1)
 BATCH_SIZES=(15000)
 
 # Configuration sweeps
-OPTIMIZERS=(apts_p)
+OPTIMIZERS=(apts_d apts_p)
 PAPER_TR_UPDATES=(false) # For LSSR1-TR: use TR updates from paper
 DATASETS=(mnist)
 MODELS=(simple_ffnn)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(true false)
-LOC_SECOND_ORDERS=(true false)
+GLOB_SECOND_ORDERS=(true)
+LOC_SECOND_ORDERS=(true)
 
 # Dogleg toggles
-GLOB_DOGLEGS=(true false)
-LOC_DOGLEGS=(true false)
+GLOB_DOGLEGS=(true)
+LOC_DOGLEGS=(true)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(lssr1_tr)
 APTS_LOC_OPTS=(lssr1_tr)
-FOC_OPTS=(false)
+FOC_OPTS=(true)
 
 # Evaluation parameters: epochs, max iterations, loss
 EVAL_PARAMS=(epochs=10 max_iters=0 criterion=cross_entropy)

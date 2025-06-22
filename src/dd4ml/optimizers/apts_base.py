@@ -23,6 +23,7 @@ from dd4ml.utility import (
     get_tr_hparams,
     mark_trainable,
     restore_params,
+    trainable_grads_to_vector,
     trainable_params_to_vector,
 )
 
@@ -256,6 +257,19 @@ class APTS_Base(Optimizer):
         loss = self.criterion(self.model(self.inputs), self.labels)
         if torch.is_grad_enabled() or compute_grad:
             loss.backward()  # DDP handles gradient averaging
+            # Check if model is DDP-wrapped
+            if not isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+                # Handle gradient averaging for non-DDP models
+                if self.nr_models > 1 and dist.is_available() and dist.is_initialized():
+                    # flatten grads, sum across ranks, then average
+                    flat_grad = self.glob_grad_to_vector()
+                    dist.all_reduce(flat_grad, op=dist.ReduceOp.SUM)
+                    flat_grad.div_(self.nr_models)
+                    # unpack back into each parameter's grad
+                    vector_to_parameters(
+                        flat_grad, [p.grad for p in self.model.parameters()]
+                    )
+
             self.grad_evals += 1.0  # Count global gradient evaluation
         if self.nr_models > 1:
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
@@ -268,7 +282,6 @@ class APTS_Base(Optimizer):
         loss = self.criterion(self.loc_model(self.inputs_d), self.labels_d)
         if torch.is_grad_enabled() or compute_grad:
             loss.backward()
-            self.loc_grad_evals += 1  # Count local gradient evaluation
         return loss
 
     def foc_loc_closure_d(self, compute_grad: bool = False):
@@ -292,7 +305,6 @@ class APTS_Base(Optimizer):
         loss = self.criterion(self.model(self.inputs_d), self.labels_d)
         if torch.is_grad_enabled() or compute_grad:
             loss.backward()  # DDP will handle gradient averaging
-            self.grad_evals += 1.0  # Count global gradient evaluation
         if self.nr_models > 1:
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
             loss /= self.nr_models

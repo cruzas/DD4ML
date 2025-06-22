@@ -67,6 +67,12 @@ class LSR1:
             # Reject pair - insufficient curvature information
             return
 
+        # # Candidate gamma used for degenerate check
+        # gamma_candidate = (y.dot(y) / curvature).clamp_min(self.tol)
+        # if torch.norm(y - gamma_candidate * s) <= self.tol:
+        #     # Skip storing if gamma_candidate is too small
+        #     return
+
         # Maintain limited memory
         if len(self._S) >= self.memory_length:
             # Remove oldest pair

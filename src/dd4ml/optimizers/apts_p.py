@@ -72,6 +72,9 @@ class APTS_P(APTS_Base):
         if isinstance(self.loc_opt, ASNTR):
             self.loc_closure_d = self.non_foc_loc_closure_d
 
+        if nr_models > 1 and norm_type != math.inf:
+            self.loc_opt.delta = self.delta * (1.0 / math.sqrt(nr_models))
+
         # Print name of glob_opt and loc_opt
         dprint(
             f"{self.__name__} global optimizer: {type(self.glob_opt).__name__}; local optimizer: {type(self.loc_opt).__name__}"
@@ -123,6 +126,20 @@ class APTS_P(APTS_Base):
         """
         return trainable_grads_to_vector(self.loc_model)
 
+    @torch.no_grad()
+    def sync_glob_to_loc(self):
+        self.delta = self.glob_opt.delta
+        self.update_pytorch_lr()
+
+        self.loc_opt.delta = self.glob_opt.delta
+        if self.norm_type != math.inf and self.nr_models > 1:
+            self.loc_opt.delta /= math.sqrt(self.nr_models)
+        if hasattr(self.loc_opt, "update_pytorch_lr"):
+            self.loc_opt.update_pytorch_lr()
+
+        # Ensure local model matches global model for the next iteration
+        self.loc_model.load_state_dict(get_state_dict(self.model))
+
     def step(self, inputs, labels, inputs_d=None, labels_d=None, hNk=None):
         """
         Performs one APTS_P step: evaluate initial losses/gradients,
@@ -149,6 +166,8 @@ class APTS_P(APTS_Base):
             compute_grad=True
         ), self.loc_closure(compute_grad=True)
 
+        print(f"Num grad evaluations after first closure: {self.grad_evals}")
+
         # Store initial global/local gradients (flattened)
         self.init_glob_grad, self.init_loc_grad = (
             self.glob_grad_to_vector(),
@@ -160,6 +179,8 @@ class APTS_P(APTS_Base):
 
         # Account for local gradient evaluations across all models
         self.grad_evals += self.loc_grad_evals
+
+        print(f"Num grad evaluations after local steps: {self.grad_evals}")
 
         # Synchronize parameters from local models to global model
         self.sync_loc_to_glob()
@@ -178,6 +199,7 @@ class APTS_P(APTS_Base):
         # Optional global pass
         if self.glob_pass:
             loss, grad = self.glob_steps(loss, grad)
+            print(f"Num grad evaluations after global steps: {self.grad_evals}")
 
         # Synchronize global and local models and set delta accordingly
         self.sync_glob_to_loc()

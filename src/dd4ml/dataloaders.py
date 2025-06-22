@@ -5,13 +5,8 @@ from typing import Iterator, List, Optional, Sequence
 import numpy as np
 import torch
 import torch.distributed as dist
-from torch.utils.data import (
-    BatchSampler,
-    DataLoader,
-    Dataset,
-    DistributedSampler,
-    Sampler,
-)
+from torch.utils.data import (BatchSampler, DataLoader, Dataset,
+                              DistributedSampler, Sampler)
 from torch.utils.data.distributed import DistributedSampler
 
 
@@ -34,6 +29,10 @@ class OverlapBatchSampler(BatchSampler):
         self.base_sampler = base_sampler
         self.batch_size = int(batch_size)
         self.drop_last = drop_last
+
+        # if self.batch_size >= len(self.base_sampler):
+        #     self.batch_size = len(self.base_sampler)
+        #     self.overlap_sz = 0
 
         if isinstance(overlap, float) and 0.0 < overlap < 1.0:
             self.overlap_sz = int(round(overlap * self.batch_size))
