@@ -60,9 +60,21 @@ class APTS_P(APTS_Base):
         # Clone model for local updates; avoids overwriting global params
         self.loc_model = mark_trainable(clone_model(model))
 
+        # Trainable parameters
+        filtered = []
+        for g in self.loc_model.parameters():
+            if isinstance(g, dict):
+                grp = dict(g)
+                grp["params"] = [p for p in g["params"] if p.requires_grad]
+                if grp["params"]:
+                    filtered.append(grp)
+            else:
+                if g.requires_grad:
+                    filtered.append(g)
+
         # Instantiate local optimizer (trust‐region or LSSR1_TR)
         self.loc_opt = loc_opt(
-            self.loc_model.parameters(),
+            params=filtered,
             flat_grads_fn=self.loc_grad_to_vector,
             flat_params_fn=self.loc_params_to_vector,
             **loc_opt_hparams,
@@ -166,8 +178,6 @@ class APTS_P(APTS_Base):
             compute_grad=True
         ), self.loc_closure(compute_grad=True)
 
-        print(f"Num grad evaluations after first closure: {self.grad_evals}")
-
         # Store initial global/local gradients (flattened)
         self.init_glob_grad, self.init_loc_grad = (
             self.glob_grad_to_vector(),
@@ -176,11 +186,6 @@ class APTS_P(APTS_Base):
 
         # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)
-
-        # Account for local gradient evaluations across all models
-        self.grad_evals += self.loc_grad_evals
-
-        print(f"Num grad evaluations after local steps: {self.grad_evals}")
 
         # Synchronize parameters from local models to global model
         self.sync_loc_to_glob()
@@ -199,7 +204,6 @@ class APTS_P(APTS_Base):
         # Optional global pass
         if self.glob_pass:
             loss, grad = self.glob_steps(loss, grad)
-            print(f"Num grad evaluations after global steps: {self.grad_evals}")
 
         # Synchronize global and local models and set delta accordingly
         self.sync_glob_to_loc()

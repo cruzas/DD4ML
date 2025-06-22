@@ -11,8 +11,7 @@ from torch.optim.optimizer import Optimizer
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.solvers.obs import OBS
 from dd4ml.utility import get_lssr1_tr_hparams
-from dd4ml.utility.optimizer_utils import (solve_tr_first_order,
-                                           solve_tr_second_order)
+from dd4ml.utility.optimizer_utils import solve_tr_first_order, solve_tr_second_order
 
 from .lsr1 import LSR1
 

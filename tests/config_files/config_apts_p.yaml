@@ -72,4 +72,4 @@ parameters:
   paper_tr_update:
     value: False
   data_parallel:
-    value: False
+    value: True

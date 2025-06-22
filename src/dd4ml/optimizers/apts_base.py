@@ -346,7 +346,13 @@ class APTS_Base(Optimizer):
             "closure_d": self.loc_closure_d,
         }
 
-        return self._step_loop(**step_loop_args)
+        loc_loss, loc_grad = self._step_loop(**step_loop_args)
+        loc_evals = torch.tensor(self.loc_grad_evals, device=self.device)
+        if self.nr_models > 1:
+            dist.all_reduce(loc_evals, op=dist.ReduceOp.SUM)
+            loc_evals /= self.nr_models
+        self.grad_evals += loc_evals.item()
+        return loc_loss, loc_grad
 
     def glob_steps(self, loss, grad, closure=None, closure_d=None):
         step_loop_args = {

@@ -138,10 +138,6 @@ class APTS_D(APTS_Base):
         # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)
 
-        # Account for local gradient evaluations across all models
-        world_size = dist.get_world_size() if dist.is_initialized() else 1
-        self.grad_evals += self.loc_grad_evals
-
         # Compute local step and reduction, then aggregate across all models:
         # step becomes global trial step
         with torch.no_grad():

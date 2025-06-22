@@ -16,7 +16,7 @@ NUM_REP=(1)
 BATCH_SIZES=(15000)
 
 # Configuration sweeps
-OPTIMIZERS=(apts_d apts_p)
+OPTIMIZERS=(apts_p)
 PAPER_TR_UPDATES=(false) # For LSSR1-TR: use TR updates from paper
 DATASETS=(mnist)
 MODELS=(simple_ffnn)

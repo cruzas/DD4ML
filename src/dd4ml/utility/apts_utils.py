@@ -97,27 +97,39 @@ def print_params_norm(model: nn.Module):
 
 def trainable_params_to_vector(model: nn.Module) -> torch.Tensor:
     """
-    Returns a vector containing only the trainable parameters of the model.
+    Returns a flat vector containing all trainable parameters of the model.
     """
     return torch.cat(
-        [
-            (p.grad.view(-1) if p.grad is not None else p.new_zeros(p.numel()))
-            for p in model.parameters()
-        ]
-    ).detach()
+        [p.detach().view(-1) for p in model.parameters() if p.requires_grad]
+    ).clone()
 
 
 def trainable_grads_to_vector(model: nn.Module) -> torch.Tensor:
     """
-    Returns a vector containing only the trainable gradients of the model.
+    Returns a flat vector containing the gradients of all trainable parameters of the model.
     """
-    return torch.cat(
-        [
-            (
-                p.grad.view(-1)
-                if p.requires_grad and p.grad is not None
-                else p.new_zeros(p.numel())
-            )
-            for p in model.parameters()
-        ]
-    ).detach()
+    grads = []
+    for p in model.parameters():
+        if not p.requires_grad:
+            continue
+        if p.grad is None:
+            grads.append(torch.zeros_like(p).view(-1))
+        else:
+            grads.append(p.grad.view(-1))
+    return torch.cat(grads).detach()
+
+
+# def trainable_grads_to_vector(model: nn.Module) -> torch.Tensor:
+#     """
+#     Returns a vector containing only the trainable gradients of the model.
+#     """
+#     return torch.cat(
+#         [
+#             (
+#                 p.grad.view(-1)
+#                 if p.requires_grad and p.grad is not None
+#                 else p.new_zeros(p.numel())
+#             )
+#             for p in model.parameters()
+#         ]
+#     ).detach()
