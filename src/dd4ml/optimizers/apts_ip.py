@@ -159,6 +159,7 @@ class APTS_IP(APTS_Base):
         # Optional global pass
         if self.glob_pass:
             loss, grad = self.glob_steps(loss, grad, closure=closure)
+            self.grad_evals += 1
 
         self.delta = self.glob_opt.delta
         self._update_param_group()
