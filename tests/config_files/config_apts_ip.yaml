@@ -28,7 +28,7 @@ parameters:
   loc_dogleg:
     value: False
   norm_type:
-    value: inf
+    value: 2
   max_loc_iters:
     value: 5
   max_glob_iters:

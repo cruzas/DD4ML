@@ -44,7 +44,7 @@ class Trainer:
         C.grad_norm_clip = None
         # initial batch size and adaptive params
         C.batch_size = 128  # max batch size is length of dataset
-        C.batch_inc_factor = 1  # factor to increase batch size
+        C.batch_inc_factor = 1.5  # factor to increase batch size
         C.loss_tol = 1e-2  # loss tolerance for adaptive batch size
         # APTS and TR
         C.delta = 0.1  # for trust region methods
@@ -668,9 +668,9 @@ class Trainer:
                 total_loss += batch_loss * bs
                 total_samples += bs
 
-                print(
-                    f"Total samples processed: {total_samples}/{self.num_training_samples_per_process}"
-                )
+                # print(
+                #     f"Total samples processed: {total_samples}/{self.num_training_samples_per_process}"
+                # )
                 self.loss = total_loss / total_samples
 
                 stay = self._stay_here()
@@ -682,6 +682,10 @@ class Trainer:
                     if len(self.train_loader) != old:
                         it = iter(self.train_loader)
 
+            if self._lssr1_tr_present() and self.epoch_num % 3 == 0:
+                full = self._eval_full_objective()
+                self._adjust_batch_size(full)
+            
             self.compute_accuracy()
             self.epoch_dt = time.time() - self.epoch_time
             self.running_time = time.time() - self.total_start_time

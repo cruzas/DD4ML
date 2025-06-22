@@ -43,7 +43,7 @@ class WeightParallelizedModel(BasePMWModel):
     def zero_grad(self):
         self.subdomain.zero_grad()
 
-    def grad(self, clone=True):  # Returns the global gradient of the model
+    def grad(self, clone=False):  # Returns the global gradient of the model
         gradient = [
             param.grad.clone() if clone else param.grad for param in self.parameters()
         ]
@@ -54,7 +54,7 @@ class WeightParallelizedModel(BasePMWModel):
     def grad_norm(self, p=2):  # Returns the global gradient norm of the model
         return self.grad().norm(p=p)
 
-    def parameters(self, clone=True):  # Returns the global parameters of the model
+    def parameters(self, clone=False):  # Returns the global parameters of the model
         params = [
             param.clone() if clone else param for param in self.subdomain.parameters()
         ]
@@ -130,5 +130,6 @@ class WeightParallelizedModel(BasePMWModel):
             self.subdomain.backward(loss, chunk_id=i, is_in_pipeline=True)
 
         # Rescale the gradients by the number of chunks
-        for param in self.parameters():
-            param.grad /= num_chunks
+        for param in self.parameters(clone=False):
+            if param.grad is not None:
+                param.grad /= num_chunks

@@ -58,7 +58,7 @@ parameters:
   tol:
     value: 1e-6
   batch_inc_factor:
-    value: 2.0
+    value: 1.5
   mem_length:
     value: 3
   max_wolfe_iters:

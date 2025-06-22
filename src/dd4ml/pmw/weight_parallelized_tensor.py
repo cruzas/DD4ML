@@ -49,7 +49,8 @@ class WeightParallelizedTensor(BasePMWModel):
         """
         if dim is not None:
             raise NotImplementedError("Per-dimension norms are not supported yet.")
-        if p in (2, float("inf")):
+        if p in (2, "fro", float("inf")):
+            p = 2 if p == "fro" else p
             return torch.norm(self.detach(), p=p)
         raise NotImplementedError("Only L-2 and L-∞ norms are implemented.")
 

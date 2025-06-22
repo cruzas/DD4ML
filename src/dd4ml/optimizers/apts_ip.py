@@ -103,7 +103,7 @@ class APTS_IP(APTS_Base):
             raise ValueError(
                 'The APTS in data synchronization strategy must be either "average" or "sum".'
             )
-        if self.APTS_in_data_sync_strategy == "sum" and dist.get_rank() == 0:
+        if self.APTS_in_data_sync_strategy == "sum" and dist.is_initialized() and dist.get_rank() == 0:
             print(
                 '(WARNING) APTS in data "sum" synchronization strategy still has to be tested/verified.'
             )
@@ -153,7 +153,6 @@ class APTS_IP(APTS_Base):
         step = self.model.parameters(clone=True) - self.init_glob_flat
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
-        flat_grads_fn = self.model.grad
         loss, grad, self.glob_opt.delta = self.control_step(step, closure=closure)
 
         # Optional global pass
