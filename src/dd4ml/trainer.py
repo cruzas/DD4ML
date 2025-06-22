@@ -104,6 +104,7 @@ class Trainer:
         self.max_batch_size_reached = False
         self.last_loss = float("inf")
         self.grad_evals = 0.0
+        self.world_size = dist.get_world_size() if dist.is_initialized() else 1
 
         # timing
         self.total_start_time = 0.0  # for computing the total running time
@@ -636,13 +637,17 @@ class Trainer:
         return batch_loss, batch_grad, bs
 
     def run_by_epoch(self):
-        world_size = dist.get_world_size() if dist.is_initialized() else 1
-        N = len(self.train_dataset) / world_size
+        """Run the training loop by epochs."""
+        self.num_training_samples_per_process = (
+            len(self.train_dataset) / self.world_size
+        )
         self.total_start_time = time.time()
         self.epoch_time = time.time()
         self.epoch_num = 0
 
-        print("Total number of training samples:", N)
+        dprint(
+            f"Total number of training samples per process: {self.num_training_samples_per_process}"
+        )
 
         while self.epoch_num <= self.config.epochs:
             total_loss = 0.0
@@ -651,7 +656,7 @@ class Trainer:
             stay = False
             first = self.epoch_num == 0
 
-            while total_samples < N:
+            while total_samples < self.num_training_samples_per_process:
                 try:
                     x, y = next(it)
                 except StopIteration:
@@ -663,7 +668,9 @@ class Trainer:
                 total_loss += batch_loss * bs
                 total_samples += bs
 
-                print(f"Total samples processed: {total_samples}/{N}, ")
+                print(
+                    f"Total samples processed: {total_samples}/{self.num_training_samples_per_process}"
+                )
                 self.loss = total_loss / total_samples
 
                 stay = self._stay_here()

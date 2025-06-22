@@ -21,7 +21,14 @@ class TR(Optimizer):
             setattr(cfg, k, v)
         return cfg
 
-    def __init__(self, params: Iterable[torch.nn.Parameter], **kwargs) -> None:
+    def __init__(
+        self,
+        params: Iterable[torch.nn.Parameter],
+        *,
+        flat_grads_fn: Callable[[], torch.Tensor] | None = None,
+        flat_params_fn: Callable[[], torch.Tensor] | None = None,
+        **kwargs,
+    ) -> None:
         # Extract trust-region hyperparameters from kwargs
         self.delta = kwargs.pop("delta", 0.1)
         self.norm_type = kwargs.pop("norm_type", 2)
@@ -39,6 +46,10 @@ class TR(Optimizer):
         self.inc_factor = kwargs.pop("inc_factor")
         self.min_delta = kwargs.pop("min_delta")
         self.dec_factor = kwargs.pop("dec_factor")
+
+        # Hooks for custom flatten operations
+        self._flat_grads_fn = flat_grads_fn
+        self._flat_params_fn = flat_params_fn
 
         # Only 'lr' remains in defaults
         defaults = {"lr": self.delta}
@@ -72,6 +83,12 @@ class TR(Optimizer):
 
     def _flat_grad(self) -> torch.Tensor:
         """Return the current gradient as a single flat vector."""
+        if self._flat_grads_fn is not None:
+            grad = self._flat_grads_fn()
+            if isinstance(grad, WeightParallelizedTensor):
+                grad = grad.detach()
+            return grad.clone() if isinstance(grad, torch.Tensor) else grad
+
         self._grad_buf.zero_()
         for i, p in enumerate(self.ps):
             if p.grad is not None:
@@ -85,9 +102,29 @@ class TR(Optimizer):
     def _apply_update(self, sign: float = 1.0) -> None:
         """Add sign * step to each parameter tensor in-place."""
         with torch.no_grad():
-            for i, p in enumerate(self.ps):
-                s, e = int(self.offsets[i]), int(self.offsets[i + 1])
-                p.add_(self._step_buf[s:e].view(self.shapes[i]) * sign)
+            if self._flat_params_fn is not None:
+                flat_params = self._flat_params_fn()
+                if isinstance(flat_params, WeightParallelizedTensor):
+                    if isinstance(self._step_buf, WeightParallelizedTensor):
+                        for p, base, upd in zip(
+                            self.ps,
+                            flat_params.tensor,
+                            self._step_buf.tensor,
+                        ):
+                            p.copy_(base.view_as(p) + sign * upd.view_as(p))
+                    else:
+                        for i, (p, base) in enumerate(zip(self.ps, flat_params.tensor)):
+                            s, e = int(self.offsets[i]), int(self.offsets[i + 1])
+                            p.copy_(
+                                base.view_as(p) + sign * self._step_buf[s:e].view_as(p)
+                            )
+                else:
+                    updated = flat_params + sign * self._step_buf
+                    torch.nn.utils.vector_to_parameters(updated, self.ps)
+            else:
+                for i, p in enumerate(self.ps):
+                    s, e = int(self.offsets[i]), int(self.offsets[i + 1])
+                    p.add_(self._step_buf[s:e].view(self.shapes[i]) * sign)
 
     def update_pytorch_lr(self) -> None:
         """Keep PyTorch's recorded lr in sync with the current δ."""
