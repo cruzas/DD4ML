@@ -399,7 +399,8 @@ class APTS_Base(Optimizer):
             # linear part
             pred_red = -g.dot(step)
             # add quadratic term if SR1 info exists
-            if self.glob_opt.hess._S is not None and len(self.glob_opt.hess._S) > 0:
+            # Check if hess is an attribute of glob_opt
+            if hasattr(self.glob_opt, "hess") and self.glob_opt.hess is not None and self.glob_opt.hess._S is not None and len(self.glob_opt.hess._S) > 0:
                 self.glob_opt.hess.precompute()
                 Bp = self.glob_opt.hess.B(step)
                 pred_red -= 0.5 * step.dot(Bp)

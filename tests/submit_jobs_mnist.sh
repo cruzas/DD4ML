@@ -1,44 +1,54 @@
 #!/bin/bash
 set -euo pipefail
 
+DEBUGGING=false # Set to true for debugging mode
+
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
-PROJECT="debugging"         # wandb project name
-TRIALS=1                    # Repetitions per configuration
-USE_PMW=false               # PMW optimizer flag
-GRAD_ACC=false              # Gradient accumulation flag
-SCALING_TYPE="weak"         # "weak": scale up batch; "strong": scale down
+if $DEBUGGING; then
+  PROJECT="debugging" # wandb project name
+  TRIALS=1            # Repetitions per configuration
+  partition="debug"   # Slurm partition for debugging
+else
+  PROJECT="thesis_results" # wandb project name
+  TRIALS=3                 # Repetitions per configuration
+  partition="normal"       # Slurm partition for normal runs
+fi
+
+USE_PMW=false            # PMW optimizer flag
+GRAD_ACC=false           # Gradient accumulation flag
+PAPER_TR_UPDATES=(false) # For LSSR1-TR: use TR updates from paper
+SCALING_TYPE="weak"      # "weak": scale up batch; "strong": scale down
 
 # Parallelism sweep settings
-NUM_SUBD=(2)
+NUM_SUBD=(2 4 8)
 NUM_STAGES=(1)
 NUM_REP=(1)
-BATCH_SIZES=(15000)
+BATCH_SIZES=(250 500 1000)
 
 # Configuration sweeps
 OPTIMIZERS=(apts_d)
-PAPER_TR_UPDATES=(false) # For LSSR1-TR: use TR updates from paper
 DATASETS=(mnist)
-MODELS=(simple_ffnn)
+MODELS=(simple_cnn)
 
 # Second-order toggles
 GLOB_SECOND_ORDERS=(true)
 LOC_SECOND_ORDERS=(true)
 
 # Dogleg toggles
-GLOB_DOGLEGS=(true)
-LOC_DOGLEGS=(true)
+GLOB_DOGLEGS=(false)
+LOC_DOGLEGS=(false)
 
 # APTS solver options to sweep
-APTS_GLOB_OPTS=(lssr1_tr)
-APTS_LOC_OPTS=(lssr1_tr)
+APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.
+APTS_LOC_OPTS=(lssr1_tr)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and adam*
 FOC_OPTS=(true)
 
 # Evaluation parameters: epochs, max iterations, loss
 EVAL_PARAMS=(epochs=10 max_iters=0 criterion=cross_entropy)
 
 # Adaptive solver parameters (base)
-APTS_PARAMS=(batch_inc_factor=1.0 overlap=0.0 glob_second_order=false)
+APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.0 glob_second_order=false)
 
 # --- Functions to Adjust Defaults --- #
 set_optimizer_params() {
@@ -54,7 +64,7 @@ set_optimizer_params() {
 set_model_params() {
   local mdl="$1"
   if [[ "$mdl" == "nanogpt" ]]; then
-    EVAL_PARAMS=(epochs=0 max_iters=2000000 criterion=cross_entropy_transformers)
+    EVAL_PARAMS=(epochs=0 max_iters=2000 criterion=cross_entropy_transformers)
     BATCH_SIZES=(128)
   fi
 }
@@ -124,6 +134,7 @@ submit_job() {
     -e "s|\${num_subd}|${num_subd}|g" \
     -e "s|\${num_rep}|${num_rep}|g" \
     -e "s|\${ntasks_per_node}|${ntasks_per_node}|g" \
+    -e "s|\${partition}|${partition}|g" \
     "$template" >"$jobfile"
   if ! sbatch --nodes="${nodes}" "$jobfile"; then
     echo "ERROR: sbatch failed for $job_name" >&2
