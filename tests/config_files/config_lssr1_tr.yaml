@@ -42,7 +42,7 @@ parameters:
   dataset_name:
     value: "mnist"
   model_name:
-    value: "simple_resnet"
+    value: "simple_cnn"
   criterion:
     value: "cross_entropy"
   gradient_accumulation:

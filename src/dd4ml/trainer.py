@@ -666,7 +666,7 @@ class Trainer:
                     y_d,
                     criterion=self.criterion,
                     model=self.model,
-                    data_chunks_amount=self.config.data_chunks_amount,
+                    data_chunks_amount=1,
                     compute_grad=True,
                     grad_norm_clip=self.config.grad_norm_clip,
                 )

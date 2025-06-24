@@ -6,9 +6,9 @@ parameters:
   optimizer:
     value: "asntr"
   batch_size:
-    value: 5000
+    value: 12
   effective_batch_size:
-    value: 5000
+    value: 10000
   num_stages:
     value: 1
   num_subdomains:
@@ -16,9 +16,9 @@ parameters:
   num_replicas_per_subdomain:
     value: 1
   glob_second_order:
-    value: False
-  dogleg:
-    value: False
+    value: True
+  glob_dogleg:
+    value: True
   mem_length:
     value: 3
   max_iters:
@@ -28,7 +28,7 @@ parameters:
   norm_type:
     value: 2
   learning_rate:
-    value: 0.01
+    value: 1.0
   delta: 
     value: 0.1
   min_delta: 
@@ -42,7 +42,7 @@ parameters:
   criterion:
     value: "cross_entropy"
   gradient_accumulation:
-    value: True
+    value: False
   accumulation_steps:
     value: 1
   seed:
@@ -51,3 +51,8 @@ parameters:
     value: 1e-6
   batch_inc_factor:
     value: 1.01
+  overlap:
+    value: 0.33
+  adjust_batch_size_every_iters:
+    value: 10
+

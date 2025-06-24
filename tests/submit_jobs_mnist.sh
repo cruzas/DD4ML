@@ -5,36 +5,39 @@ DEBUGGING=false # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
+PAPER_TR_UPDATES=(true)     # For LSSR1-TR: use TR updates from paper
 if $DEBUGGING; then
   PROJECT="debugging" # wandb project name
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
+  time="00:10:00"     # Time limit for debugging
+  BATCH_SIZES=(64)
+  NUM_SUBD=(4)
+  NUM_STAGES=(1)
+  NUM_REP=(1)
 else
   PROJECT="thesis_results" # wandb project name
   TRIALS=3                 # Repetitions per configuration
   partition="normal"       # Slurm partition for normal runs
+  time="00:40:00"          # Time limit for debugging
+  BATCH_SIZES=(64 128 256)
+  NUM_SUBD=(2 4 8)
+  NUM_STAGES=(1)
+  NUM_REP=(1)
 fi
 
-USE_PMW=false            # PMW optimizer flag
-GRAD_ACC=false           # Gradient accumulation flag
-PAPER_TR_UPDATES=(false) # For LSSR1-TR: use TR updates from paper
-SCALING_TYPE="weak"      # "weak": scale up batch; "strong": scale down
-
-# Parallelism sweep settings
-NUM_SUBD=(2 4 8)
-NUM_STAGES=(1)
-NUM_REP=(1)
-BATCH_SIZES=(250 500 1000)
+USE_PMW=false       # PMW optimizer flag
+GRAD_ACC=false      # Gradient accumulation flag
+SCALING_TYPE="weak" # "weak": scale up batch; "strong": scale down
 
 # Configuration sweeps
-OPTIMIZERS=(apts_d)
+OPTIMIZERS=(apts_p)
 DATASETS=(mnist)
 MODELS=(simple_cnn)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(true)
-LOC_SECOND_ORDERS=(true)
-
+GLOB_SECOND_ORDERS=(false)
+LOC_SECOND_ORDERS=(false)
 # Dogleg toggles
 GLOB_DOGLEGS=(false)
 LOC_DOGLEGS=(false)
@@ -45,7 +48,7 @@ APTS_LOC_OPTS=(lssr1_tr)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP,
 FOC_OPTS=(true)
 
 # Evaluation parameters: epochs, max iterations, loss
-EVAL_PARAMS=(epochs=10 max_iters=0 criterion=cross_entropy)
+EVAL_PARAMS=(epochs=5 max_iters=0 criterion=cross_entropy)
 
 # Adaptive solver parameters (base)
 APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.0 glob_second_order=false)
@@ -135,6 +138,7 @@ submit_job() {
     -e "s|\${num_rep}|${num_rep}|g" \
     -e "s|\${ntasks_per_node}|${ntasks_per_node}|g" \
     -e "s|\${partition}|${partition}|g" \
+    -e "s|\${time}|${time}|g" \
     "$template" >"$jobfile"
   if ! sbatch --nodes="${nodes}" "$jobfile"; then
     echo "ERROR: sbatch failed for $job_name" >&2
@@ -194,6 +198,15 @@ for optimizer in "${OPTIMIZERS[@]}"; do
                 set_hardware_params
                 set_apts_lssr1_tr_params "$optimizer"
                 extract_apts_details
+
+                # ─── Override batch_inc_factor for ASNTR ─── #
+                if [[ "$optimizer" == "asntr" || "$APTS_GLOB_OPT" == "asntr" || "$APTS_LOC_OPT" == "asntr" ]]; then
+                  for i in "${!APTS_PARAMS[@]}"; do
+                    if [[ "${APTS_PARAMS[$i]}" == batch_inc_factor=* ]]; then
+                      APTS_PARAMS[$i]="batch_inc_factor=1.01"
+                    fi
+                  done
+                fi
 
                 # Strip existing solver keys
                 tmp=()
