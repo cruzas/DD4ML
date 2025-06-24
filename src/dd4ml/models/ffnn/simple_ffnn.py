@@ -36,3 +36,6 @@ class SimpleFFNN(BaseFFNN):
         x = x.view(x.size(0), -1)
         x = self.net(x)
         return F.log_softmax(x, dim=1)
+
+    def as_model_dict(self):
+        pass

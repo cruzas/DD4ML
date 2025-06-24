@@ -16,9 +16,9 @@ parameters:
   num_replicas_per_subdomain:
     value: 1
   glob_second_order:
-    value: False
+    value: True
   dogleg:
-    value: False
+    value: True
   mem_length:
     value: 3
   max_iters:
@@ -38,7 +38,7 @@ parameters:
   dataset_name: 
     value: "mnist" 
   model_name: 
-    value: "simple_cnn"
+    value: "simple_ffnn"
   criterion:
     value: "cross_entropy"
   gradient_accumulation:

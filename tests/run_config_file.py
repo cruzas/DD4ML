@@ -33,9 +33,7 @@ def parse_cmd_args() -> argparse.Namespace:
         description="Parse command line arguments.",
     )
 
-    parser.add_argument(
-        "--optimizer", type=str, default="apts_d", help="Optimizer name"
-    )
+    parser.add_argument("--optimizer", type=str, default="asntr", help="Optimizer name")
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
     )
@@ -296,7 +294,7 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 2
+    world_size = 1
     if args["use_pmw"]:
         world_size = (
             args["num_subdomains"]

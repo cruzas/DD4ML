@@ -318,7 +318,10 @@ def get_config_model_and_trainer(args, wandb_config):
     else:
         all_config.trainer.run_by_epoch = False
 
-    all_config.trainer.num_subdomains = all_config.model.num_subdomains
+    if hasattr(all_config.model, "num_subdomains"):
+        all_config.trainer.num_subdomains = all_config.model.num_subdomains
+    else:
+        all_config.model.num_subdomains = 1
     trainer = Trainer(
         all_config.trainer, model, optimizer_obj, criterion, dataset, test_dataset
     )
