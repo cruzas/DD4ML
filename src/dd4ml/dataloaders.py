@@ -5,18 +5,22 @@ from typing import Iterator, List, Optional, Sequence
 import numpy as np
 import torch
 import torch.distributed as dist
-from torch.utils.data import (BatchSampler, DataLoader, Dataset,
-                              DistributedSampler, Sampler)
+from torch.utils.data import (
+    BatchSampler,
+    DataLoader,
+    Dataset,
+    DistributedSampler,
+    Sampler,
+)
 from torch.utils.data.distributed import DistributedSampler
 
 
 class OverlapBatchSampler(BatchSampler):
     """
-    Successive batches share `overlap` examples **without**
-    changing the number of batches:
-
-        stride = batch_size               # unique indices per step
-        size   = batch_size + overlap_sz  # actual minibatch length
+    Successive batches share `overlap` examples **without** changing the number of batches,
+    and treat mini-batches circularly when drop_last=True (last overlaps first).
+    stride = batch_size # unique indices per step
+    size = batch_size + overlap_sz # actual minibatch length (except final partial when drop_last=False)
     """
 
     def __init__(
@@ -30,10 +34,6 @@ class OverlapBatchSampler(BatchSampler):
         self.batch_size = int(batch_size)
         self.drop_last = drop_last
 
-        # if self.batch_size >= len(self.base_sampler):
-        #     self.batch_size = len(self.base_sampler)
-        #     self.overlap_sz = 0
-
         if isinstance(overlap, float) and 0.0 < overlap < 1.0:
             self.overlap_sz = int(round(overlap * self.batch_size))
         elif isinstance(overlap, int) and overlap >= 1:
@@ -44,38 +44,39 @@ class OverlapBatchSampler(BatchSampler):
         if self.overlap_sz >= self.batch_size:
             raise ValueError("`overlap` must be smaller than `batch_size`")
 
-    # --------------------------------------------------------------------- #
-    # Iteration
-    # --------------------------------------------------------------------- #
     def __iter__(self):
-        idxs = list(self.base_sampler)  # one full pass over dataset
+        idxs = list(self.base_sampler)
         n = len(idxs)
-        stride = self.batch_size  # progress after every batch
-        size = self.batch_size + self.overlap_sz
-
+        stride = self.batch_size
         n_batches = n // stride if self.drop_last else math.ceil(n / stride)
 
         for b in range(n_batches):
-            start = b * stride  # left edge of unique block
-
-            # --- unique part ------------------------------------------------
+            start = b * stride
+            # unique portion (wrap if needed)
             unique = idxs[start : start + stride]
-            if len(unique) < stride:  # wrap-around at epoch end
+            if len(unique) < stride:
                 unique += idxs[: stride - len(unique)]
 
-            # --- overlap part ----------------------------------------------
-            o_start = (start + stride) % n
-            o_end = o_start + self.overlap_sz
-            if o_end <= n:
-                overlap = idxs[o_start:o_end]
-            else:  # need to wrap
-                overlap = idxs[o_start:] + idxs[: o_end - n]
+            # if non-drop-last final partial batch, omit overlap
+            # if not self.drop_last and (start + stride) >= n:
+            if not self.drop_last and (start + stride) > n:
+                yield unique
+                continue
 
-            yield unique + overlap  # length == size
+            # compute overlap
+            if self.drop_last and b == (n_batches - 1):
+                # last batch in drop_last mode: overlap comes from the start of dataset
+                overlap = idxs[0 : self.overlap_sz]
+            else:
+                o_start = (start + stride) % n
+                o_end = o_start + self.overlap_sz
+                if o_end <= n:
+                    overlap = idxs[o_start:o_end]
+                else:
+                    overlap = idxs[o_start:] + idxs[: o_end - n]
 
-    # --------------------------------------------------------------------- #
-    # Length (optional, but handy)
-    # --------------------------------------------------------------------- #
+            yield unique + overlap
+
     def __len__(self):
         n = len(self.base_sampler)
         return (
@@ -83,234 +84,87 @@ class OverlapBatchSampler(BatchSampler):
         )
 
 
-class MockDataset(Dataset):
-    # NOTE: First=True means that the real input data and mock output data will be provided
-    # First=False means that the mock input data and real output data will be provided
-    # First=None means that the mock input and output data will be provided
-    def __init__(self, dataset, amount_of_batches=None, device=None, first=True):
-        """
-        Initializes a MockDataset object.
+class MicroBatchOverlapSampler:
+    """
+    Splits each mini-batch from OverlapBatchSampler into N subdomains,
+    preserving overlap within each subdomain. Works with variable last batch size.
+    """
 
-        Args:
-            dataset: The dataset to be used.
-            amount_of_batches (optional): The number of batches to be used. Defaults to None.
-            device (optional): The device to be used. Defaults to None.
-            first (optional): A boolean indicating if it is the first dataset. Defaults to True.
-        """
-        super(MockDataset, self).__init__()
-        self.amount_of_batches = amount_of_batches
-        self.dataset = dataset
-        self.first = first
-        self.device = device
-
-    def __len__(self):
-        """
-        Returns the number of batches in the dataloader.
-
-        :return: The number of batches.
-        :rtype: int
-        """
-        return self.amount_of_batches
-
-    def __getitem__(self, idx):
-        """
-        Get the item at the specified index.
-
-        Parameters:
-            idx (int): The index of the item to retrieve.
-
-        Returns:
-            tuple: A tuple containing the item at the specified index.
-        """
-        if self.first == True:
-            return (self.dataset[idx][0], 1)
-        elif self.first == False:
-            return (1, self.dataset[idx][1])
-        else:
-            return (1, 1)
-
-
-class GeneralizedDistributedDataLoader(DataLoader):
     def __init__(
         self,
-        model_handler,
-        dataset,
-        batch_size,
-        shuffle,
-        overlap: float | int = 0.0,
-        device="cpu" if not torch.cuda.is_available() else "cuda",
-        num_workers=0,
-        pin_memory=False,
-        seed=0,
-        **kwargs,
+        overlap_sampler: OverlapBatchSampler,
+        num_subdomains: int,
+        allow_empty_microbatches: bool = False,
     ):
-        """
-        Initializes the GeneralizedDistributedDataLoader object.
+        if not isinstance(overlap_sampler, OverlapBatchSampler):
+            raise TypeError(
+                "overlap_sampler must be an instance of OverlapBatchSampler"
+            )
+        if num_subdomains <= 0:
+            raise ValueError("num_subdomains must be positive")
+        if overlap_sampler.overlap_sz == 0:
+            raise ValueError(
+                "OverlapBatchSampler must have overlap > 0 for micro-batch overlap"
+            )
 
-        Args:
-            model_handler (list of lists of ...): This variable is generated by the ParallelizedModel class.
-            dataset: The dataset to be loaded.
-            batch_size (int): The batch size.
-            shuffle (bool): Whether to shuffle the data.
-            device (str): The device to use. Defaults to 'cpu' if torch.cuda.is_available() is False, otherwise 'cuda'.
-            num_workers (int): The number of worker processes. Defaults to 0.
-            pin_memory (bool): Whether to pin memory. Defaults to False.
-            seed (int): The random seed. Defaults to 0.
-            **kwargs: Additional keyword arguments.
+        total_size = overlap_sampler.batch_size + overlap_sampler.overlap_sz
+        if num_subdomains > total_size and not allow_empty_microbatches:
+            raise ValueError(
+                f"num_subdomains ({num_subdomains}) > total mini-batch size ({total_size})."
+            )
 
-        E.g.: Supppose len_stage_list = 3 and num_replicas = 2.Then:
-        model 0 will be distributed across ranks [0,1,2] with first layer in rank 0 and second layer in rank 1 and so on.
-        model 1 will be distributed across ranks [3,4,5] with first layer in rank 3 and second layer in rank 4 and so on.
-        """
-        if "drop_last" in kwargs:
-            # print a warning
-            print(
-                f"(WARNING) drop_last will always be set to 'True' in the GeneralizedDistributedDataLoader."
-            )
-            kwargs.pop("drop_last")
-        if batch_size > len(dataset):
-            print(
-                f"(WARNING) Batch size {batch_size} is greater than the dataset size {len(dataset)}. Setting batch size to dataset size."
-            )
-            batch_size = min(batch_size, len(dataset))
+        self.overlap_sampler = overlap_sampler
+        self.num_subdomains = num_subdomains
+        self.allow_empty_microbatches = allow_empty_microbatches
+        self.mini_batches = list(overlap_sampler)
+        if len(self.mini_batches) == 0:
+            raise ValueError("OverlapBatchSampler produced no mini-batches")
 
-        tot_replicas = model_handler.tot_replicas
-        num_stages = model_handler.num_stages
+    def __iter__(self) -> Iterator[List[List[int]]]:
+        for mini_batch in self.mini_batches:
+            yield self._split_mini_batch(mini_batch)
 
-        first_layer_ranks = model_handler.get_stage_ranks(
-            stage_name="first", mode="global"
-        )
-        last_layer_ranks = model_handler.get_stage_ranks(
-            stage_name="last", mode="global"
-        )
+    def _split_mini_batch(self, mini_batch: List[int]) -> List[List[int]]:
+        unique_size = min(len(mini_batch), self.overlap_sampler.batch_size)
+        unique = mini_batch[:unique_size]
+        overlap = mini_batch[unique_size:]
+        micro_batches = []
+        for j in range(self.num_subdomains):
+            mb = [unique[k] for k in range(j, len(unique), self.num_subdomains)]
+            mb += [overlap[k] for k in range(j, len(overlap), self.num_subdomains)]
+            micro_batches.append(mb)
+        if not self.allow_empty_microbatches:
+            empties = sum(1 for mb in micro_batches if not mb)
+            if empties:
+                raise RuntimeError(f"{empties} empty micro-batches generated.")
+        return micro_batches
 
-        rank = dist.get_rank()
-        if num_stages == 1:
-            base_sampler = GeneralizedDistributedSampler(
-                layer_ranks=first_layer_ranks,
-                dataset=dataset,
-                num_replicas=tot_replicas,
-                rank=rank,
-                shuffle=shuffle,
-                drop_last=True,
-                seed=seed,
-                **kwargs,
+    def __len__(self):
+        return len(self.mini_batches)
+
+    def get_overlap_info(self) -> dict:
+        info = {
+            "mini_batches": len(self.mini_batches),
+            "subdomains": self.num_subdomains,
+            "overlap_per_minibatch": self.overlap_sampler.overlap_sz,
+            "allow_empty_microbatches": self.allow_empty_microbatches,
+        }
+        if len(self.mini_batches) >= 2:
+            m0 = self._split_mini_batch(self.mini_batches[0])
+            m1 = self._split_mini_batch(self.mini_batches[1])
+            overlaps = [
+                len(set(m0[j]) & set(m1[j])) for j in range(self.num_subdomains)
+            ]
+            info.update(
+                {
+                    "actual_microbatch_overlaps": overlaps,
+                    "first_minibatch_sizes": [len(m) for m in m0],
+                    "second_minibatch_sizes": [len(m) for m in m1],
+                }
             )
-            if overlap:
-                batch_sampler = OverlapBatchSampler(
-                    base_sampler=base_sampler,
-                    batch_size=batch_size // tot_replicas,
-                    overlap=overlap,
-                    drop_last=True,
-                )
-                super(GeneralizedDistributedDataLoader, self).__init__(
-                    dataset=dataset,
-                    batch_sampler=batch_sampler,
-                    num_workers=num_workers,
-                    pin_memory=pin_memory,
-                    **kwargs,
-                )
-            else:
-                super(GeneralizedDistributedDataLoader, self).__init__(
-                    dataset=dataset,
-                    batch_size=batch_size // tot_replicas,
-                    shuffle=False,
-                    sampler=base_sampler,
-                    num_workers=num_workers,
-                    pin_memory=pin_memory,
-                    drop_last=True,
-                    **kwargs,
-                )
-        # rank in the middle does not require any real data
-        elif rank not in first_layer_ranks + last_layer_ranks:
-            # Make a mock dataset with the same amount of batches as the original dataset (this is needed to keep iterations consistent across all ranks)
-            amount_of_batches = (
-                1 if len(dataset) == batch_size else len(dataset) // batch_size
-            )
-            dataset = MockDataset(dataset, amount_of_batches, device=device, first=None)
-            super(GeneralizedDistributedDataLoader, self).__init__(
-                dataset=dataset,
-                batch_size=1,
-                shuffle=False,
-                num_workers=num_workers,
-                pin_memory=pin_memory,
-                drop_last=True,
-                **kwargs,
-            )
-        elif rank in first_layer_ranks:
-            dataset = MockDataset(dataset, len(dataset), device=device, first=True)
-            base_sampler = GeneralizedDistributedSampler(
-                layer_ranks=first_layer_ranks,
-                dataset=dataset,
-                num_replicas=tot_replicas,
-                rank=rank,
-                shuffle=shuffle,
-                drop_last=True,
-                seed=seed,
-                **kwargs,
-            )
-            if overlap:
-                batch_sampler = OverlapBatchSampler(
-                    base_sampler=base_sampler,
-                    batch_size=batch_size // tot_replicas,
-                    overlap=overlap,
-                    drop_last=True,
-                )
-                super(GeneralizedDistributedDataLoader, self).__init__(
-                    dataset=dataset,
-                    batch_sampler=batch_sampler,
-                    num_workers=num_workers,
-                    pin_memory=pin_memory,
-                    **kwargs,
-                )
-            else:
-                super(GeneralizedDistributedDataLoader, self).__init__(
-                    dataset=dataset,
-                    batch_size=batch_size // tot_replicas,
-                    shuffle=False,
-                    sampler=base_sampler,
-                    num_workers=num_workers,
-                    pin_memory=pin_memory,
-                    drop_last=True,
-                    **kwargs,
-                )
         else:
-            dataset = MockDataset(dataset, len(dataset), device=device, first=False)
-            base_sampler = GeneralizedDistributedSampler(
-                layer_ranks=last_layer_ranks,
-                dataset=dataset,
-                num_replicas=tot_replicas,
-                rank=rank,
-                shuffle=shuffle,
-                drop_last=True,
-                seed=seed,
-                **kwargs,
-            )
-            if overlap:
-                batch_sampler = OverlapBatchSampler(
-                    base_sampler=base_sampler,
-                    batch_size=batch_size // tot_replicas,
-                    overlap=overlap,
-                    drop_last=True,
-                )
-                super(GeneralizedDistributedDataLoader, self).__init__(
-                    dataset=dataset,
-                    batch_sampler=batch_sampler,
-                    num_workers=num_workers,
-                    pin_memory=pin_memory,
-                    **kwargs,
-                )
-            else:
-                super(GeneralizedDistributedDataLoader, self).__init__(
-                    dataset=dataset,
-                    batch_size=batch_size // tot_replicas,
-                    shuffle=False,
-                    sampler=base_sampler,
-                    num_workers=num_workers,
-                    pin_memory=pin_memory,
-                    drop_last=True,
-                    **kwargs,
-                )
+            info["note"] = "Need ≥2 mini-batches to calc overlap."
+        return info
 
 
 class GeneralizedDistributedSampler(DistributedSampler):
