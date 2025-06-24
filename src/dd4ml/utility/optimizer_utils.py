@@ -260,7 +260,7 @@ def solve_tr_second_order(
         p_c = p_cand
 
     # Dogleg combination
-    if dogleg:
+    if dogleg and gBg > 0:
         if torch.norm(p_b) <= delta:
             p = p_b
         elif torch.norm(p_c) >= delta:
@@ -271,8 +271,13 @@ def solve_tr_second_order(
             a = d.dot(d)
             b = 2 * p_c.dot(d)
             c = p_c.dot(p_c) - delta**2
-            tau = (-b + torch.sqrt(b * b - 4 * a * c)) / (2 * a)
-            p = p_c + tau * d
+            disc = b ** 2 - 4 * a * c # discriminant
+            
+            if disc < 0:
+                p = p_c # fallback to Cauchy point if no valid tau
+            else:    
+                tau = (-b + torch.sqrt(disc)) / (2 * a)
+                p = p_c + tau * d
     else:
         p = p_b
 
