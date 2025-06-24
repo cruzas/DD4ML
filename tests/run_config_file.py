@@ -34,7 +34,7 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--optimizer", type=str, default="lssr1_tr", help="Optimizer name"
+        "--optimizer", type=str, default="apts_d", help="Optimizer name"
     )
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
@@ -45,7 +45,7 @@ def parse_cmd_args() -> argparse.Namespace:
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
     # default_project = "thesis" + temp_args.optimizer + "_tests"
-    default_project = "thesis_tests"
+    default_project = "debugging"
 
     parser.add_argument(
         "--use_pmw",
@@ -82,7 +82,7 @@ def parse_cmd_args() -> argparse.Namespace:
     )
     parser.add_argument("--overlap", type=float, default=0.33, help="Overlap factor")
     parser.add_argument(
-        "--model_name", type=str, default="simple_resnet", help="Model name"
+        "--model_name", type=str, default="simple_cnn", help="Model name"
     )
     parser.add_argument(
         "--criterion", type=str, default="cross_entropy", help="Criterion name"
@@ -115,7 +115,7 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Trial number. Used to generate seed for reproducibility.",
     )
     parser.add_argument(
-        "--num_subdomains", type=int, default=1, help="Number of subdomains"
+        "--num_subdomains", type=int, default=2, help="Number of subdomains"
     )
 
     parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
@@ -296,7 +296,7 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 1
+    world_size = 2
     if args["use_pmw"]:
         world_size = (
             args["num_subdomains"]

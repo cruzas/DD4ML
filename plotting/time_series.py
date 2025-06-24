@@ -1,9 +1,12 @@
+import os
+import pprint
+from itertools import product
+
 import matplotlib.pyplot as plt
 import numpy as np
 
 import wandb
-
-from .utils import _abbreviate_val
+from plotting.utils import _abbreviate_val
 
 
 def plot_averaged_time_series(
@@ -15,6 +18,7 @@ def plot_averaged_time_series(
     x_axis: str = "_step",
     show_variance: bool = True,
     figsize: tuple = (14, 6),
+    save_path: str = None,
 ):
     """Plot two time-series (metrics[0] and metrics[1]) vs x_axis in side-by-side subplots."""
 
@@ -34,7 +38,7 @@ def plot_averaged_time_series(
         if group_by:
             key = tuple(run.config.get(k, "unknown") for k in group_by)
             label = " | ".join(
-                f"{abbr_map.get(k,k)}={('T' if v is True else 'F' if v is False else v)}"
+                f"{abbr_map.get(k, k)}={('T' if v is True else 'F' if v is False else v)}"
                 for k, v in zip(group_by, key)
             )
         else:
@@ -82,46 +86,76 @@ def plot_averaged_time_series(
 
     axes[1].legend(loc="best")
     plt.tight_layout()
-    plt.show()
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        fig.savefig(save_path)
+        plt.close(fig)
+    else:
+        plt.show()
+
+    return grouped
 
 
 def main(
     entity="cruzas-universit-della-svizzera-italiana",
-    project="tr_variants_assessment",
+    project="thesis_results",
 ):
     base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     datasets = ["mnist"]
-    optimizers = ["lssr1_tr", "tr"]
-    batch_sizes = [15000, 30000, 60000]
-    group_by_map = {"glob_second_order": "so", "glob_dogleg": "dleg"}
+    optimizers = ["apts_d"]
+    effective_batch_sizes = [125]
+
+    # mapping config keys to abbreviations
+    group_by_map = {
+        "config.glob_second_order": "so",
+        "config.loc_second_order": "lso",
+        "config.glob_dogleg": "dleg",
+        "config.loc_dogleg": "ldleg",
+    }
 
     experiments = [
         (
             {
                 "config.optimizer": opt,
-                "config.model_name": "simple_ffnn",
                 "config.dataset_name": ds,
                 "config.batch_size": bs,
+                "config.model_name": "simple_cnn",
+                "config.glob_second_order": True,
+                "config.loc_second_order": True,
+                "config.glob_dogleg": True,
+                "config.loc_dogleg": True,
             },
-            group_by_map,
+            list(group_by_map.keys()),
+            list(group_by_map.values()),
             os.path.join(base_save, f"{opt}_{ds}_{bs}.pdf"),
         )
-        for ds, opt, bs in product(datasets, optimizers, batch_sizes)
+        for ds, opt, bs in product(datasets, optimizers, effective_batch_sizes)
     ]
 
-    for i, (filters, group_by_map, save_path) in enumerate(experiments, start=1):
-        pprint.pprint(f"\n=== Experiment {save_path} ===")
+    for i, (filters, group_by, group_by_abbr, save_path) in enumerate(
+        experiments, start=1
+    ):
+        pprint.pprint(f"\n=== Experiment {i}: saving to {save_path} ===")
+        project_path = f"{entity}/{project}"
+        grouped = plot_averaged_time_series(
+            project_path=project_path,
+            filters=filters,
+            group_by=group_by,
+            group_by_abbr=group_by_abbr,
+            metrics=["accuracy", "loss"],
+            x_axis="_step",
+            show_variance=True,
+            figsize=(14, 6),
+            save_path=save_path,
+        )
+
+        # optional: log counts to text file
         txt_path = os.path.splitext(save_path)[0] + ".txt"
+        with open(txt_path, "w") as f:
+            for info in grouped.values():
+                f.write(f"{info['label']}: {len(info['runs'])} runs\n")
 
-        group_by = list(group_by_map.keys())
-        group_by_abbr = list(group_by_map.values())
-        metrics = ["accuracy", "loss"]
-
-        # Plotting the time series
-        #...
 
 if __name__ == "__main__":
-    main(
-        entity="cruzas-universit-della-svizzera-italiana",
-        project="tr_variants_assessment",
-    )
+    main()

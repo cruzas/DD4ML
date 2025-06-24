@@ -20,7 +20,11 @@ from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure, dprint
 
-from .dataloaders import GeneralizedDistributedDataLoader, OverlapBatchSampler
+from .dataloaders import (
+    GeneralizedDistributedDataLoader,
+    MicroBatchOverlapSampler,
+    OverlapBatchSampler,
+)
 
 
 class Trainer:
@@ -51,6 +55,7 @@ class Trainer:
         C.min_delta = 1e-3
         C.max_delta = 2.0
         C.data_parallel = True
+        C.num_subdomains = 1  # for micro-batch splitting
         C.norm_type = 2  # for APTS_D (and possibly APTS_IP)
         C.glob_pass = False
         C.foc = False  # for APTS_D
@@ -148,24 +153,24 @@ class Trainer:
         """(Re)create train and test loaders using current_batch_size"""
         cfg, ds_train, ds_test = self.config, self.train_dataset, self.test_dataset
         bs = self.current_batch_size
-        overlap = (
-            cfg.overlap if hasattr(cfg, "overlap") else 0
-        )  # Overlap between consecutive batches
+        overlap = cfg.overlap if hasattr(cfg, "overlap") else 0
 
-        # Check if batch size is length of dataset
+        # Check if batch size equals or exceeds dataset
         if bs >= len(ds_train):
             print(
-                f"Batch size {bs} is greater than or equal to the dataset size {len(ds_train)}. Using the entire dataset as a single batch and setting overlap to 0."
+                f"Batch size {bs} >= dataset size {len(ds_train)}; using full dataset as single batch, overlap=0."
             )
             self.current_batch_size = len(ds_train)
-            self.config.overlap = 0
-            cfg = self.config  # Update config to reflect the new batch size
+            cfg.overlap = 0
             bs = self.current_batch_size
             overlap = 0
 
+        # Determine distributed context
         world_size = dist.get_world_size() if dist.is_initialized() else 1
         rank = dist.get_rank() if dist.is_initialized() else 0
+
         if cfg.use_pmw:
+            # PMW loader
             self.train_loader = GeneralizedDistributedDataLoader(
                 model_handler=cfg.model_handler,
                 dataset=ds_train,
@@ -175,7 +180,6 @@ class Trainer:
                 num_workers=cfg.num_workers,
                 pin_memory=True,
             )
-
             self.test_loader = DataLoader(
                 ds_test,
                 batch_size=bs,
@@ -186,28 +190,27 @@ class Trainer:
         else:
             # Per-process batch size
             pp_bs = bs // world_size
-            shard_N = math.ceil(len(ds_train) / world_size)
-            if pp_bs >= shard_N:
+            shard_size = math.ceil(len(ds_train) / world_size)
+            if pp_bs >= shard_size:
                 dprint(
-                    f"Per-process batch size {pp_bs} is greater than or equal to the shard size {shard_N}. "
-                    "Using the entire shard as a single batch and setting overlap to 0."
+                    f"Per-process batch size {pp_bs} >= shard size {shard_size}; shard as single batch, overlap=0."
                 )
                 overlap = 0
 
             if pp_bs < 1:
                 raise ValueError(
-                    f"Per-process batch size {pp_bs} is less than 1. "
-                    "Please increase the global batch size."
+                    f"Per-process batch size {pp_bs} < 1; increase global batch size."
                 )
 
-            base_train_sampler = DistributedSampler(
+            # Base distributed samplers
+            base_train = DistributedSampler(
                 ds_train,
                 num_replicas=world_size,
                 rank=rank,
                 shuffle=True,
                 drop_last=False,
             )
-            base_test_sampler = DistributedSampler(
+            base_test = DistributedSampler(
                 ds_test,
                 num_replicas=world_size,
                 rank=rank,
@@ -215,27 +218,44 @@ class Trainer:
                 drop_last=False,
             )
 
-            train_sampler = OverlapBatchSampler(
-                base_sampler=base_train_sampler,
+            # Overlap samplers
+            train_ov = OverlapBatchSampler(
+                base_sampler=base_train,
+                batch_size=pp_bs,
+                overlap=overlap,
+                drop_last=False,
+            )
+            test_ov = OverlapBatchSampler(
+                base_sampler=base_test,
                 batch_size=pp_bs,
                 overlap=overlap,
                 drop_last=False,
             )
 
-            test_sampler = OverlapBatchSampler(
-                base_sampler=base_test_sampler,
-                batch_size=pp_bs,
-                overlap=overlap,
-                drop_last=False,
-            )
+            # Micro-batch splitting based on cfg.model.num_subdomains
+            num_sub = getattr(cfg, "num_subdomains", 1)
+            if num_sub > 1:
+                train_sampler = MicroBatchOverlapSampler(
+                    overlap_sampler=train_ov,
+                    num_subdomains=num_sub,
+                    allow_empty_microbatches=False,
+                )
+                test_sampler = MicroBatchOverlapSampler(
+                    overlap_sampler=test_ov,
+                    num_subdomains=num_sub,
+                    allow_empty_microbatches=False,
+                )
+            else:
+                train_sampler = train_ov
+                test_sampler = test_ov
 
+            # DataLoaders
             self.train_loader = DataLoader(
                 ds_train,
                 batch_sampler=train_sampler,
                 num_workers=cfg.num_workers,
                 pin_memory=True,
             )
-
             self.test_loader = DataLoader(
                 ds_test,
                 batch_sampler=test_sampler,
@@ -243,7 +263,6 @@ class Trainer:
                 pin_memory=True,
             )
 
-            # Print number of batches in the train loader
             dprint(f"Number of batches in train_loader: {self._get_num_batches()}")
 
     def _asntr_present(self):
@@ -685,7 +704,7 @@ class Trainer:
             if self._lssr1_tr_present() and self.epoch_num % 3 == 0:
                 full = self._eval_full_objective()
                 self._adjust_batch_size(full)
-            
+
             self.compute_accuracy()
             self.epoch_dt = time.time() - self.epoch_time
             self.running_time = time.time() - self.total_start_time
