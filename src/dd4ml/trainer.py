@@ -22,6 +22,7 @@ from dd4ml.utility import closure, dprint
 
 from .dataloaders import (
     GeneralizedDistributedDataLoader,
+    MicroBatchFlattenSampler,
     MicroBatchOverlapSampler,
     OverlapBatchSampler,
 )
@@ -170,7 +171,7 @@ class Trainer:
         rank = dist.get_rank() if dist.is_initialized() else 0
 
         if cfg.use_pmw:
-            # PMW loader
+            # PMW loader (assuming this is a custom implementation)
             self.train_loader = GeneralizedDistributedDataLoader(
                 model_handler=cfg.model_handler,
                 dataset=ds_train,
@@ -192,7 +193,7 @@ class Trainer:
             pp_bs = bs // world_size
             shard_size = math.ceil(len(ds_train) / world_size)
             if pp_bs >= shard_size:
-                dprint(
+                print(
                     f"Per-process batch size {pp_bs} >= shard size {shard_size}; shard as single batch, overlap=0."
                 )
                 overlap = 0
@@ -232,22 +233,46 @@ class Trainer:
                 drop_last=False,
             )
 
-            # Micro-batch splitting based on cfg.model.num_subdomains
+            # Micro-batch splitting based on cfg.num_subdomains
             num_sub = getattr(cfg, "num_subdomains", 1)
+
             if num_sub > 1:
-                train_sampler = MicroBatchOverlapSampler(
-                    overlap_sampler=train_ov,
-                    num_subdomains=num_sub,
-                    allow_empty_microbatches=False,
-                )
-                test_sampler = MicroBatchOverlapSampler(
-                    overlap_sampler=test_ov,
-                    num_subdomains=num_sub,
-                    allow_empty_microbatches=False,
-                )
+                if overlap > 0:
+                    # Create micro-batch samplers with overlap
+                    train_micro = MicroBatchOverlapSampler(
+                        overlap_sampler=train_ov,
+                        num_subdomains=num_sub,
+                        allow_empty_microbatches=False,
+                    )
+                    test_micro = MicroBatchOverlapSampler(
+                        overlap_sampler=test_ov,
+                        num_subdomains=num_sub,
+                        allow_empty_microbatches=False,
+                    )
+
+                    # Use flatten samplers for DataLoader compatibility
+                    train_sampler = MicroBatchFlattenSampler(train_micro)
+                    test_sampler = MicroBatchFlattenSampler(test_micro)
+                    print(
+                        f"Using micro-batching with {num_sub} subdomains and overlap={overlap}"
+                    )
+                else:
+                    # No overlap but subdomains requested - use regular batch samplers
+                    print(
+                        f"Warning: num_subdomains={num_sub} requested but overlap=0. Using regular batching."
+                    )
+                    train_sampler = train_ov
+                    test_sampler = test_ov
             else:
+                # num_subdomains = 1: Use overlap samplers directly (overlap between mini-batches)
                 train_sampler = train_ov
                 test_sampler = test_ov
+                if overlap > 0:
+                    print(
+                        f"Using overlap={overlap} between mini-batches (num_subdomains=1)"
+                    )
+                else:
+                    print("Using regular batching (no overlap, num_subdomains=1)")
 
             # DataLoaders
             self.train_loader = DataLoader(
@@ -263,7 +288,22 @@ class Trainer:
                 pin_memory=True,
             )
 
-            dprint(f"Number of batches in train_loader: {self._get_num_batches()}")
+            print(f"Number of batches in train_loader: {len(self.train_loader)}")
+
+            # Print debug info
+            if num_sub > 1 and overlap > 0:
+                print(
+                    f"Micro-batching active: {num_sub} subdomains with overlap={overlap}"
+                )
+                if hasattr(train_sampler, "micro_batch_sampler"):
+                    overlap_info = train_sampler.micro_batch_sampler.get_overlap_info()
+                    print(f"Overlap info: {overlap_info}")
+            elif num_sub == 1 and overlap > 0:
+                print(
+                    f"Mini-batch overlap active: overlap={overlap} between consecutive mini-batches"
+                )
+            else:
+                print("Regular batching (no overlap or micro-batching)")
 
     def _asntr_present(self):
         # Check if ASNTR is the optimizer itself...

@@ -1,6 +1,6 @@
 # overlap_sampler.py
 import math
-from typing import Iterator, List, Optional, Sequence
+from typing import Iterator, List, Optional, Sequence, Union
 
 import numpy as np
 import torch
@@ -27,9 +27,10 @@ class OverlapBatchSampler(BatchSampler):
         self,
         base_sampler: Sampler[int],
         batch_size: int,
-        overlap: float | int = 0.0,
+        overlap: Union[float, int] = 0.0,
         drop_last: bool = False,
     ):
+        # Don't call super().__init__ to avoid conflicts
         self.base_sampler = base_sampler
         self.batch_size = int(batch_size)
         self.drop_last = drop_last
@@ -44,41 +45,63 @@ class OverlapBatchSampler(BatchSampler):
         if self.overlap_sz >= self.batch_size:
             raise ValueError("`overlap` must be smaller than `batch_size`")
 
-    def __iter__(self):
-        idxs = list(self.base_sampler)
+        # Cache the indices to ensure consistency across multiple iterations
+        self._cached_indices = None
+
+    def _get_indices(self):
+        """Get cached indices or generate them if not cached."""
+        if self._cached_indices is None:
+            self._cached_indices = list(self.base_sampler)
+        return self._cached_indices
+
+    def __iter__(self) -> Iterator[List[int]]:
+        idxs = self._get_indices()
         n = len(idxs)
+
+        if n == 0:
+            return
+
         stride = self.batch_size
         n_batches = n // stride if self.drop_last else math.ceil(n / stride)
 
         for b in range(n_batches):
             start = b * stride
-            # unique portion (wrap if needed)
-            unique = idxs[start : start + stride]
-            if len(unique) < stride:
-                unique += idxs[: stride - len(unique)]
 
-            # if non-drop-last final partial batch, omit overlap
-            # if not self.drop_last and (start + stride) >= n:
-            if not self.drop_last and (start + stride) > n:
+            # Get unique portion
+            end = min(start + stride, n)
+            unique = idxs[start:end]
+
+            # If we need to pad the unique portion (only in drop_last mode)
+            if self.drop_last and len(unique) < stride:
+                needed = stride - len(unique)
+                unique += idxs[:needed]
+
+            # Handle final partial batch without overlap
+            if not self.drop_last and end >= n and len(unique) < stride:
                 yield unique
                 continue
 
-            # compute overlap
-            if self.drop_last and b == (n_batches - 1):
-                # last batch in drop_last mode: overlap comes from the start of dataset
-                overlap = idxs[0 : self.overlap_sz]
-            else:
-                o_start = (start + stride) % n
-                o_end = o_start + self.overlap_sz
-                if o_end <= n:
-                    overlap = idxs[o_start:o_end]
+            # Compute overlap
+            if self.overlap_sz > 0:
+                if self.drop_last and b == (n_batches - 1):
+                    # Last batch in drop_last mode: overlap comes from the start
+                    overlap = idxs[: self.overlap_sz]
                 else:
-                    overlap = idxs[o_start:] + idxs[: o_end - n]
+                    # Normal overlap from next positions
+                    o_start = end % n
+                    overlap = []
+                    for i in range(self.overlap_sz):
+                        overlap.append(idxs[(o_start + i) % n])
 
-            yield unique + overlap
+                yield unique + overlap
+            else:
+                yield unique
 
     def __len__(self):
-        n = len(self.base_sampler)
+        if self._cached_indices is None:
+            n = len(self.base_sampler)
+        else:
+            n = len(self._cached_indices)
         return (
             n // self.batch_size if self.drop_last else math.ceil(n / self.batch_size)
         )
@@ -88,6 +111,8 @@ class MicroBatchOverlapSampler:
     """
     Splits each mini-batch from OverlapBatchSampler into N subdomains,
     preserving overlap within each subdomain. Works with variable last batch size.
+
+    Note: This is NOT a BatchSampler - it's a wrapper that yields lists of micro-batches.
     """
 
     def __init__(
@@ -116,55 +141,88 @@ class MicroBatchOverlapSampler:
         self.overlap_sampler = overlap_sampler
         self.num_subdomains = num_subdomains
         self.allow_empty_microbatches = allow_empty_microbatches
-        self.mini_batches = list(overlap_sampler)
-        if len(self.mini_batches) == 0:
-            raise ValueError("OverlapBatchSampler produced no mini-batches")
 
     def __iter__(self) -> Iterator[List[List[int]]]:
-        for mini_batch in self.mini_batches:
+        for mini_batch in self.overlap_sampler:
             yield self._split_mini_batch(mini_batch)
 
     def _split_mini_batch(self, mini_batch: List[int]) -> List[List[int]]:
         unique_size = min(len(mini_batch), self.overlap_sampler.batch_size)
         unique = mini_batch[:unique_size]
         overlap = mini_batch[unique_size:]
+
         micro_batches = []
         for j in range(self.num_subdomains):
-            mb = [unique[k] for k in range(j, len(unique), self.num_subdomains)]
-            mb += [overlap[k] for k in range(j, len(overlap), self.num_subdomains)]
+            # Distribute unique indices round-robin
+            mb_unique = [unique[k] for k in range(j, len(unique), self.num_subdomains)]
+            # Distribute overlap indices round-robin
+            mb_overlap = [
+                overlap[k] for k in range(j, len(overlap), self.num_subdomains)
+            ]
+            mb = mb_unique + mb_overlap
             micro_batches.append(mb)
+
         if not self.allow_empty_microbatches:
             empties = sum(1 for mb in micro_batches if not mb)
             if empties:
                 raise RuntimeError(f"{empties} empty micro-batches generated.")
+
         return micro_batches
 
     def __len__(self):
-        return len(self.mini_batches)
+        return len(self.overlap_sampler)
 
     def get_overlap_info(self) -> dict:
+        """Get information about overlap configuration and actual overlaps."""
         info = {
-            "mini_batches": len(self.mini_batches),
+            "mini_batches": len(self.overlap_sampler),
             "subdomains": self.num_subdomains,
             "overlap_per_minibatch": self.overlap_sampler.overlap_sz,
             "allow_empty_microbatches": self.allow_empty_microbatches,
         }
-        if len(self.mini_batches) >= 2:
-            m0 = self._split_mini_batch(self.mini_batches[0])
-            m1 = self._split_mini_batch(self.mini_batches[1])
+
+        # Get first two mini-batches to analyze overlap
+        mini_batches = list(self.overlap_sampler)
+        if len(mini_batches) >= 2:
+            m0 = self._split_mini_batch(mini_batches[0])
+            m1 = self._split_mini_batch(mini_batches[1])
+            mlast = self._split_mini_batch(mini_batches[-1])
             overlaps = [
                 len(set(m0[j]) & set(m1[j])) for j in range(self.num_subdomains)
             ]
             info.update(
                 {
                     "actual_microbatch_overlaps": overlaps,
-                    "first_minibatch_sizes": [len(m) for m in m0],
-                    "second_minibatch_sizes": [len(m) for m in m1],
+                    "first_microbatch_sizes": [len(m) for m in m0],
+                    "second_microbatch_sizes": [len(m) for m in m1],
+                    "last_microbatch_sizes": [len(m) for m in mlast],
                 }
             )
         else:
             info["note"] = "Need ≥2 mini-batches to calc overlap."
+
         return info
+
+
+class MicroBatchFlattenSampler(BatchSampler):
+    """
+    A BatchSampler that flattens micro-batches from MicroBatchOverlapSampler
+    into individual batches for use with DataLoader.
+    """
+
+    def __init__(self, micro_batch_sampler: MicroBatchOverlapSampler):
+        self.micro_batch_sampler = micro_batch_sampler
+        # Don't call super().__init__()
+
+    def __iter__(self) -> Iterator[List[int]]:
+        for micro_batches in self.micro_batch_sampler:
+            for micro_batch in micro_batches:
+                if micro_batch:  # Only yield non-empty micro-batches
+                    yield micro_batch
+
+    def __len__(self):
+        # This is approximate since we don't know how many non-empty micro-batches there will be
+        return len(self.micro_batch_sampler) * self.micro_batch_sampler.num_subdomains
 
 
 class GeneralizedDistributedDataLoader(DataLoader):
