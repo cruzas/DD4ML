@@ -51,3 +51,5 @@ parameters:
     value: 1e-6
   batch_inc_factor:
     value: 1.01
+  overlap:
+    value: 0.0
