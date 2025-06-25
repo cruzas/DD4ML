@@ -9,82 +9,68 @@ import wandb
 from plotting.utils import _abbreviate_val
 
 
-def plot_averaged_time_series(
+def plot_time_series(
     project_path: str,
+    x_axis: str,
+    metric: str,
     filters: dict = None,
     group_by: list[str] = None,
-    group_by_abbr: list[str] = None,
-    metrics: list[str] = ("accuracy", "loss"),
-    x_axis: str = "_step",
+    group_by_abbr: dict[str, str] = None,
     show_variance: bool = True,
-    figsize: tuple = (14, 6),
+    figsize: tuple = (8, 6),
     save_path: str = None,
 ):
-    """Plot two time-series (metrics[0] and metrics[1]) vs x_axis in side-by-side subplots."""
-
     api = wandb.Api()
     runs = api.runs(project_path, filters=filters or {})
 
-    # normalize group_by arguments
-    if isinstance(group_by, str):
-        group_by = [group_by]
-    if isinstance(group_by_abbr, str):
-        group_by_abbr = [group_by_abbr]
-    abbr_map = dict(zip(group_by or [], group_by_abbr or []))
+    print(f"Found {len(runs)} runs for filters {filters!r}")
 
-    # group runs
+    if runs:
+        print("Columns in first run.history():", runs[0].history().columns.tolist())
+
+    # prepare grouping
+    group_by = group_by or []
+    abbr = {k: k for k in group_by}
+    if group_by_abbr:
+        abbr.update(group_by_abbr)
     grouped = {}
     for run in runs:
         if group_by:
-            key = tuple(run.config.get(k, "unknown") for k in group_by)
-            label = " | ".join(
-                f"{abbr_map.get(k, k)}={('T' if v is True else 'F' if v is False else v)}"
-                for k, v in zip(group_by, key)
-            )
+            key = tuple(run.config.get(k, "unk") for k in group_by)
+            lbl = " | ".join(f"{abbr[k]}={v}" for k, v in zip(group_by, key))
         else:
-            key, label = "all", "All runs"
-        grouped.setdefault(key, {"runs": [], "label": label})["runs"].append(run)
+            key, lbl = "all", "all runs"
+        grouped.setdefault(key, {"runs": [], "label": lbl})["runs"].append(run)
 
-    # prepare subplots
-    fig, axes = plt.subplots(1, 2, figsize=figsize, sharey=False)
-    for ax, metric in zip(axes, metrics):
-        ax.set_xlabel(x_axis)
-        ax.set_ylabel(metric)
-        ax.set_title(f"{metric} vs {x_axis}")
-        ax.grid(True, alpha=0.3)
+    # set up figure
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.set_xlabel(x_axis)
+    ax.set_ylabel(metric)
+    ax.set_title(f"{metric} vs {x_axis}")
+    ax.grid(True, alpha=0.3)
 
-    # plot each group
     for info in grouped.values():
-        label = f"{info['label']} (n={len(info['runs'])})"
-        series_data = []
+        series = []
         for run in info["runs"]:
             hist = run.history()
-            if (
-                x_axis in hist.columns
-                and metrics[0] in hist.columns
-                and metrics[1] in hist.columns
-            ):
-                series_data.append(hist[[x_axis, metrics[0], metrics[1]]].dropna())
-
-        if not series_data:
+            if x_axis in hist.columns and metric in hist.columns:
+                series.append(hist[[x_axis, metric]].dropna())
+        if not series:
             continue
 
-        # define common grid per group
-        all_x = np.concatenate([s[x_axis].values for s in series_data])
+        # common grid + interpolation
+        all_x = np.concatenate([s[x_axis].values for s in series])
         grid = np.linspace(all_x.min(), all_x.max(), 200)
+        data = np.stack([np.interp(grid, s[x_axis], s[metric]) for s in series])
+        m, s_ = data.mean(0), data.std(0)
 
-        for i, metric in enumerate(metrics):
-            data = np.stack(
-                [np.interp(grid, s[x_axis], s[metric]) for s in series_data]
-            )
-            m = data.mean(axis=0)
-            s = data.std(axis=0)
+        ax.plot(grid, m, label=f"{info['label']} (n={len(series)})")
+        if show_variance and len(series) > 1:
+            ax.fill_between(grid, m - s_, m + s_, alpha=0.2)
 
-            axes[i].plot(grid, m, label=label, linewidth=2)
-            if show_variance and len(series_data) > 1:
-                axes[i].fill_between(grid, m - s, m + s, alpha=0.2)
-
-    axes[1].legend(loc="best")
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc="best")
     plt.tight_layout()
 
     if save_path:
@@ -94,67 +80,39 @@ def plot_averaged_time_series(
     else:
         plt.show()
 
-    return grouped
-
 
 def main(
     entity="cruzas-universit-della-svizzera-italiana",
     project="thesis_results",
 ):
     base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
-    datasets = ["mnist"]
-    optimizers = ["apts_d"]
-    effective_batch_sizes = [125]
 
-    # mapping config keys to abbreviations
-    group_by_map = {
-        "config.glob_second_order": "so",
-        "config.loc_second_order": "lso",
-        "config.glob_dogleg": "dleg",
-        "config.loc_dogleg": "ldleg",
-    }
+    proj = f"{entity}/{project}"
+    filters = {"config.effective_batch_size": 128}
+    group_by = ["optimizer", "num_subdomains"]
+    abbr = {"optimizer": "opt", "num_subdomains": "N"}
 
-    experiments = [
-        (
-            {
-                "config.optimizer": opt,
-                "config.dataset_name": ds,
-                "config.batch_size": bs,
-                "config.model_name": "simple_cnn",
-                "config.glob_second_order": True,
-                "config.loc_second_order": True,
-                "config.glob_dogleg": True,
-                "config.loc_dogleg": True,
-            },
-            list(group_by_map.keys()),
-            list(group_by_map.values()),
-            os.path.join(base_save, f"{opt}_{ds}_{bs}.pdf"),
-        )
-        for ds, opt, bs in product(datasets, optimizers, effective_batch_sizes)
+    plots = [
+        ("epoch", "loss"),
+        ("epoch", "accuracy"),
+        ("grad_evals", "loss"),
+        ("grad_evals", "accuracy"),
+        ("running_time", "loss"),
+        ("running_time", "accuracy"),
     ]
 
-    for i, (filters, group_by, group_by_abbr, save_path) in enumerate(
-        experiments, start=1
-    ):
-        pprint.pprint(f"\n=== Experiment {i}: saving to {save_path} ===")
-        project_path = f"{entity}/{project}"
-        grouped = plot_averaged_time_series(
-            project_path=project_path,
+    for x_axis, metric in plots:
+        save = os.path.join(base_save, f"{metric}_vs_{x_axis}.pdf")
+
+        plot_time_series(
+            project_path=proj,
+            x_axis=x_axis,
+            metric=metric,
             filters=filters,
             group_by=group_by,
-            group_by_abbr=group_by_abbr,
-            metrics=["accuracy", "loss"],
-            x_axis="_step",
-            show_variance=True,
-            figsize=(14, 6),
-            save_path=save_path,
+            group_by_abbr=abbr,
+            save_path=save,
         )
-
-        # optional: log counts to text file
-        txt_path = os.path.splitext(save_path)[0] + ".txt"
-        with open(txt_path, "w") as f:
-            for info in grouped.values():
-                f.write(f"{info['label']}: {len(info['runs'])} runs\n")
 
 
 if __name__ == "__main__":
