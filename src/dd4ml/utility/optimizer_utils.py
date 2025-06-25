@@ -72,11 +72,10 @@ def get_lssr1_loc_tr_hparams(config):
     """
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
-    delta = config.delta * delta_scale
     return {
-        "delta": delta,
-        "min_delta": config.min_delta,
-        "max_delta": config.max_delta,  # Lower maximum for local updates
+        "delta": config.delta * delta_scale,
+        "min_delta": config.min_delta * delta_scale,
+        "max_delta": config.max_delta * delta_scale,  # Lower maximum for local updates
         "gamma": 1e-3,
         "second_order": config.loc_second_order,
         "dogleg": config.loc_dogleg,
@@ -130,11 +129,10 @@ def get_loc_tr_hparams(config):
     """
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
-    delta = config.delta * delta_scale
     return {
-        "delta": delta,
-        "max_delta": config.max_delta,  # Lower maximum for local updates
-        "min_delta": 1e-6,
+        "delta": config.delta * delta_scale,
+        "max_delta": config.max_delta * delta_scale,  # Lower maximum for local updates
+        "min_delta": config.min_delta * delta_scale,
         "nu": 0.45,  
         "inc_factor": 1.5,  # Reduced increase factor
         "dec_factor": 0.6,

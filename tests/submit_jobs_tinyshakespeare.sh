@@ -11,8 +11,8 @@ if $DEBUGGING; then
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
-  BATCH_SIZES=(12)
-  NUM_SUBD=(4)
+  BATCH_SIZES=(128)
+  NUM_SUBD=(2)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
@@ -36,11 +36,11 @@ DATASETS=(tinyshakespeare)
 MODELS=(minigpt)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(true)
-LOC_SECOND_ORDERS=(true)
+GLOB_SECOND_ORDERS=(false)
+LOC_SECOND_ORDERS=(false)
 # Dogleg toggles
-GLOB_DOGLEGS=(true)
-LOC_DOGLEGS=(true)
+GLOB_DOGLEGS=(false)
+LOC_DOGLEGS=(false)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.

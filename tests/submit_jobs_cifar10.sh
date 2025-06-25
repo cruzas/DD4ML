@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=false # Set to true for debugging mode
+DEBUGGING=true # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
@@ -31,17 +31,17 @@ GRAD_ACC=false      # Gradient accumulation flag
 SCALING_TYPE="weak" # "weak": scale up batch; "strong": scale down
 
 # Configuration sweeps
-OPTIMIZERS=(apts_d)
+OPTIMIZERS=(apts_p)
 DATASETS=(cifar10)
 MODELS=(simple_resnet)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(true)
-LOC_SECOND_ORDERS=(true)
+GLOB_SECOND_ORDERS=(false)
+LOC_SECOND_ORDERS=(false)
 
 # Dogleg toggles
-GLOB_DOGLEGS=(true)
-LOC_DOGLEGS=(true)
+GLOB_DOGLEGS=(false)
+LOC_DOGLEGS=(false)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.
@@ -52,7 +52,7 @@ FOC_OPTS=(true)
 EVAL_PARAMS=(epochs=25 max_iters=0 criterion=cross_entropy)
 
 # Adaptive solver parameters (base)
-APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.0 glob_second_order=false)
+APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.33 glob_second_order=false)
 
 # --- Functions to Adjust Defaults --- #
 set_optimizer_params() {
@@ -139,6 +139,7 @@ submit_job() {
     -e "s|\${num_rep}|${num_rep}|g" \
     -e "s|\${ntasks_per_node}|${ntasks_per_node}|g" \
     -e "s|\${partition}|${partition}|g" \
+    -e "s|\${time}|${time}|g" \
     "$template" >"$jobfile"
   if ! sbatch --nodes="${nodes}" "$jobfile"; then
     echo "ERROR: sbatch failed for $job_name" >&2

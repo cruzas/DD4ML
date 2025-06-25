@@ -36,9 +36,9 @@ class APTS_P(APTS_Base):
         super().__init__(
             params,
             model=model,
-            delta=delta,
-            min_delta=min_delta,
-            max_delta=max_delta,
+            delta=delta,         # in inf-norm
+            min_delta=min_delta, # in inf-norm
+            max_delta=max_delta, # in inf-norm
             nu_dec=nu_dec,
             nu_inc=nu_inc,
             inc_factor=inc_factor,
@@ -89,10 +89,18 @@ class APTS_P(APTS_Base):
         self.n_local = self.loc_params_to_vector().numel()
         self.sqrt_n_global = math.sqrt(self.n_global)
         self.sqrt_n_local = math.sqrt(self.n_local)
+        print(f"Rank {dist.get_rank()}. Nglobal: {self.n_global}, Nlocal: {self.n_local}")
+                
+        # Convert global optimizer bounds from inf-norm to 2-norm
+        self.glob_opt.max_delta = self.max_delta * self.sqrt_n_global
+        self.glob_opt.min_delta = self.min_delta * self.sqrt_n_global
+        # Convert local optimizer bounds from inf-norm to 2-norm
+        self.loc_opt.max_delta = self.glob_opt.max_delta #self.max_delta * self.sqrt_n_local
+        self.loc_opt.min_delta = self.glob_opt.min_delta #self.min_delta * self.sqrt_n_local
         
         # Modify delta for global and local optimizers
-        self.glob_opt.delta = min(self.glob_opt.max_delta, self.delta * self.sqrt_n_global)
-        self.loc_opt.delta = min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local)
+        self.glob_opt.delta = max(self.glob_opt.min_delta, min(self.glob_opt.max_delta, self.delta * self.sqrt_n_global))
+        self.loc_opt.delta = self.glob_opt.delta # min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local)
 
         # Print name of glob_opt and loc_opt
         dprint(
@@ -147,10 +155,10 @@ class APTS_P(APTS_Base):
 
     @torch.no_grad()
     def sync_glob_to_loc(self):
-        self.delta = max(self.glob_opt.min_delta, self.glob_opt.delta / self.sqrt_n_global)
+        self.delta = min(self.max_delta, max(self.min_delta, self.glob_opt.delta / self.sqrt_n_global))
         self.update_pytorch_lr()
 
-        self.loc_opt.delta = min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local)
+        self.loc_opt.delta = self.glob_opt.delta #max(self.loc_opt.min_delta, min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local))
         if hasattr(self.loc_opt, "update_pytorch_lr"):
             self.loc_opt.update_pytorch_lr()
 
@@ -197,7 +205,9 @@ class APTS_P(APTS_Base):
 
         # Compute trial step
         step = self.glob_params_to_vector() - self.init_glob_flat
-
+        # Clamp step to the delta bound
+        step = step.clamp(min=-self.delta, max=self.delta)
+        
         # Aggregate local losses
         pred = self.init_loc_loss - loc_loss
         if self.nr_models > 1:
@@ -208,7 +218,7 @@ class APTS_P(APTS_Base):
         self.delta = new_base_delta
 
         # Update global optimizer's delta based on the new base delta    
-        self.glob_opt.delta = min(self.max_delta, new_base_delta * self.sqrt_n_global)
+        self.glob_opt.delta = min(self.glob_opt.max_delta, new_base_delta * self.sqrt_n_global)
 
         # Optional global pass
         if self.glob_pass:
