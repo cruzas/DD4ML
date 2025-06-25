@@ -110,7 +110,7 @@ def main(
             "config.effective_batch_size": bs,
         }
         for x_axis, metric in plots:
-            fname = f"{dataset}_bs_{bs}_{metric}_vs_{x_axis}.pdf"
+            fname = f"{dataset}_effbs_{bs}_{metric}_vs_{x_axis}.pdf"
             save_path = os.path.join(base_save, fname)
             plot_time_series(
                 project_path=proj,

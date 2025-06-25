@@ -15,12 +15,13 @@ import pandas as pd
 
 from plotting.analysis import analyze_wandb_runs_advanced
 
-BASELINE_N = 2
 
-
-def prepare_scaling_table(gdf, group_cols, baseline_n=BASELINE_N):
+def prepare_scaling_table(gdf, group_cols):
     """
-    Build a tidy DataFrame with speedup & efficiency based on baseline_n.
+    Build a tidy DataFrame with dynamic speedup & efficiency.
+    For each subgroup defined by group_cols without 'num_subdomains',
+    baseline is the time_mean at the minimal N in that subgroup.
+
     group_cols: list of (key, abbr) pairs to rename and order.
     """
     # rename config and summary columns
@@ -39,17 +40,42 @@ def prepare_scaling_table(gdf, group_cols, baseline_n=BASELINE_N):
     )
     df = gdf.rename(columns=rename_map)
 
-    # identify abbr for batch and subdomains
-    abbr_bs = next(abbr for k, abbr in group_cols if "batch" in k)
+    # identify abbr for N and grouping keys (excluding N)
     abbr_N = next(abbr for k, abbr in group_cols if k == "num_subdomains")
+    abbr_group_keys = [abbr for k, abbr in group_cols if k != "num_subdomains"]
 
-    # baseline times at N=baseline_n per bs
-    baseline = df[df[abbr_N] == baseline_n].set_index(abbr_bs)["time_mean"].to_dict()
-    df["baseline_time"] = df[abbr_bs].map(baseline)
+    # compute minimal N per subgroup
+    group_min = (
+        df.groupby(abbr_group_keys)[abbr_N]
+        .min()
+        .reset_index()
+        .rename(columns={abbr_N: "min_N"})
+    )
+
+    # build baseline maps
+    baseline_time_map = {}
+    baseline_n_map = {}
+    for _, row in group_min.iterrows():
+        key = tuple(row[abbr] for abbr in abbr_group_keys)
+        min_n = row["min_N"]
+        mask = df[abbr_N] == min_n
+        for abbr in abbr_group_keys:
+            mask &= df[abbr] == row[abbr]
+        base_time = df.loc[mask, "time_mean"].iloc[0]
+        baseline_time_map[key] = base_time
+        baseline_n_map[key] = min_n
+
+    # map baseline values onto each row
+    df["baseline_time"] = df.apply(
+        lambda r: baseline_time_map[tuple(r[abbr] for abbr in abbr_group_keys)], axis=1
+    )
+    df["baseline_N"] = df.apply(
+        lambda r: baseline_n_map[tuple(r[abbr] for abbr in abbr_group_keys)], axis=1
+    )
 
     # compute scaling metrics
     df["speedup"] = df["baseline_time"] / df["time_mean"]
-    df["efficiency"] = df["speedup"] / (df[abbr_N] / baseline_n)
+    df["efficiency"] = df["speedup"] / (df[abbr_N] / df["baseline_N"])
 
     # final order: grouped columns, metrics, scaling
     cols = [abbr for _, abbr in group_cols] + [
@@ -68,13 +94,12 @@ def prepare_scaling_table(gdf, group_cols, baseline_n=BASELINE_N):
 
 
 def process_scaling(
-    proj, dataset, size_val, scale_type, base_key, bs_abbr, group_keys, group_abbrs
+    proj, dataset, size_val, scale_type, base_key, group_keys, group_abbrs
 ):
     """
     Common routine for either strong or weak scaling.
     scale_type: 'strong' or 'weak'
-    base_key: config key for size filter, e.g. 'batch_size' or 'effective_batch_size'
-    bs_abbr: corresponding abbreviation in filename
+    base_key: config key for size filter
     group_keys: list of config keys for grouping
     group_abbrs: list of abbreviations for grouping columns
     """
@@ -94,7 +119,7 @@ def process_scaling(
     )
     if gdf is None:
         pprint.pprint(
-            f"No {scale_type}-scaling runs for {dataset}, {bs_abbr}={size_val}"
+            f"No {scale_type}-scaling runs for {dataset}, {base_key}={size_val}"
         )
         return
 
@@ -118,7 +143,7 @@ def main(
     proj = f"{entity}/{project}"
     datasets = ["mnist"]
     strong_batch_sizes = [1024, 2048, 4096]
-    weak_batch_sizes = [128, 256, 512]  # can differ from strong sizes
+    weak_batch_sizes = [128, 256, 512]
 
     # strong scaling loop
     for dataset in datasets:
@@ -129,7 +154,6 @@ def main(
                 bs,
                 scale_type="strong",
                 base_key="batch_size",
-                bs_abbr="bs",
                 group_keys=["optimizer", "batch_size", "num_subdomains"],
                 group_abbrs=["opt", "bs", "N"],
             )
@@ -143,7 +167,6 @@ def main(
                 effbs,
                 scale_type="weak",
                 base_key="effective_batch_size",
-                bs_abbr="effbs",
                 group_keys=["optimizer", "effective_batch_size", "num_subdomains"],
                 group_abbrs=["opt", "effbs", "N"],
             )
