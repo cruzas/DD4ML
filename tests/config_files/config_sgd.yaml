@@ -6,21 +6,21 @@ parameters:
   optimizer: 
     value: "sgd" # pmw compatible
   batch_size:
-    value: 200
+    value: 64
   effective_batch_size:
-    value: 200 
+    value: 64 
   epochs: 
     value: 10 # used for any other model other than LLMs
   max_iters:
-    value: 2000000
+    value: 2000
   learning_rate:
     value: 0.1
   dataset_name: 
-    value: "cifar10"
+    value: "tinyshakespeare"
   model_name: 
-    value: "simple_resnet"
+    value: "minigpt"
   criterion:
-    value: "cross_entropy"
+    value: "cross_entropy_transformers"
   seed:
     value: 42
   # For parallel computation
@@ -34,4 +34,6 @@ parameters:
     value: False
   accumulation_steps:
     value: None
+  overlap:
+    value: 0.0
   

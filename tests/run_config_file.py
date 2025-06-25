@@ -33,7 +33,7 @@ def parse_cmd_args() -> argparse.Namespace:
         description="Parse command line arguments.",
     )
 
-    parser.add_argument("--optimizer", type=str, default="asntr", help="Optimizer name")
+    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
     )
@@ -76,14 +76,15 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Directory to save models",
     )
     parser.add_argument(
-        "--dataset_name", type=str, default="mnist", help="Dataset name"
+        "--dataset_name", type=str, default="tinyshakespeare", help="Dataset name"
     )
-    parser.add_argument("--overlap", type=float, default=0.33, help="Overlap factor")
+    parser.add_argument("--overlap", type=float, default=0.0, help="Overlap factor")
+    parser.add_argument("--model_name", type=str, default="minigpt", help="Model name")
     parser.add_argument(
-        "--model_name", type=str, default="simple_cnn", help="Model name"
-    )
-    parser.add_argument(
-        "--criterion", type=str, default="cross_entropy", help="Criterion name"
+        "--criterion",
+        type=str,
+        default="cross_entropy_transformers",
+        help="Criterion name",
     )
     parser.add_argument(
         "--learning_rate", type=float, default=1.0, help="Learning rate"

@@ -49,7 +49,7 @@ class Trainer:
         C.grad_norm_clip = None
         # initial batch size and adaptive params
         C.batch_size = 128  # max batch size is length of dataset
-        C.batch_inc_factor = 1.5  # factor to increase batch size
+        C.batch_inc_factor = 1.0  # factor to increase batch size
         C.loss_tol = 1e-2  # loss tolerance for adaptive batch size
         # APTS and TR
         C.delta = 0.1  # for trust region methods

@@ -1,11 +1,11 @@
 from .utils import CfgNode
 
-GPT_MODEL_ALIASES = 
-{
+GPT_MODEL_ALIASES = {
     "nanogpt": "gpt-nano",
     "microgpt": "gpt-micro",
     "minigpt": "gpt-mini",
 }
+
 
 def remove_keys(config, keys_to_remove):
     """
