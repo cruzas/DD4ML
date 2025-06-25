@@ -2,8 +2,9 @@
 """
 make_scaling_tables.py
 
-Generate per-dataset, per-batch-size scaling summary tables (mean ± std, speedup, efficiency)
-from wandb runs, saving each as a .txt file.
+Generate per-dataset scaling tables (mean ± std, speedup, efficiency)
+for both strong and weak regimes, grouping by optimizer, batch size (or eff batch size),
+and number of subdomains, saving each as a .txt file.
 """
 
 import os
@@ -14,16 +15,18 @@ import pandas as pd
 
 from plotting.analysis import analyze_wandb_runs_advanced
 
+BASELINE_N = 2
 
-def prepare_scaling_table(gdf, batch_col, subdomains_col):
+
+def prepare_scaling_table(gdf, group_cols, baseline_n=BASELINE_N):
     """
-    From grouped_df with summary_*_{mean,std,count} columns,
-    compute speedup & efficiency (baseline at N=2) and return a tidy DataFrame.
+    Build a tidy DataFrame with speedup & efficiency based on baseline_n.
+    group_cols: list of (key, abbr) pairs to rename and order.
     """
-    df = gdf.rename(
-        columns={
-            batch_col: "bs",
-            subdomains_col: "N",
+    # rename config and summary columns
+    rename_map = {f"config_{k}": abbr for k, abbr in group_cols}
+    rename_map.update(
+        {
             "summary_loss_mean": "loss_mean",
             "summary_loss_std": "loss_std",
             "summary_accuracy_mean": "acc_mean",
@@ -34,21 +37,22 @@ def prepare_scaling_table(gdf, batch_col, subdomains_col):
             "summary_running_time_std": "time_std",
         }
     )
+    df = gdf.rename(columns=rename_map)
 
-    # baseline time per batch size = time at N=2
-    BASELINE_N = 2
-    baseline_times = df[df["N"] == BASELINE_N].set_index("bs")["time_mean"].to_dict()
-    df["baseline_time"] = df["bs"].map(baseline_times)
+    # identify abbr for batch and subdomains
+    abbr_bs = next(abbr for k, abbr in group_cols if "batch" in k)
+    abbr_N = next(abbr for k, abbr in group_cols if k == "num_subdomains")
 
-    # compute speedup & efficiency
-    # speedup = T(2)/T(N)
+    # baseline times at N=baseline_n per bs
+    baseline = df[df[abbr_N] == baseline_n].set_index(abbr_bs)["time_mean"].to_dict()
+    df["baseline_time"] = df[abbr_bs].map(baseline)
+
+    # compute scaling metrics
     df["speedup"] = df["baseline_time"] / df["time_mean"]
-    # efficiency = speedup / (N/2)
-    df["efficiency"] = df["speedup"] / (df["N"] / BASELINE_N)
+    df["efficiency"] = df["speedup"] / (df[abbr_N] / baseline_n)
 
-    cols = [
-        "bs",
-        "N",
+    # final order: grouped columns, metrics, scaling
+    cols = [abbr for _, abbr in group_cols] + [
         "loss_mean",
         "loss_std",
         "acc_mean",
@@ -63,61 +67,86 @@ def prepare_scaling_table(gdf, batch_col, subdomains_col):
     return df[cols]
 
 
+def process_scaling(
+    proj, dataset, size_val, scale_type, base_key, bs_abbr, group_keys, group_abbrs
+):
+    """
+    Common routine for either strong or weak scaling.
+    scale_type: 'strong' or 'weak'
+    base_key: config key for size filter, e.g. 'batch_size' or 'effective_batch_size'
+    bs_abbr: corresponding abbreviation in filename
+    group_keys: list of config keys for grouping
+    group_abbrs: list of abbreviations for grouping columns
+    """
+    filters = {
+        "config.dataset_name": dataset,
+        f"config.{base_key}": size_val,
+    }
+
+    _, gdf = analyze_wandb_runs_advanced(
+        project_path=proj,
+        filters=filters,
+        group_by=group_keys,
+        group_by_abbr=group_abbrs,
+        metrics=["loss", "accuracy", "grad_evals", "running_time"],
+        aggregate="mean",
+        mad_threshold=3.0,
+    )
+    if gdf is None:
+        pprint.pprint(
+            f"No {scale_type}-scaling runs for {dataset}, {bs_abbr}={size_val}"
+        )
+        return
+
+    table = prepare_scaling_table(
+        gdf,
+        group_cols=list(zip(group_keys, group_abbrs)),
+    )
+    fname = f"{dataset}_{group_abbrs[1]}_{size_val}_{scale_type}_scaling.txt"
+    save_path = os.path.join(
+        os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures"), fname
+    )
+    with open(save_path, "w") as f:
+        f.write(table.to_string(index=False, float_format="%.4f"))
+    print(f"Saved {scale_type}-scaling table to {save_path}")
+
+
 def main(
     entity="cruzas-universit-della-svizzera-italiana",
     project="thesis_results",
 ):
-    # where to save .txt tables
-    base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
-    os.makedirs(base_save, exist_ok=True)
-
     proj = f"{entity}/{project}"
-    group_by = ["effective_batch_size", "num_subdomains"]
-    group_by_abbr = ["bs", "N"]
-
     datasets = ["mnist"]
-    batch_sizes = [128, 256, 512]
+    strong_batch_sizes = [1024, 2048, 4096]
+    weak_batch_sizes = [128, 256, 512]  # can differ from strong sizes
 
-    metrics = ["loss", "accuracy", "grad_evals", "running_time"]
-    aggregate = "mean"
-    mad_threshold = 3.0
+    # strong scaling loop
+    for dataset in datasets:
+        for bs in strong_batch_sizes:
+            process_scaling(
+                proj,
+                dataset,
+                bs,
+                scale_type="strong",
+                base_key="batch_size",
+                bs_abbr="bs",
+                group_keys=["optimizer", "batch_size", "num_subdomains"],
+                group_abbrs=["opt", "bs", "N"],
+            )
 
-    for dataset, bs in product(datasets, batch_sizes):
-        # build filters per (dataset, batch_size)
-        filters = {
-            "config.dataset_name": dataset,
-            "config.effective_batch_size": bs,
-        }
-
-        # fetch & group
-        df, gdf = analyze_wandb_runs_advanced(
-            project_path=proj,
-            filters=filters,
-            group_by=group_by,
-            group_by_abbr=group_by_abbr,
-            metrics=metrics,
-            aggregate=aggregate,
-            mad_threshold=mad_threshold,
-        )
-
-        if gdf is None:
-            pprint.pprint(f"No runs found for {dataset}, bs={bs}")
-            continue
-
-        # prepare the scaling table
-        table = prepare_scaling_table(
-            gdf,
-            batch_col="config_effective_batch_size",
-            subdomains_col="config_num_subdomains",
-        )
-
-        # save to .txt
-        fname = f"{dataset}_bs_{bs}_scaling.txt"
-        save_path = os.path.join(base_save, fname)
-        with open(save_path, "w") as f:
-            f.write(table.to_string(index=False, float_format="%.4f"))
-
-        print(f"Saved scaling table to {save_path}")
+    # weak scaling loop
+    for dataset in datasets:
+        for effbs in weak_batch_sizes:
+            process_scaling(
+                proj,
+                dataset,
+                effbs,
+                scale_type="weak",
+                base_key="effective_batch_size",
+                bs_abbr="effbs",
+                group_keys=["optimizer", "effective_batch_size", "num_subdomains"],
+                group_abbrs=["opt", "effbs", "N"],
+            )
 
 
 if __name__ == "__main__":
