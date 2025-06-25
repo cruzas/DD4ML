@@ -88,9 +88,11 @@ def main(
     base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
 
     proj = f"{entity}/{project}"
-    filters = {"config.effective_batch_size": 128}
     group_by = ["optimizer", "num_subdomains"]
     abbr = {"optimizer": "opt", "num_subdomains": "N"}
+
+    datasets = ["mnist"]
+    batch_sizes = [128, 256, 512]
 
     plots = [
         ("epoch", "loss"),
@@ -101,18 +103,24 @@ def main(
         ("running_time", "accuracy"),
     ]
 
-    for x_axis, metric in plots:
-        save = os.path.join(base_save, f"{metric}_vs_{x_axis}.pdf")
-
-        plot_time_series(
-            project_path=proj,
-            x_axis=x_axis,
-            metric=metric,
-            filters=filters,
-            group_by=group_by,
-            group_by_abbr=abbr,
-            save_path=save,
-        )
+    for dataset, bs in product(datasets, batch_sizes):
+        # build filters per (dataset, batch_size)
+        filters = {
+            "config.dataset_name": dataset,
+            "config.effective_batch_size": bs,
+        }
+        for x_axis, metric in plots:
+            fname = f"{dataset}_bs_{bs}_{metric}_vs_{x_axis}.pdf"
+            save_path = os.path.join(base_save, fname)
+            plot_time_series(
+                project_path=proj,
+                x_axis=x_axis,
+                metric=metric,
+                filters=filters,
+                group_by=group_by,
+                group_by_abbr=abbr,
+                save_path=save_path,
+            )
 
 
 if __name__ == "__main__":
