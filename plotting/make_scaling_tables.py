@@ -2,9 +2,9 @@
 """
 make_scaling_tables.py
 
-Generate per-dataset scaling tables (mean ± std, speedup, efficiency)
-for both strong and weak regimes, grouping by optimizer, batch size (or eff batch size),
-and number of subdomains, saving each as a .txt file.
+Generate two summary tables (mean ± std, sample count, speedup, efficiency) for strong and weak scaling,
+across all specified batch sizes and datasets, grouping by optimizer and subdomains.
+Each scaling regime writes a single .txt file including dataset name.
 """
 
 import os
@@ -19,12 +19,10 @@ from plotting.analysis import analyze_wandb_runs_advanced
 def prepare_scaling_table(gdf, group_cols):
     """
     Build a tidy DataFrame with dynamic speedup & efficiency.
-    For each subgroup defined by group_cols without 'num_subdomains',
-    baseline is the time_mean at the minimal N in that subgroup.
-
+    Include sample count for time metric and baseline at minimal N per subgroup.
     group_cols: list of (key, abbr) pairs to rename and order.
     """
-    # rename config and summary columns
+    # rename config, summary and count columns
     rename_map = {f"config_{k}": abbr for k, abbr in group_cols}
     rename_map.update(
         {
@@ -36,104 +34,105 @@ def prepare_scaling_table(gdf, group_cols):
             "summary_grad_evals_std": "evals_std",
             "summary_running_time_mean": "time_mean",
             "summary_running_time_std": "time_std",
+            # include count of runs used for time
+            "summary_running_time_count": "sample_count",
         }
     )
     df = gdf.rename(columns=rename_map)
 
     # identify abbr for N and grouping keys (excluding N)
     abbr_N = next(abbr for k, abbr in group_cols if k == "num_subdomains")
-    abbr_group_keys = [abbr for k, abbr in group_cols if k != "num_subdomains"]
+    abbr_group = [abbr for k, abbr in group_cols if k != "num_subdomains"]
 
     # compute minimal N per subgroup
     group_min = (
-        df.groupby(abbr_group_keys)[abbr_N]
+        df.groupby(abbr_group)[abbr_N]
         .min()
         .reset_index()
         .rename(columns={abbr_N: "min_N"})
     )
 
-    # build baseline maps
-    baseline_time_map = {}
-    baseline_n_map = {}
+    # baseline maps
+    baseline_time = {}
+    baseline_n = {}
     for _, row in group_min.iterrows():
-        key = tuple(row[abbr] for abbr in abbr_group_keys)
+        key = tuple(row[abbr] for abbr in abbr_group)
         min_n = row["min_N"]
         mask = df[abbr_N] == min_n
-        for abbr in abbr_group_keys:
+        for abbr in abbr_group:
             mask &= df[abbr] == row[abbr]
-        base_time = df.loc[mask, "time_mean"].iloc[0]
-        baseline_time_map[key] = base_time
-        baseline_n_map[key] = min_n
+        baseline_time[key] = df.loc[mask, "time_mean"].iloc[0]
+        baseline_n[key] = min_n
 
-    # map baseline values onto each row
+    # map baseline values and N
     df["baseline_time"] = df.apply(
-        lambda r: baseline_time_map[tuple(r[abbr] for abbr in abbr_group_keys)], axis=1
+        lambda r: baseline_time[tuple(r[abbr] for abbr in abbr_group)], axis=1
     )
     df["baseline_N"] = df.apply(
-        lambda r: baseline_n_map[tuple(r[abbr] for abbr in abbr_group_keys)], axis=1
+        lambda r: baseline_n[tuple(r[abbr] for abbr in abbr_group)], axis=1
     )
 
     # compute scaling metrics
     df["speedup"] = df["baseline_time"] / df["time_mean"]
     df["efficiency"] = df["speedup"] / (df[abbr_N] / df["baseline_N"])
 
-    # final order: grouped columns, metrics, scaling
-    cols = [abbr for _, abbr in group_cols] + [
-        "loss_mean",
-        "loss_std",
-        "acc_mean",
-        "acc_std",
-        "evals_mean",
-        "evals_std",
-        "time_mean",
-        "time_std",
-        "speedup",
-        "efficiency",
-    ]
+    # final column order
+    cols = (
+        abbr_group
+        + [abbr_N, "sample_count"]
+        + [
+            "loss_mean",
+            "loss_std",
+            "acc_mean",
+            "acc_std",
+            "evals_mean",
+            "evals_std",
+            "time_mean",
+            "time_std",
+            "speedup",
+            "efficiency",
+        ]
+    )
     return df[cols]
 
 
-def process_scaling(
-    proj, dataset, size_val, scale_type, base_key, group_keys, group_abbrs
+def collect_gdf_all(
+    proj,
+    datasets,
+    sizes,
+    base_key,
+    group_keys,
+    group_abbrs,
+    metrics=["loss", "accuracy", "grad_evals", "running_time"],
+    aggregate="mean",
+    mad_threshold=3.0,
 ):
     """
-    Common routine for either strong or weak scaling.
-    scale_type: 'strong' or 'weak'
-    base_key: config key for size filter
-    group_keys: list of config keys for grouping
-    group_abbrs: list of abbreviations for grouping columns
+    Run analyze_wandb_runs_advanced for each (dataset, size) combination,
+    collect all grouped DataFrames and tag with dataset.
     """
-    filters = {
-        "config.dataset_name": dataset,
-        f"config.{base_key}": size_val,
-    }
-
-    _, gdf = analyze_wandb_runs_advanced(
-        project_path=proj,
-        filters=filters,
-        group_by=group_keys,
-        group_by_abbr=group_abbrs,
-        metrics=["loss", "accuracy", "grad_evals", "running_time"],
-        aggregate="mean",
-        mad_threshold=3.0,
-    )
-    if gdf is None:
-        pprint.pprint(
-            f"No {scale_type}-scaling runs for {dataset}, {base_key}={size_val}"
+    all_gdfs = []
+    for dataset, size_val in product(datasets, sizes):
+        filters = {
+            "config.dataset_name": dataset,
+            f"config.{base_key}": size_val,
+        }
+        _, gdf = analyze_wandb_runs_advanced(
+            project_path=proj,
+            filters=filters,
+            group_by=group_keys,
+            group_by_abbr=group_abbrs,
+            metrics=metrics,
+            aggregate=aggregate,
+            mad_threshold=mad_threshold,
         )
-        return
-
-    table = prepare_scaling_table(
-        gdf,
-        group_cols=list(zip(group_keys, group_abbrs)),
-    )
-    fname = f"{dataset}_{group_abbrs[1]}_{size_val}_{scale_type}_scaling.txt"
-    save_path = os.path.join(
-        os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures"), fname
-    )
-    with open(save_path, "w") as f:
-        f.write(table.to_string(index=False, float_format="%.4f"))
-    print(f"Saved {scale_type}-scaling table to {save_path}")
+        if gdf is not None:
+            # tag dataset for filename and table
+            gdf["config_dataset_name"] = dataset
+            all_gdfs.append(gdf)
+        else:
+            pprint.pprint(f"No runs: {base_key}={size_val}, dataset={dataset}")
+    return pd.concat(all_gdfs, ignore_index=True) if all_gdfs else None
 
 
 def main(
@@ -142,34 +141,58 @@ def main(
 ):
     proj = f"{entity}/{project}"
     datasets = ["mnist"]
-    strong_batch_sizes = [1024, 2048, 4096]
-    weak_batch_sizes = [128, 256, 512]
+    strong_sizes = [1024, 2048, 4096]
+    weak_sizes = [128, 256, 512]
 
-    # strong scaling loop
-    for dataset in datasets:
-        for bs in strong_batch_sizes:
-            process_scaling(
-                proj,
-                dataset,
-                bs,
-                scale_type="strong",
-                base_key="batch_size",
-                group_keys=["optimizer", "batch_size", "num_subdomains"],
-                group_abbrs=["opt", "bs", "N"],
-            )
+    out_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
+    os.makedirs(out_dir, exist_ok=True)
 
-    # weak scaling loop
-    for dataset in datasets:
-        for effbs in weak_batch_sizes:
-            process_scaling(
-                proj,
-                dataset,
-                effbs,
-                scale_type="weak",
-                base_key="effective_batch_size",
-                group_keys=["optimizer", "effective_batch_size", "num_subdomains"],
-                group_abbrs=["opt", "effbs", "N"],
-            )
+    # strong scaling
+    gdf_strong = collect_gdf_all(
+        proj,
+        datasets,
+        strong_sizes,
+        base_key="batch_size",
+        group_keys=["optimizer", "batch_size", "num_subdomains"],
+        group_abbrs=["opt", "bs", "N"],
+    )
+    if gdf_strong is not None:
+        table_strong = prepare_scaling_table(
+            gdf_strong,
+            list(
+                zip(["optimizer", "batch_size", "num_subdomains"], ["opt", "bs", "N"])
+            ),
+        )
+        ds_name = "_".join(datasets)
+        path = os.path.join(out_dir, f"{ds_name}_strong_scaling.txt")
+        with open(path, "w") as f:
+            f.write(table_strong.to_string(index=False, float_format="%.4f"))
+        print(f"Saved strong scaling to {path}")
+
+    # weak scaling
+    gdf_weak = collect_gdf_all(
+        proj,
+        datasets,
+        weak_sizes,
+        base_key="effective_batch_size",
+        group_keys=["optimizer", "effective_batch_size", "num_subdomains"],
+        group_abbrs=["opt", "effbs", "N"],
+    )
+    if gdf_weak is not None:
+        table_weak = prepare_scaling_table(
+            gdf_weak,
+            list(
+                zip(
+                    ["optimizer", "effective_batch_size", "num_subdomains"],
+                    ["opt", "effbs", "N"],
+                )
+            ),
+        )
+        ds_name = "_".join(datasets)
+        path = os.path.join(out_dir, f"{ds_name}_weak_scaling.txt")
+        with open(path, "w") as f:
+            f.write(table_weak.to_string(index=False, float_format="%.4f"))
+        print(f"Saved weak scaling to {path}")
 
 
 if __name__ == "__main__":
