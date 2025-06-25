@@ -20,27 +20,27 @@ else
   TRIALS=3                 # Repetitions per configuration
   partition="normal"       # Slurm partition for normal runs
   time="00:50:00"          # Time limit for debugging
-  BATCH_SIZES=(64 128 256)
+  BATCH_SIZES=(64 128 256) #2048)
   NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
 
-USE_PMW=false         # PMW optimizer flag
-GRAD_ACC=false        # Gradient accumulation flag
-SCALING_TYPE="strong" # "weak": scale up batch; "strong": scale down
+USE_PMW=false       # PMW optimizer flag
+GRAD_ACC=false      # Gradient accumulation flag
+SCALING_TYPE="weak" # "weak": scale up batch; "strong": scale down
 
 # Configuration sweeps
-OPTIMIZERS=(apts_d)
+OPTIMIZERS=(apts_p)
 DATASETS=(mnist)
 MODELS=(simple_cnn)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(true)
-LOC_SECOND_ORDERS=(true)
+GLOB_SECOND_ORDERS=(false)
+LOC_SECOND_ORDERS=(false)
 # Dogleg toggles
-GLOB_DOGLEGS=(true)
-LOC_DOGLEGS=(true)
+GLOB_DOGLEGS=(false)
+LOC_DOGLEGS=(false)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.
@@ -51,7 +51,7 @@ FOC_OPTS=(true)
 EVAL_PARAMS=(epochs=5 max_iters=0 criterion=cross_entropy)
 
 # Adaptive solver parameters (base)
-APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.0 glob_second_order=false)
+APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.33 glob_second_order=false)
 
 # --- Functions to Adjust Defaults --- #
 set_optimizer_params() {

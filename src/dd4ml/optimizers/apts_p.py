@@ -91,8 +91,8 @@ class APTS_P(APTS_Base):
         self.sqrt_n_local = math.sqrt(self.n_local)
         
         # Modify delta for global and local optimizers
-        self.glob_opt.delta = self.delta * self.sqrt_n_global
-        self.loc_opt.delta = self.delta * self.sqrt_n_local
+        self.glob_opt.delta = min(self.glob_opt.max_delta, self.delta * self.sqrt_n_global)
+        self.loc_opt.delta = min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local)
 
         # Print name of glob_opt and loc_opt
         dprint(
@@ -147,10 +147,10 @@ class APTS_P(APTS_Base):
 
     @torch.no_grad()
     def sync_glob_to_loc(self):
-        self.delta = self.glob_opt.delta / self.sqrt_n_global
+        self.delta = max(self.glob_opt.min_delta, self.glob_opt.delta / self.sqrt_n_global)
         self.update_pytorch_lr()
 
-        self.loc_opt.delta = self.delta * self.sqrt_n_local
+        self.loc_opt.delta = min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local)
         if hasattr(self.loc_opt, "update_pytorch_lr"):
             self.loc_opt.update_pytorch_lr()
 
@@ -208,7 +208,7 @@ class APTS_P(APTS_Base):
         self.delta = new_base_delta
 
         # Update global optimizer's delta based on the new base delta    
-        self.glob_opt.delta = new_base_delta * self.sqrt_n_global
+        self.glob_opt.delta = min(self.max_delta, new_base_delta * self.sqrt_n_global)
 
         # Optional global pass
         if self.glob_pass:

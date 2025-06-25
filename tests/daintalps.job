@@ -13,7 +13,7 @@
 
 #SBATCH --hint=nomultithread
 #SBATCH --constraint=gpu
-#SBATCH --partition=normal
+#SBATCH --partition=${partition} # Dynamically set partition
 #SBATCH --exclusive
 source ~/.slurm_env # You should define SLURM_ACCOUNT in this file
 #SBATCH --account=$SLURM_ACCOUNT
