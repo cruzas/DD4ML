@@ -208,7 +208,7 @@ class APTS_Base(Optimizer):
         self.update_pytorch_lr()
 
         self.loc_opt.delta = self.glob_opt.delta
-        if self.norm_type != math.inf and self.nr_models > 1:
+        if self.norm_type == 2 and self.nr_models > 1:
             self.loc_opt.delta /= self.nr_models
         if hasattr(self.loc_opt, "update_pytorch_lr"):
             self.loc_opt.update_pytorch_lr()

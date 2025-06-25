@@ -71,7 +71,6 @@ def get_lssr1_loc_tr_hparams(config):
     when used as the local optimizer for APTS.
     """
     world_size = dist.get_world_size() if dist.is_initialized() else 1
-    norm_type = config.norm_type
     delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
     delta = config.delta * delta_scale
     return {
@@ -130,22 +129,17 @@ def get_loc_tr_hparams(config):
     when used as the local optimizer for APTS.
     """
     world_size = dist.get_world_size() if dist.is_initialized() else 1
-    norm_type = config.norm_type
     delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
     delta = config.delta * delta_scale
     return {
         "delta": delta,
         "max_delta": config.max_delta,  # Lower maximum for local updates
         "min_delta": 1e-6,
-        "nu": (
-            0.45 if norm_type != math.inf else 0.5
-        ),  # Adjusted to be more conservative locally
-        "inc_factor": 1.5 if norm_type != math.inf else 1.2,  # Reduced increase factor
-        "dec_factor": (
-            0.6 if norm_type != math.inf else 0.9
-        ),  # Slightly more aggressive reduction
-        "nu_dec": 0.3 if norm_type != math.inf else 0.25,
-        "nu_inc": 0.7 if norm_type != math.inf else 0.75,
+        "nu": 0.45,  
+        "inc_factor": 1.5,  # Reduced increase factor
+        "dec_factor": 0.6,
+        "nu_dec": 0.3,
+        "nu_inc": 0.7,
         "mem_length": 5,
         "norm_type": config.norm_type,
         "second_order": config.loc_second_order,

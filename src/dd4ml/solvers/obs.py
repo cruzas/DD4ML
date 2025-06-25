@@ -58,16 +58,10 @@ class OBS:
         if delta < 0:
             raise ValueError(f"Delta must be non-negative. Delta: {delta}")
 
-        # if Psi is None or Psi.numel() == 0 or torch.norm(Psi) <= self.tol:
-        #     # Unconstrained minimizer
-        #     p_unc = -g / gamma
-        #     # If inside trust‐region, return it; otherwise Cauchy‐step on boundary
-        #     if torch.norm(p_unc) <= delta:
-        #         return p_unc
-        #     return -delta / g.norm() * g
-
         PsiPsi = torch.matmul(Psi.transpose(0, 1), Psi)
-        # print(f"PsiPsi norm: {torch.norm(PsiPsi)}")
+        # eps = self.tol * torch.norm(PsiPsi, p='fro')
+        # PsiPsi_reg = PsiPsi + eps * torch.eye(PsiPsi.shape[0], device=PsiPsi.device, dtype=PsiPsi.dtype)
+        # PsiPsi = PsiPsi_reg
         R = torch.linalg.cholesky(PsiPsi, upper=True)
 
         MR = torch.linalg.solve(Minv, R.transpose(0, 1))

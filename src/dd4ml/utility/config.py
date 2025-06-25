@@ -1,5 +1,11 @@
 from .utils import CfgNode
 
+GPT_MODEL_ALIASES = 
+{
+    "nanogpt": "gpt-nano",
+    "microgpt": "gpt-micro",
+    "minigpt": "gpt-mini",
+}
 
 def remove_keys(config, keys_to_remove):
     """
@@ -81,6 +87,9 @@ def get_config(dataset_name: str, model_name: str, optimizer: str):
     C.system.seed = 3407
     C.system.trial = 0
     C.system.work_dir = f"../../saved_networks/{dataset_name}/{model_name}/{optimizer}/"
+    C.dataset_name = dataset_name
+    C.model_name = model_name
+    C.optimizer = optimizer
 
     # Data configuration via DATASET_MAP.
     from .factory import DATASET_MAP
@@ -103,6 +112,8 @@ def get_config(dataset_name: str, model_name: str, optimizer: str):
     model_cls = getattr(model_module_obj, model_class_name)
     C.model = model_cls.get_default_config()
     C.model.model_class = model_cls
+    if key in GPT_MODEL_ALIASES:
+        C.model.model_type = GPT_MODEL_ALIASES[key]
 
     # Propagate image-specific properties if available.
     for attr in ["input_channels", "input_height", "input_width", "output_classes"]:

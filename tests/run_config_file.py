@@ -242,7 +242,7 @@ def main(
             )
 
     def batch_end_callback(
-        trainer, save_model: bool = True, save_frequency: int = 10000
+        trainer, save_model: bool = True, save_frequency: int = 1000
     ) -> None:
         # Check if delta is present in the optimizer's attributes
         if not hasattr(trainer.optimizer, "delta"):

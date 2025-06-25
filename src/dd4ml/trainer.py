@@ -288,16 +288,16 @@ class Trainer:
                 pin_memory=True,
             )
 
-            print(f"Number of batches in train_loader: {len(self.train_loader)}")
+            dprint(f"Number of batches in train_loader: {len(self.train_loader)}")
 
             # Print debug info
             if num_sub > 1 and overlap > 0:
-                print(
+                dprint(
                     f"Micro-batching active: {num_sub} subdomains with overlap={overlap}"
                 )
                 if hasattr(train_sampler, "micro_batch_sampler"):
                     overlap_info = train_sampler.micro_batch_sampler.get_overlap_info()
-                    print(f"Overlap info: {overlap_info}")
+                    dprint(f"Overlap info: {overlap_info}")
             elif num_sub == 1 and overlap > 0:
                 print(
                     f"Mini-batch overlap active: overlap={overlap} between consecutive mini-batches"

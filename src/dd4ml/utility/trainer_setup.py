@@ -16,7 +16,7 @@ from dd4ml.utility import (
     print_params_norm,
 )
 
-from .config import get_config, make_std_config
+from .config import get_config, make_std_config, GPT_MODEL_ALIASES
 
 # You can now add new components dynamically at runtime by calling, e.g.:
 # dataset_factory.register("new_dataset", "dd4ml.datasets.new_dataset", "NewDatasetClass")
@@ -55,6 +55,11 @@ def get_config_model_and_trainer(args, wandb_config):
     else:
         args.pop("sweep_config", None)
     all_config.merge_from_dict(args)
+    
+    # Ensure the correct GPT model_type is set based on the provided   
+    model_key = next((k for k in GPT_MODEL_ALIASES if k in model_name.lower()), None)
+    if model_key is not None and getattr(all_config.model, "model_type", None) is None:
+        all_config.model.model_type = GPT_MODEL_ALIASES[model_key]
 
     # Allow `subdomain_opt` as an alias for `loc_opt` in configuration files
     if hasattr(all_config.trainer, "subdomain_opt") and not hasattr(

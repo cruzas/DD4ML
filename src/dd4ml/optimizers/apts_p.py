@@ -28,7 +28,7 @@ class APTS_P(APTS_Base):
         loc_opt_hparams=None,
         *,
         glob_pass=True,
-        norm_type=2,
+        norm_type=math.inf,
         max_loc_iters=3,
         max_glob_iters=3,
         tol=1e-6,
@@ -51,7 +51,7 @@ class APTS_P(APTS_Base):
             loc_opt=loc_opt,
             loc_opt_hparams=loc_opt_hparams,
             glob_pass=glob_pass,
-            norm_type=norm_type,
+            norm_type=math.inf,
             max_loc_iters=max_loc_iters,
             max_glob_iters=max_glob_iters,
             tol=tol,
@@ -83,9 +83,16 @@ class APTS_P(APTS_Base):
         self.loc_closure = self.non_foc_loc_closure
         if isinstance(self.loc_opt, ASNTR):
             self.loc_closure_d = self.non_foc_loc_closure_d
-
-        if nr_models > 1 and norm_type != math.inf:
-            self.loc_opt.delta = self.delta * (1.0 / math.sqrt(nr_models))
+        
+        # Compute number of parameters in local and global models
+        self.n_global = self.glob_params_to_vector().numel()
+        self.n_local = self.loc_params_to_vector().numel()
+        self.sqrt_n_global = math.sqrt(self.n_global)
+        self.sqrt_n_local = math.sqrt(self.n_local)
+        
+        # Modify delta for global and local optimizers
+        self.glob_opt.delta = self.delta * self.sqrt_n_global
+        self.loc_opt.delta = self.delta * self.sqrt_n_local
 
         # Print name of glob_opt and loc_opt
         dprint(
@@ -140,12 +147,10 @@ class APTS_P(APTS_Base):
 
     @torch.no_grad()
     def sync_glob_to_loc(self):
-        self.delta = self.glob_opt.delta
+        self.delta = self.glob_opt.delta / self.sqrt_n_global
         self.update_pytorch_lr()
 
-        self.loc_opt.delta = self.glob_opt.delta
-        if self.norm_type != math.inf and self.nr_models > 1:
-            self.loc_opt.delta /= math.sqrt(self.nr_models)
+        self.loc_opt.delta = self.delta * self.sqrt_n_local
         if hasattr(self.loc_opt, "update_pytorch_lr"):
             self.loc_opt.update_pytorch_lr()
 
@@ -199,12 +204,16 @@ class APTS_P(APTS_Base):
             dist.all_reduce(pred, op=dist.ReduceOp.SUM)
 
         # Perform global control on step and update delta
-        loss, grad, self.glob_opt.delta = self.control_step(step, pred)
+        loss, grad, new_base_delta = self.control_step(step, pred)
+        self.delta = new_base_delta
+
+        # Update global optimizer's delta based on the new base delta    
+        self.glob_opt.delta = new_base_delta * self.sqrt_n_global
 
         # Optional global pass
         if self.glob_pass:
             loss, grad = self.glob_steps(loss, grad)
-
+        
         # Synchronize global and local models and set delta accordingly
         self.sync_glob_to_loc()
 

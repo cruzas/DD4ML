@@ -91,7 +91,7 @@ class LSSR1_TR(Optimizer):
         self.nu_3 = nu_3
         self.nu_4 = nu_4
         self.tol = float(tol)
-        self.norm_type = norm_type
+        self.norm_type = 2
         self.c_1 = c_1
         self.c_2 = c_2
         self.alpha_max = alpha_max
@@ -476,7 +476,7 @@ class LSSR1_TR(Optimizer):
         # Evaluate or retrieve precomputed loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
         g = _["grad"] if "grad" in _ else self._flat_grads_fn()
-        gn = torch.norm(g, p=self.norm_type)
+        gn = torch.norm(g)
 
         if self.sync and self.world_size > 1:
             loss = self._avg_scalar(loss)
@@ -503,6 +503,7 @@ class LSSR1_TR(Optimizer):
         # Solve trust-region subproblem: second-order if memory available, otherwise first-order
         if self.second_order and len(self.hess._S) > 0:
             # pred_red = -(g*p + 0.5*p*B*p)
+            # print(f"Calling solve_tr_second_order with delta={self.delta}, gamma={self.gamma}")
             p_star, pred_red = solve_tr_second_order(
                 gradient=g,
                 grad_norm=gn,

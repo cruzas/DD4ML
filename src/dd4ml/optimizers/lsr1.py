@@ -60,19 +60,37 @@ class LSR1:
         s = _prepare(s)
         y = _prepare(y)
         if s.norm() <= self.tol or y.norm() <= self.tol:
+            # Reject pair - insufficient information
             return
 
+        # SR1 curvature check
         curvature = y.dot(s)
         if abs(curvature) <= self.tol * (torch.norm(s) * torch.norm(y)):
             # Reject pair - insufficient curvature information
             return
 
-        # # Candidate gamma used for degenerate check
-        # gamma_candidate = (y.dot(y) / curvature).clamp_min(self.tol)
-        # if torch.norm(y - gamma_candidate * s) <= self.tol:
-        #     # Skip storing if gamma_candidate is too small
-        #     return
-
+        # Candidate gamma and psi
+        gamma_cand = (y.dot(y) / curvature).clamp_min(self.tol)
+        psi_cand = y - gamma_cand * s
+        if psi_cand.norm() <= self.tol * y.norm():
+            # Reject pair - trivial or degenerate Psi
+            return
+        
+        # If we have an existing Psi, check if the new one is linearly dependent
+        if len(self._S) > 0:
+            S_mat = torch.stack(self._S, dim=1)  # (n, k)
+            Y_mat = torch.stack(self._Y, dim=1)  # (n, k)
+            Psi_mat = Y_mat - self.gamma * S_mat  # (n, k)
+            # Full column QR decomposition of Psi_mat
+            self.Q, _ = torch.linalg.qr(Psi_mat, mode='reduced')
+            # Project psi_cand onto span(Psi_mat)
+            alpha_cand = self.Q.transpose(0,1) @ psi_cand # (k,)
+            psi_res = psi_cand - self.Q @ alpha_cand  # (n,)
+            if psi_res.norm() <= self.tol * psi_cand.norm():
+                # Reject pair - new Psi is linearly dependent on existing Psi
+                print("Rejecting pair: new Psi is linearly dependent on existing Psi.")
+                return
+            
         # Maintain limited memory
         if len(self._S) >= self.memory_length:
             # Remove oldest pair
@@ -84,7 +102,7 @@ class LSR1:
         self._Y.append(y)
 
         # "Adaptive" gamma: use last pair (positive by curvature check)
-        self.gamma = (y.dot(y) / curvature).clamp_min(self.tol)
+        self.gamma = gamma_cand
 
     def precompute(self) -> None:
         """
@@ -132,7 +150,7 @@ class LSR1:
         if self.Psi is None or self.Psi.numel() == 0:
             return self.gamma * v
 
-        # Solve  M*x = Psi^T * v (without forming M)
+        # Solve  M^{-1}*x = Psi^T * v (without forming M)
         # (M^{-1} already stored) -> x = (M^{-1})^{-1} Psi^T * v
         rhs = self.Psi.transpose(0, 1) @ v  # (k,)
         x = torch.linalg.solve(self.Minv, rhs)  # (k,)
