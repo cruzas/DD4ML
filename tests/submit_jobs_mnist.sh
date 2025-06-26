@@ -11,24 +11,24 @@ if $DEBUGGING; then
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
-  BATCH_SIZES=(128)
+  BATCH_SIZES=(1024 2048 4096)
   NUM_SUBD=(8)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="thesis_results"  # wandb project name
-  TRIALS=3                  # Repetitions per configuration
-  partition="normal"        # Slurm partition for normal runs
-  time="01:00:00"           # Time limit for debugging
-  BATCH_SIZES=(128 256 512) # weak: (64 128 256) strong: (128 256 512)
+  PROJECT="thesis_results"     # wandb project name
+  TRIALS=3                     # Repetitions per configuration
+  partition="normal"           # Slurm partition for normal runs
+  time="01:00:00"              # Time limit for debugging
+  BATCH_SIZES=(1024 2048 4096) # weak: (128 256 512) strong: (512 1024 2048)
   NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
 
-USE_PMW=false       # PMW optimizer flag
-GRAD_ACC=false      # Gradient accumulation flag
-SCALING_TYPE="weak" # "weak": scale up batch; "strong": scale down
+USE_PMW=false         # PMW optimizer flag
+GRAD_ACC=false        # Gradient accumulation flag
+SCALING_TYPE="strong" # "weak": scale up batch; "strong": scale down
 
 # Configuration sweeps
 OPTIMIZERS=(apts_p)

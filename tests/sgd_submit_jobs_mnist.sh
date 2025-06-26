@@ -12,28 +12,28 @@ if $DEBUGGING; then
   TRIALS=1
   partition="debug"
   time="00:10:00"
-  BATCH_SIZES=(64)
-  NUM_SUBD=(4)
+  BATCH_SIZES=(128)
+  NUM_SUBD=(1)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="thesis_results"
+  PROJECT="sgd_hyperparam_tuning"
   TRIALS=3
   partition="normal"
-  time="00:50:00"
-  BATCH_SIZES=(64 128 256)
-  NUM_SUBD=(2 4 8)
+  time="00:10:00"
+  BATCH_SIZES=(128 256 512)
+  NUM_SUBD=(1)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
 
 USE_PMW=false
 GRAD_ACC=false
-SCALING_TYPE="strong"
+SCALING_TYPE="weak"
 
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)
-LEARNING_RATES=(0.1 0.01 0.001)
+LEARNING_RATES=(0.001 0.01 0.1)
 
 DATASETS=(mnist)
 MODELS=(simple_cnn)
@@ -42,7 +42,71 @@ MODELS=(simple_cnn)
 
 EVAL_PARAMS=(epochs=5 max_iters=0 criterion=cross_entropy)
 
-# --- Helper functions omitted for brevity --- #
+set_optimizer_params() {
+  local opt="$1"
+  if [[ "$opt" == "apts_ip" ]]; then
+    USE_PMW=true
+    NUM_SUBD=(1)
+    NUM_STAGES=(2)
+    NUM_REP=(1)
+  fi
+}
+
+set_model_params() {
+  local mdl="$1"
+  if [[ "$mdl" == "nanogpt" ]]; then
+    EVAL_PARAMS=(epochs=0 max_iters=2000 criterion=cross_entropy_transformers)
+    BATCH_SIZES=(128)
+  fi
+}
+
+set_grad_acc_params() {
+  if $GRAD_ACC; then
+    ACCUM_STEPS=1
+  fi
+}
+
+set_hardware_params() {
+  if [[ "$(pwd)" == *"/home/"* ]]; then
+    MAX_GPUS=1
+  else
+    MAX_GPUS=4
+  fi
+}
+
+submit_job() {
+  local template="$1" jobfile
+  jobfile=$(mktemp)
+  sed -e "s|\${job_name}|${job_name}|g" \
+    -e "s|\${world_size}|${world_size}|g" \
+    -e "s|\${script}|${SCRIPT}|g" \
+    -e "s|\${num_stages}|${num_stages}|g" \
+    -e "s|\${num_subd}|${num_subd}|g" \
+    -e "s|\${num_rep}|${num_rep}|g" \
+    -e "s|\${ntasks_per_node}|${ntasks_per_node}|g" \
+    -e "s|\${partition}|${partition}|g" \
+    -e "s|\${time}|${time}|g" \
+    "$template" >"$jobfile"
+  if ! sbatch --nodes="${nodes}" "$jobfile"; then
+    echo "ERROR: sbatch failed for $job_name" >&2
+  fi
+  rm -f "$jobfile"
+}
+
+calc_nodes() {
+  for n in $(seq 1 "$world_size"); do
+    local tpn=$((world_size / n))
+    if ((world_size % n == 0 && tpn <= MAX_GPUS)); then
+      echo $n
+      return
+    fi
+  done
+  echo "$world_size"
+}
+
+update_config() {
+  sed -i "/$1:/ {n; s/value: .*/value: $2/}" "$config_file"
+}
 
 # --- Main Sweep Loop --- #
 for optimizer in "${OPTIMIZERS[@]}"; do
@@ -62,6 +126,11 @@ for optimizer in "${OPTIMIZERS[@]}"; do
                   actual_bs=$batch_size
                   eff_bs=$((batch_size / num_subd))
                 fi
+
+                set_optimizer_params "$optimizer"
+                set_model_params "$model"
+                set_grad_acc_params
+                set_hardware_params
 
                 # Iterate over learning rates
                 for lr in "${LEARNING_RATES[@]}"; do
