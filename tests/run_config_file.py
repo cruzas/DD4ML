@@ -76,10 +76,12 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Directory to save models",
     )
     parser.add_argument(
-        "--dataset_name", type=str, default="tinyshakespeare", help="Dataset name"
+        "--dataset_name", type=str, default="mnist", help="Dataset name"
     )
     parser.add_argument("--overlap", type=float, default=0.0, help="Overlap factor")
-    parser.add_argument("--model_name", type=str, default="minigpt", help="Model name")
+    parser.add_argument(
+        "--model_name", type=str, default="simple_cnn", help="Model name"
+    )
     parser.add_argument(
         "--criterion",
         type=str,
@@ -87,7 +89,7 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Criterion name",
     )
     parser.add_argument(
-        "--learning_rate", type=float, default=1.0, help="Learning rate"
+        "--learning_rate", type=float, default=0.01, help="Learning rate"
     )
     parser.add_argument("--delta", type=float, default=0.01, help="Trust-region radius")
     parser.add_argument(
@@ -114,7 +116,7 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Trial number. Used to generate seed for reproducibility.",
     )
     parser.add_argument(
-        "--num_subdomains", type=int, default=2, help="Number of subdomains"
+        "--num_subdomains", type=int, default=1, help="Number of subdomains"
     )
 
     parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")

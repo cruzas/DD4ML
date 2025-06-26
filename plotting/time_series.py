@@ -85,42 +85,55 @@ def main(
     entity="cruzas-universit-della-svizzera-italiana",
     project="thesis_results",
 ):
-    base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
-
     proj = f"{entity}/{project}"
-    group_by = ["optimizer", "num_subdomains"]
-    abbr = {"optimizer": "opt", "num_subdomains": "N"}
-
+    base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     datasets = ["mnist"]
-    batch_sizes = [128, 256, 512]
-
     plots = [
-        ("epoch", "loss"),
-        ("epoch", "accuracy"),
+        # ("epoch", "loss"),
+        # ("epoch", "accuracy"),
         ("grad_evals", "loss"),
         ("grad_evals", "accuracy"),
         ("running_time", "loss"),
         ("running_time", "accuracy"),
     ]
 
-    for dataset, bs in product(datasets, batch_sizes):
-        # build filters per (dataset, batch_size)
-        filters = {
-            "config.dataset_name": dataset,
-            "config.effective_batch_size": bs,
-        }
-        for x_axis, metric in plots:
-            fname = f"{dataset}_effbs_{bs}_{metric}_vs_{x_axis}.pdf"
-            save_path = os.path.join(base_save, fname)
-            plot_time_series(
-                project_path=proj,
-                x_axis=x_axis,
-                metric=metric,
-                filters=filters,
-                group_by=group_by,
-                group_by_abbr=abbr,
-                save_path=save_path,
-            )
+    regimes = {
+        "strong": {
+            "sizes": [1024, 2048, 4096],
+            "base_key": "batch_size",
+            "group_by": ["optimizer", "batch_size", "num_subdomains"],
+            "abbr": {"optimizer": "opt", "batch_size": "bs", "num_subdomains": "N"},
+        },
+        "weak": {
+            "sizes": [128, 256, 512],
+            "base_key": "effective_batch_size",
+            "group_by": ["optimizer", "effective_batch_size", "num_subdomains"],
+            "abbr": {
+                "optimizer": "opt",
+                "effective_batch_size": "effbs",
+                "num_subdomains": "N",
+            },
+        },
+    }
+
+    for regime, cfg in regimes.items():
+        for dataset, size in product(datasets, cfg["sizes"]):
+            filters = {
+                "config.dataset_name": dataset,
+                f"config.{cfg['base_key']}": size,
+            }
+            for x_axis, metric in plots:
+                fname = f"{dataset}_{regime}_bs_{size}_" f"{metric}_vs_{x_axis}.pdf"
+                save_path = os.path.join(base_save, fname)
+                plot_time_series(
+                    project_path=proj,
+                    x_axis=x_axis,
+                    metric=metric,
+                    filters=filters,
+                    group_by=cfg["group_by"],
+                    group_by_abbr=cfg["abbr"],
+                    save_path=save_path,
+                )
 
 
 if __name__ == "__main__":

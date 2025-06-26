@@ -4,23 +4,23 @@ metric:
   goal: minimize
 parameters:
   optimizer: 
-    value: "sgd" # pmw compatible
+    value: "sgd"
   batch_size:
-    value: 64
+    value: 128
   effective_batch_size:
-    value: 64 
+    value: 128 
   epochs: 
-    value: 10 # used for any other model other than LLMs
+    value: 5
   max_iters:
     value: 2000
   learning_rate:
-    value: 0.1
+    values: [0.001, 0.01, 0.1]
   dataset_name: 
-    value: "tinyshakespeare"
+    value: "mnist"
   model_name: 
-    value: "minigpt"
+    value: "simple_cnn"
   criterion:
-    value: "cross_entropy_transformers"
+    value: "cross_entropy"
   seed:
     value: 42
   # For parallel computation
@@ -36,4 +36,3 @@ parameters:
     value: None
   overlap:
     value: 0.0
-  
