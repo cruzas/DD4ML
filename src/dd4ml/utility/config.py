@@ -2,8 +2,11 @@ from .utils import CfgNode
 
 GPT_MODEL_ALIASES = {
     "nanogpt": "gpt-nano",
+    "gptnano": "gpt-nano",
     "microgpt": "gpt-micro",
+    "gptmicro": "gpt-micro",
     "minigpt": "gpt-mini",
+    "gptmini": "gpt-mini",
 }
 
 

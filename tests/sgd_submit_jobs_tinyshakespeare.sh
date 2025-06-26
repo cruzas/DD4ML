@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=false # Set to true for debugging mode
+DEBUGGING=true # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py"
@@ -13,7 +13,7 @@ if $DEBUGGING; then
   partition="debug"
   time="00:10:00"
   BATCH_SIZES=(128)
-  NUM_SUBD=(1)
+  NUM_SUBD=(8)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
@@ -22,7 +22,7 @@ else
   partition="normal"
   time="00:20:00"
   BATCH_SIZES=(128 256 512)
-  NUM_SUBD=(2 4 8)
+  NUM_SUBD=(1)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
@@ -36,7 +36,7 @@ OPTIMIZERS=(sgd)
 LEARNING_RATES=(0.01)
 
 DATASETS=(tinyshakespeare)
-MODELS=(gptmini)
+MODELS=(minigpt)
 
 # (Remove all APTS / TR / dogleg loops – they’re skipped since optimizer=sgd)
 
