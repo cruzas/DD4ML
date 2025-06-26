@@ -7,6 +7,7 @@ GPT_MODEL_ALIASES = {
     "gptmicro": "gpt-micro",
     "minigpt": "gpt-mini",
     "gptmini": "gpt-mini",
+    "gpt2": "gpt2",
 }
 
 

@@ -75,6 +75,7 @@ MODEL_MAP = {
     "nanogpt": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
     "minigpt": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
     "microgpt": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
+    "gpt2": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
 }
 
 CRITERION_MAP = {

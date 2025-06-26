@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=false # Set to true for debugging mode
+DEBUGGING=true # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
@@ -11,9 +11,9 @@ if $DEBUGGING; then
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
-  BATCH_SIZES=(1024 2048 4096)
-  NUM_SUBD=(8)
-  NUM_STAGES=(1)
+  BATCH_SIZES=(512)
+  NUM_SUBD=(1)
+  NUM_STAGES=(8)
   NUM_REP=(1)
 else
   PROJECT="thesis_results"     # wandb project name
@@ -26,25 +26,25 @@ else
   NUM_REP=(1)
 fi
 
-USE_PMW=false         # PMW optimizer flag
-GRAD_ACC=false        # Gradient accumulation flag
-SCALING_TYPE="strong" # "weak": scale up batch; "strong": scale down
+USE_PMW=false       # PMW optimizer flag
+GRAD_ACC=false      # Gradient accumulation flag
+SCALING_TYPE="weak" # "weak": scale up batch; "strong": scale down
 
 # Configuration sweeps
-OPTIMIZERS=(apts_p)
+OPTIMIZERS=(apts_ip)
 DATASETS=(mnist)
 MODELS=(simple_cnn)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(false)
+GLOB_SECOND_ORDERS=(true)
 LOC_SECOND_ORDERS=(false)
 # Dogleg toggles
-GLOB_DOGLEGS=(false)
+GLOB_DOGLEGS=(true)
 LOC_DOGLEGS=(false)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.
-APTS_LOC_OPTS=(lssr1_tr)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and adam*
+APTS_LOC_OPTS=(sgd)       # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and adam*
 FOC_OPTS=(true)
 
 # Evaluation parameters: epochs, max iterations, loss

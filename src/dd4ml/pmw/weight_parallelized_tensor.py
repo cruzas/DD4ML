@@ -308,3 +308,28 @@ class WeightParallelizedTensor(BasePMWModel):
 
         new_wpt.device = self.device  # Ensure the device is set correctly
         return new_wpt
+
+    def abs(self):
+        """
+        Return element-wise absolute value across all shards.
+        """
+        return WeightParallelizedTensor(
+            [p.abs() for p in self.tensor],
+            backend=self.backend,
+            master_group=self.master_group,
+            rank=self.rank,
+        )
+    
+    def max(self, dim=None, keepdim=False):
+        """
+        Compute the global maximum across all shards.
+
+        Only global (``dim is None``) max is implemented.
+        """
+        if dim is not None:
+            raise NotImplementedError("Per-dimension max is not supported yet.")
+        # Local maximum
+        local_max = max(p.max() for p in self.tensor).to(get_device())
+        # Reduce globally
+        dist.all_reduce(local_max, group=self.master_group, op=dist.ReduceOp.MAX)
+        return local_max

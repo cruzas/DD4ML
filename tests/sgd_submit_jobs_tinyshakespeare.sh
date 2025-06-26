@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=true # Set to true for debugging mode
+DEBUGGING=false # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py"
@@ -13,15 +13,15 @@ if $DEBUGGING; then
   partition="debug"
   time="00:10:00"
   BATCH_SIZES=(128)
-  NUM_SUBD=(8)
+  NUM_SUBD=(1)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="thesis_results"
+  PROJECT="sgd_hyperparam_sweep"
   TRIALS=3
   partition="normal"
   time="00:20:00"
-  BATCH_SIZES=(128 256 512)
+  BATCH_SIZES=(1024 2048 4096)
   NUM_SUBD=(1)
   NUM_STAGES=(1)
   NUM_REP=(1)
@@ -29,14 +29,14 @@ fi
 
 USE_PMW=false
 GRAD_ACC=false
-SCALING_TYPE="weak"
+SCALING_TYPE="strong"
 
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)
-LEARNING_RATES=(0.01)
+LEARNING_RATES=(0.001 0.01 0.1)
 
 DATASETS=(tinyshakespeare)
-MODELS=(minigpt)
+MODELS=(nanogpt)
 
 # (Remove all APTS / TR / dogleg loops – they’re skipped since optimizer=sgd)
 

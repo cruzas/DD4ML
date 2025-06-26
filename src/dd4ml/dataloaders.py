@@ -408,6 +408,53 @@ class GeneralizedDistributedDataLoader(DataLoader):
                 )
 
 
+class MockDataset(Dataset):
+    # NOTE: First=True means that the real input data and mock output data will be provided
+    # First=False means that the mock input data and real output data will be provided
+    # First=None means that the mock input and output data will be provided
+    def __init__(self, dataset, amount_of_batches=None, device=None, first=True):
+        """
+        Initializes a MockDataset object.
+
+        Args:
+            dataset: The dataset to be used.
+            amount_of_batches (optional): The number of batches to be used. Defaults to None.
+            device (optional): The device to be used. Defaults to None.
+            first (optional): A boolean indicating if it is the first dataset. Defaults to True.
+        """
+        super(MockDataset, self).__init__()
+        self.amount_of_batches = amount_of_batches
+        self.dataset = dataset
+        self.first = first
+        self.device = device
+
+    def __len__(self):
+        """
+        Returns the number of batches in the dataloader.
+
+        :return: The number of batches.
+        :rtype: int
+        """
+        return self.amount_of_batches
+
+    def __getitem__(self, idx):
+        """
+        Get the item at the specified index.
+
+        Parameters:
+            idx (int): The index of the item to retrieve.
+
+        Returns:
+            tuple: A tuple containing the item at the specified index.
+        """
+        if self.first == True:
+            return (self.dataset[idx][0], 1)
+        elif self.first == False:
+            return (1, self.dataset[idx][1])
+        else:
+            return (1, 1)
+
+
 class GeneralizedDistributedSampler(DistributedSampler):
     def __init__(
         self,

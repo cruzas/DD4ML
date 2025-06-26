@@ -145,7 +145,7 @@ def wait_and_exit(rank: int) -> None:
 def save_model_if_needed(
     trainer, count, frequency, work_dir, project, use_pmw, filename_template
 ):
-    if count % frequency == 0:
+    if count % frequency == 0 and count > 0:
         dprint("Saving model...")
         model_path = os.path.join(
             work_dir, filename_template.format(project=project, count=count)
@@ -245,7 +245,7 @@ def main(
             )
 
     def batch_end_callback(
-        trainer, save_model: bool = True, save_frequency: int = 1000
+        trainer, save_model: bool = True, save_frequency: int = 2000
     ) -> None:
         # Check if delta is present in the optimizer's attributes
         if not hasattr(trainer.optimizer, "delta"):

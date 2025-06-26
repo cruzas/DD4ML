@@ -21,22 +21,22 @@ else
   TRIALS=3
   partition="normal"
   time="00:20:00"
-  BATCH_SIZES=(128 256 512)
-  NUM_SUBD=(2 4 8)
+  BATCH_SIZES=(2048)
+  NUM_SUBD=(2)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
 
 USE_PMW=false
 GRAD_ACC=false
-SCALING_TYPE="weak"
+SCALING_TYPE="strong"
 
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)
 LEARNING_RATES=(0.01)
 
-DATASETS=(tinyshakespeare)
-MODELS=(gptmini)
+DATASETS=(mnist)
+MODELS=(simple_cnn)
 
 # (Remove all APTS / TR / dogleg loops – they’re skipped since optimizer=sgd)
 
@@ -54,8 +54,9 @@ set_optimizer_params() {
 
 set_model_params() {
   local mdl="$1"
-  if [[ "$mdl" == *"gpt"* ]]; then
+  if [[ "$mdl" == "nanogpt" ]]; then
     EVAL_PARAMS=(epochs=0 max_iters=2000 criterion=cross_entropy_transformers)
+    BATCH_SIZES=(128)
   fi
 }
 
