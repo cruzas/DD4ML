@@ -17,12 +17,12 @@ if $DEBUGGING; then
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="sgd_hyperparam_tuning"
+  PROJECT="thesis_results"
   TRIALS=3
   partition="normal"
-  time="00:10:00"
+  time="00:20:00"
   BATCH_SIZES=(128 256 512)
-  NUM_SUBD=(1)
+  NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
@@ -33,7 +33,7 @@ SCALING_TYPE="weak"
 
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)
-LEARNING_RATES=(0.001 0.01 0.1)
+LEARNING_RATES=(0.01)
 
 DATASETS=(mnist)
 MODELS=(simple_cnn)

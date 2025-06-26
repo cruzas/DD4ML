@@ -22,6 +22,15 @@ def plot_time_series(
 ):
     api = wandb.Api()
     runs = api.runs(project_path, filters=filters or {})
+    # Filter out runs with SGD optimizer and num_subdomains != 1
+    runs = [
+        run
+        for run in runs
+        if not (
+            run.config.get("optimizer", "").lower() == "sgd"
+            and run.config.get("num_subdomains", 1) != 1
+        )
+    ]
 
     print(f"Found {len(runs)} runs for filters {filters!r}")
 
