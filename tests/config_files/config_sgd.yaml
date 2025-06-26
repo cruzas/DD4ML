@@ -14,7 +14,7 @@ parameters:
   max_iters:
     value: 2000
   learning_rate:
-    values: [0.001, 0.01, 0.1]
+    value: 0.01
   dataset_name: 
     value: "mnist"
   model_name: 
@@ -34,5 +34,7 @@ parameters:
     value: False
   accumulation_steps:
     value: None
+  batch_inc_factor:
+    value: 1.0
   overlap:
     value: 0.0
