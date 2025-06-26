@@ -93,7 +93,7 @@ def main(
     proj = f"{entity}/{project}"
     datasets = ["mnist"]
     learning_rates = [1e-3, 1e-2, 1e-1]
-    batch_sizes = [128, 256, 512]
+    batch_sizes = [1024, 2048, 4096]
 
     out_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     os.makedirs(out_dir, exist_ok=True)

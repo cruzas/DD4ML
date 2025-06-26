@@ -98,8 +98,6 @@ def main(
     base_save = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     datasets = ["mnist"]
     plots = [
-        # ("epoch", "loss"),
-        # ("epoch", "accuracy"),
         ("grad_evals", "loss"),
         ("grad_evals", "accuracy"),
         ("running_time", "loss"),
