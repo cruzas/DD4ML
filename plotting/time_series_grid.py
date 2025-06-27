@@ -155,7 +155,7 @@ def main():
     proj = f"{entity}/{project}"
     base_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
 
-    datasets = ["tinyshakespeare"]
+    datasets = ["mnist"]
     x_axes = ["grad_evals", "running_time"]
     regimes = {
         "strong": {
