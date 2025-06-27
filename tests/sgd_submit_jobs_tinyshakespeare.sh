@@ -17,26 +17,26 @@ if $DEBUGGING; then
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="sgd_hyperparam_sweep"
+  PROJECT="thesis_results"
   TRIALS=3
   partition="normal"
-  time="00:20:00"
-  BATCH_SIZES=(1024 2048 4096)
-  NUM_SUBD=(1)
+  time="00:35:00"
+  BATCH_SIZES=(128 256 512)
+  NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
 
 USE_PMW=false
 GRAD_ACC=false
-SCALING_TYPE="strong"
+SCALING_TYPE="weak"
 
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)
-LEARNING_RATES=(0.001 0.01 0.1)
+LEARNING_RATES=(0.1)
 
 DATASETS=(tinyshakespeare)
-MODELS=(nanogpt)
+MODELS=(minigpt)
 
 # (Remove all APTS / TR / dogleg loops – they’re skipped since optimizer=sgd)
 

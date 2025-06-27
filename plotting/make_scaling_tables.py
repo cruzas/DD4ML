@@ -28,8 +28,8 @@ def prepare_scaling_table(gdf, group_cols):
         {
             "summary_loss_mean": "loss_mean",
             "summary_loss_std": "loss_std",
-            "summary_accuracy_mean": "acc_mean",
-            "summary_accuracy_std": "acc_std",
+            # "summary_accuracy_mean": "acc_mean",
+            # "summary_accuracy_std": "acc_std",
             "summary_grad_evals_mean": "evals_mean",
             "summary_grad_evals_std": "evals_std",
             "summary_running_time_mean": "time_mean",
@@ -83,8 +83,8 @@ def prepare_scaling_table(gdf, group_cols):
         + [
             "loss_mean",
             "loss_std",
-            "acc_mean",
-            "acc_std",
+            # "acc_mean",
+            # "acc_std",
             "evals_mean",
             "evals_std",
             "time_mean",
@@ -103,9 +103,10 @@ def collect_gdf_all(
     base_key,
     group_keys,
     group_abbrs,
-    metrics=["loss", "accuracy", "grad_evals", "running_time"],
+    # metrics=["loss", "accuracy", "grad_evals", "running_time"],
+    metrics=["loss", "grad_evals", "running_time"],
     aggregate="mean",
-    mad_threshold=3.0,
+    mad_threshold=1e99,
 ):
     """
     Run analyze_wandb_runs_advanced for each (dataset, size) combination,
@@ -116,6 +117,7 @@ def collect_gdf_all(
         filters = {
             "config.dataset_name": dataset,
             f"config.{base_key}": size_val,
+            "config.model_name": "minigpt",
         }
         _, gdf = analyze_wandb_runs_advanced(
             project_path=proj,
@@ -140,59 +142,65 @@ def main(
     project="thesis_results",
 ):
     proj = f"{entity}/{project}"
-    datasets = ["mnist"]
+    datasets = ["tinyshakespeare"]
     strong_sizes = [1024, 2048, 4096]
     weak_sizes = [128, 256, 512]
 
     out_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     os.makedirs(out_dir, exist_ok=True)
 
-    # strong scaling
-    gdf_strong = collect_gdf_all(
-        proj,
-        datasets,
-        strong_sizes,
-        base_key="batch_size",
-        group_keys=["optimizer", "batch_size", "num_subdomains"],
-        group_abbrs=["opt", "bs", "N"],
-    )
-    if gdf_strong is not None:
-        table_strong = prepare_scaling_table(
-            gdf_strong,
-            list(
-                zip(["optimizer", "batch_size", "num_subdomains"], ["opt", "bs", "N"])
-            ),
+    strong = True
+    weak = True
+    if strong:
+        # strong scaling
+        gdf_strong = collect_gdf_all(
+            proj,
+            datasets,
+            strong_sizes,
+            base_key="batch_size",
+            group_keys=["optimizer", "batch_size", "num_subdomains"],
+            group_abbrs=["opt", "bs", "N"],
         )
-        ds_name = "_".join(datasets)
-        path = os.path.join(out_dir, f"{ds_name}_strong_scaling.txt")
-        with open(path, "w") as f:
-            f.write(table_strong.to_string(index=False, float_format="%.4f"))
-        print(f"Saved strong scaling to {path}")
-
-    # weak scaling
-    gdf_weak = collect_gdf_all(
-        proj,
-        datasets,
-        weak_sizes,
-        base_key="effective_batch_size",
-        group_keys=["optimizer", "effective_batch_size", "num_subdomains"],
-        group_abbrs=["opt", "effbs", "N"],
-    )
-    if gdf_weak is not None:
-        table_weak = prepare_scaling_table(
-            gdf_weak,
-            list(
-                zip(
-                    ["optimizer", "effective_batch_size", "num_subdomains"],
-                    ["opt", "effbs", "N"],
-                )
-            ),
+        if gdf_strong is not None:
+            table_strong = prepare_scaling_table(
+                gdf_strong,
+                list(
+                    zip(
+                        ["optimizer", "batch_size", "num_subdomains"],
+                        ["opt", "bs", "N"],
+                    )
+                ),
+            )
+            ds_name = "_".join(datasets)
+            path = os.path.join(out_dir, f"{ds_name}_strong_scaling.txt")
+            with open(path, "w") as f:
+                f.write(table_strong.to_string(index=False, float_format="%.4f"))
+            print(f"Saved strong scaling to {path}")
+    if weak:
+        # weak scaling
+        gdf_weak = collect_gdf_all(
+            proj,
+            datasets,
+            weak_sizes,
+            base_key="effective_batch_size",
+            group_keys=["optimizer", "effective_batch_size", "num_subdomains"],
+            group_abbrs=["opt", "effbs", "N"],
         )
-        ds_name = "_".join(datasets)
-        path = os.path.join(out_dir, f"{ds_name}_weak_scaling.txt")
-        with open(path, "w") as f:
-            f.write(table_weak.to_string(index=False, float_format="%.4f"))
-        print(f"Saved weak scaling to {path}")
+        if gdf_weak is not None:
+            table_weak = prepare_scaling_table(
+                gdf_weak,
+                list(
+                    zip(
+                        ["optimizer", "effective_batch_size", "num_subdomains"],
+                        ["opt", "ebs", "N"],
+                    )
+                ),
+            )
+            ds_name = "_".join(datasets)
+            path = os.path.join(out_dir, f"{ds_name}_weak_scaling.txt")
+            with open(path, "w") as f:
+                f.write(table_weak.to_string(index=False, float_format="%.4f"))
+            print(f"Saved weak scaling to {path}")
 
 
 if __name__ == "__main__":
