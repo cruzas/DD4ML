@@ -117,7 +117,8 @@ def collect_gdf_all(
         filters = {
             "config.dataset_name": dataset,
             f"config.{base_key}": size_val,
-            "config.model_name": "minigpt",
+            # "config.model_name": "minigpt",
+            "config.model_name": "simple_resnet",
         }
         _, gdf = analyze_wandb_runs_advanced(
             project_path=proj,
@@ -142,9 +143,26 @@ def main(
     project="thesis_results",
 ):
     proj = f"{entity}/{project}"
-    datasets = ["tinyshakespeare"]
-    strong_sizes = [1024, 2048, 4096]
-    weak_sizes = [128, 256, 512]
+
+    mnist = False
+    cifar10 = True
+    tinyshakespeare = False
+
+    assert not (mnist and cifar10 and tinyshakespeare), "Only one dataset can be True"
+
+    if mnist:
+        datasets = ["mnist"]
+        strong_sizes = []
+        weak_sizes = [128, 256, 512]
+        strong_sizes = [1024, 2048, 4096]
+    elif cifar10:
+        datasets = ["cifar10"]
+        weak_sizes = [512, 1024, 2048]
+        strong_sizes = [4096, 8192, 16384]
+    else:
+        datasets = ["tinyshakespeare"]
+        weak_sizes = [128, 256, 512]
+        strong_sizes = [1024, 2048, 4096]
 
     out_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     os.makedirs(out_dir, exist_ok=True)

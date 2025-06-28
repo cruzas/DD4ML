@@ -26,8 +26,8 @@ def prepare_hyperparam_table(gdf, group_cols):
         {
             "summary_loss_mean": "loss_mean",
             "summary_loss_std": "loss_std",
-            # "summary_accuracy_mean": "acc_mean",
-            # "summary_accuracy_std": "acc_std",
+            "summary_accuracy_mean": "acc_mean",
+            "summary_accuracy_std": "acc_std",
             "summary_running_time_mean": "time_mean",
             "summary_running_time_std": "time_std",
             "summary_running_time_count": "sample_count",
@@ -39,8 +39,8 @@ def prepare_hyperparam_table(gdf, group_cols):
         "sample_count",
         "loss_mean",
         "loss_std",
-        # "acc_mean",
-        # "acc_std",
+        "acc_mean",
+        "acc_std",
         "time_mean",
         "time_std",
     ]
@@ -62,15 +62,15 @@ def collect_gdf_all(
     Run analyze_wandb_runs_advanced for each hyperparameter combination,
     collect all grouped DataFrames and tag with dataset.
     """
-    # metrics = metrics or ["loss", "accuracy", "running_time"]
-    metrics = ["loss", "running_time"]
+    metrics = metrics or ["loss", "accuracy", "running_time"]
+    # metrics = ["loss", "running_time"]
     all_gdfs = []
     for lr, bs in product(lrs, bss):
         filters = {
             "config.dataset_name": dataset,
             "config.learning_rate": lr,
             "config.batch_size": bs,
-            "config.model_name": "minigpt",
+            # "config.model_name": "minigpt",
         }
         _, gdf = analyze_wandb_runs_advanced(
             project_path=proj,
@@ -90,12 +90,12 @@ def collect_gdf_all(
 
 
 def main(
-    entity="cruzas-universit-della-svizzera-italiana", project="sgd_hyperparam_sweep"
+    entity="cruzas-universit-della-svizzera-italiana", project="cifar10_sgd_sweep"
 ):
     proj = f"{entity}/{project}"
-    datasets = ["tinyshakespeare"]
+    datasets = ["cifar10"]
     learning_rates = [1e-3, 1e-2, 1e-1]
-    batch_sizes = [128, 256, 512, 1024, 2048, 4096]
+    batch_sizes = [512, 1024, 2048, 4096, 8192, 16384]
 
     out_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     os.makedirs(out_dir, exist_ok=True)
@@ -122,8 +122,8 @@ def main(
                 lambda df: {
                     "lr_min_loss": df.loc[df.loss_mean.idxmin(), "lr"],
                     "min_loss": df.loss_mean.min(),
-                    # "lr_max_acc": df.loc[df.acc_mean.idxmax(), "lr"],
-                    # "max_acc": df.acc_mean.max(),
+                    "lr_max_acc": df.loc[df.acc_mean.idxmax(), "lr"],
+                    "max_acc": df.acc_mean.max(),
                 }
             )
             .apply(pd.Series)
