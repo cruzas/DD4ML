@@ -11,37 +11,43 @@ if $DEBUGGING; then
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
+  SCALING_TYPE="strong"
   BATCH_SIZES=(64)
-  NUM_SUBD=()
+  NUM_SUBD=(2)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="thesis_results" # wandb project name
-  TRIALS=1                 # Repetitions per configuration
-  partition="normal"       # Slurm partition for normal runs
-  time="03:30:00"          # Time limit for debugging
-  BATCH_SIZES=(64 128 256)
+  PROJECT="cifar10_results" # wandb project name
+  TRIALS=3                  # Repetitions per configuration
+  partition="normal"        # Slurm partition for normal runs
+  time="01:30:00"           # Time limit for debugging
+  SCALING_TYPE="strong"
+  if [[ "$SCALING_TYPE" == "weak" ]]; then
+    BATCH_SIZES=(512 1024 2048) # For weak scaling, we use smaller batch sizes
+  else
+    # For strong scaling, we use larger batch sizes
+    BATCH_SIZES=(4096 8192 16384)
+  fi
   NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
 
-USE_PMW=false       # PMW optimizer flag
-GRAD_ACC=false      # Gradient accumulation flag
-SCALING_TYPE="weak" # "weak": scale up batch; "strong": scale down
+USE_PMW=false  # PMW optimizer flag
+GRAD_ACC=false # Gradient accumulation flag
 
 # Configuration sweeps
-OPTIMIZERS=(apts_p)
+OPTIMIZERS=(apts_d)
 DATASETS=(cifar10)
 MODELS=(simple_resnet)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(false)
-LOC_SECOND_ORDERS=(false)
+GLOB_SECOND_ORDERS=(true)
+LOC_SECOND_ORDERS=(true)
 
 # Dogleg toggles
-GLOB_DOGLEGS=(false)
-LOC_DOGLEGS=(false)
+GLOB_DOGLEGS=(true)
+LOC_DOGLEGS=(true)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.
@@ -274,6 +280,7 @@ for optimizer in "${OPTIMIZERS[@]}"; do
                                 }
                                 cp "./config_files/config_${optimizer}.yaml" "$config_file"
 
+                                update_config optimizer "$optimizer"
                                 update_config batch_size "$actual_bs"
                                 update_config effective_batch_size "$eff_bs"
                                 update_config dataset_name "$dataset"

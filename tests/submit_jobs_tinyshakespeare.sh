@@ -11,8 +11,8 @@ if $DEBUGGING; then
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
-  SCALING_TYPE="weak"
-  BATCH_SIZES=(4096)
+  SCALING_TYPE="strong"
+  BATCH_SIZES=(1024)
   NUM_SUBD=(8)
   NUM_STAGES=(1)
   NUM_REP=(1)
@@ -20,7 +20,7 @@ else
   PROJECT="thesis_results" # wandb project name
   TRIALS=3                 # Repetitions per configuration
   partition="normal"       # Slurm partition for normal runs
-  time="01:30:00"          # Time limit for debugging
+  time="01:00:00"          # Time limit for debugging
   SCALING_TYPE="strong"
   if [[ "$SCALING_TYPE" == "weak" ]]; then
     BATCH_SIZES=(128 256 512)
@@ -37,16 +37,16 @@ USE_PMW=false  # PMW optimizer flag
 GRAD_ACC=false # Gradient accumulation flag
 
 # Configuration sweeps
-OPTIMIZERS=(apts_p)
+OPTIMIZERS=(apts_d)
 DATASETS=(tinyshakespeare)
 MODELS=(minigpt)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(false)
-LOC_SECOND_ORDERS=(false)
+GLOB_SECOND_ORDERS=(true)
+LOC_SECOND_ORDERS=(true)
 # Dogleg toggles
-GLOB_DOGLEGS=(false)
-LOC_DOGLEGS=(false)
+GLOB_DOGLEGS=(true)
+LOC_DOGLEGS=(true)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.

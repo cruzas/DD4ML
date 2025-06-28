@@ -12,6 +12,7 @@ if $DEBUGGING; then
   TRIALS=1
   partition="debug"
   time="00:10:00"
+  SCALING_TYPE="weak"
   BATCH_SIZES=(128)
   NUM_SUBD=(1)
   NUM_STAGES=(1)
@@ -20,8 +21,16 @@ else
   PROJECT="thesis_results"
   TRIALS=3
   partition="normal"
-  time="00:35:00"
-  BATCH_SIZES=(4096)
+  time="01:00:00"
+  SCALING_TYPE="strong"
+  if [[ "$SCALING_TYPE" == "weak" ]]; then
+    BATCH_SIZES=(128 256 512)
+    LEARNING_RATES=(0.1)
+  else
+    # For strong scaling, we use larger batch sizes
+    BATCH_SIZES=(1024 2048 4096)
+    LEARNING_RATES=(0.01)
+  fi
   NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)
   NUM_REP=(1)
@@ -29,11 +38,11 @@ fi
 
 USE_PMW=false
 GRAD_ACC=false
-SCALING_TYPE="strong"
 
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)
-LEARNING_RATES=(0.1)
+overlap=0.33
+batch_inc_factor=1.5
 
 DATASETS=(tinyshakespeare)
 MODELS=(minigpt)
@@ -136,7 +145,7 @@ for optimizer in "${OPTIMIZERS[@]}"; do
 
                   IFS="=" read -r _ EPOCH_COUNT <<<"${EVAL_PARAMS[0]}"
 
-                  job_name="${optimizer}_${dataset}_${model}_${actual_bs}_epochs_${EPOCH_COUNT}_nsd_${num_subd}_lr_${lr}_trial_${trial}"
+                  job_name="${optimizer}_${dataset}_${model}_${actual_bs}_epochs_${EPOCH_COUNT}_nsd_${num_subd}_lr_${lr}_overlap_${overlap}_bif_${batch_inc_factor}_trial_${trial}"
 
                   world_size=$((num_stages * num_subd * num_rep))
                   nodes=$(calc_nodes)
@@ -149,6 +158,7 @@ for optimizer in "${OPTIMIZERS[@]}"; do
                   }
                   cp "./config_files/config_${optimizer}.yaml" "$config_file"
 
+                  update_config optimizer "$optimizer"
                   update_config batch_size "$actual_bs"
                   update_config effective_batch_size "$eff_bs"
                   update_config dataset_name "$dataset"
@@ -163,6 +173,8 @@ for optimizer in "${OPTIMIZERS[@]}"; do
 
                   update_config num_stages "$num_stages"
                   update_config num_replicas_per_subdomain "$num_rep"
+                  update_config overlap "$overlap"
+                  update_config batch_inc_factor "$batch_inc_factor"
 
                   template=$([[ "$(pwd)" == *"/home/"* ]] && echo rosa.job || echo daintalps.job)
                   [[ ! -f "$template" ]] && {

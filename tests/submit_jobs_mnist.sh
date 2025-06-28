@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=false # Set to true for debugging mode
+DEBUGGING=true # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
@@ -12,8 +12,8 @@ if $DEBUGGING; then
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
   SCALING_TYPE="weak"
-  BATCH_SIZES=(512)
-  NUM_SUBD=(8)
+  BATCH_SIZES=(128)
+  NUM_SUBD=(2)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
@@ -39,16 +39,16 @@ USE_PMW=false  # PMW optimizer flag
 GRAD_ACC=false # Gradient accumulation flag
 
 # Configuration sweeps
-OPTIMIZERS=(apts_p)
+OPTIMIZERS=(apts_d)
 DATASETS=(mnist)
 MODELS=(simple_cnn)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(false)
-LOC_SECOND_ORDERS=(false)
+GLOB_SECOND_ORDERS=(true)
+LOC_SECOND_ORDERS=(true)
 # Dogleg toggles
-GLOB_DOGLEGS=(false)
-LOC_DOGLEGS=(false)
+GLOB_DOGLEGS=(true)
+LOC_DOGLEGS=(true)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.
