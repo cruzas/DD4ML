@@ -275,6 +275,7 @@ def main(
             if save_model:
                 proj = wandb_config.get("project", trial_args["project"])
                 filename = f"{proj}_{apts_id}_iter_{{count}}.pt"
+                    
                 save_model_if_needed(
                     trainer,
                     count=trainer.iter_num,

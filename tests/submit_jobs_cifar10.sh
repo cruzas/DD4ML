@@ -12,7 +12,7 @@ if $DEBUGGING; then
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
   BATCH_SIZES=(64)
-  NUM_SUBD=(2)
+  NUM_SUBD=()
   NUM_STAGES=(1)
   NUM_REP=(1)
 else

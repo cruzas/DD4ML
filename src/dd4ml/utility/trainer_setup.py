@@ -111,11 +111,7 @@ def get_config_model_and_trainer(args, wandb_config):
         device = get_device()
         model.to(device)
 
-        if (
-            all_config.trainer.data_parallel
-            and dist.is_initialized()
-            and dist.get_world_size() > 1
-        ):
+        if dist.is_initialized() and dist.get_world_size() > 1: # and all_config.trainer.data_parallel
             loc_rank = int(os.environ.get("LOCAL_RANK", 0))
             print(
                 f"Rank {dist.get_rank()}, local rank {loc_rank}, cuda available: {torch.cuda.is_available()}"

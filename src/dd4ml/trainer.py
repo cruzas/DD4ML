@@ -137,50 +137,84 @@ class Trainer:
         """Return the number of batches in the current train_loader."""
         return len(self.train_loader)
 
-    def _wrap_grad_counter(self, func):
-        """
-        Return a closure that increments grad_evals by 1/num_batches each call,
-        so that after num_batches batches, grad_evals += 1.
-        """
-
-        def wrapper(*args, **kwargs):
-            num_batches = len(self.train_loader)
-            self.grad_evals += 1.0 / num_batches
-            return func(*args, **kwargs)
-
-        return wrapper
-
     def setup_data_loaders(self):
-        """(Re)create train and test loaders using current_batch_size"""
+        """(Re)create train and test loaders; test loader always has zero overlap."""
         cfg, ds_train, ds_test = self.config, self.train_dataset, self.test_dataset
-        bs = self.current_batch_size
-        overlap = cfg.overlap if hasattr(cfg, "overlap") else 0
-
-        # Check if batch size equals or exceeds dataset
-        if bs >= len(ds_train):
-            print(
-                f"Batch size {bs} >= dataset size {len(ds_train)}; using full dataset as single batch, overlap=0."
-            )
+        # Ensure batch size does not exceed dataset
+        if self.current_batch_size >= len(ds_train):
+            print(f"Batch size {self.current_batch_size} >= dataset size {len(ds_train)}; "
+                "using full dataset as single batch, overlap=0.")
             self.current_batch_size = len(ds_train)
             cfg.overlap = 0
-            bs = self.current_batch_size
-            overlap = 0
+        bs = self.current_batch_size
 
-        # Determine distributed context
         world_size = dist.get_world_size() if dist.is_initialized() else 1
         rank = dist.get_rank() if dist.is_initialized() else 0
 
+        # --- TRAIN LOADER ---
         if cfg.use_pmw:
-            # PMW loader (assuming this is a custom implementation)
             self.train_loader = GeneralizedDistributedDataLoader(
                 model_handler=cfg.model_handler,
                 dataset=ds_train,
                 batch_size=bs,
                 shuffle=False,
-                overlap=overlap,
+                overlap=cfg.overlap,
                 num_workers=cfg.num_workers,
                 pin_memory=True,
             )
+        else:
+            shard_size = math.ceil(len(ds_train) / world_size)
+            pp_bs = bs // world_size
+
+            if pp_bs >= shard_size:
+                print(f"Per-process batch size {pp_bs} >= shard size {shard_size}; "
+                    "shard as single batch, overlap=0.")
+                cfg.overlap = 0
+
+            if pp_bs < 1:
+                raise ValueError(f"Per-process batch size {pp_bs} < 1; increase global batch size.")
+
+            base_train = DistributedSampler(
+                ds_train, num_replicas=world_size, rank=rank, shuffle=True, drop_last=False
+            )
+            train_ov = OverlapBatchSampler(
+                base_sampler=base_train,
+                batch_size=pp_bs,
+                overlap=cfg.overlap,
+                drop_last=False,
+            )
+
+            num_sub = getattr(cfg, "num_subdomains", 1)
+            if num_sub > 1:
+                if cfg.overlap > 0:
+                    train_micro = MicroBatchOverlapSampler(
+                        overlap_sampler=train_ov,
+                        num_subdomains=num_sub,
+                        allow_empty_microbatches=False,
+                    )
+                    train_sampler = MicroBatchFlattenSampler(train_micro)
+                    print(f"Using micro-batching with {num_sub} subdomains and overlap={cfg.overlap}")
+                else:
+                    print(f"Warning: num_subdomains={num_sub} requested but overlap=0. "
+                        "Using regular batching.")
+                    train_sampler = train_ov
+            else:
+                train_sampler = train_ov
+                if cfg.overlap > 0:
+                    print(f"Using overlap={cfg.overlap} between mini-batches (num_subdomains=1)")
+                else:
+                    print("Using regular batching (no overlap, num_subdomains=1)")
+
+            self.train_loader = DataLoader(
+                ds_train,
+                batch_sampler=train_sampler,
+                num_workers=cfg.num_workers,
+                pin_memory=True,
+            )
+            dprint(f"Number of batches in train_loader: {len(self.train_loader)}")
+
+        # --- TEST LOADER (no overlap) ---
+        if cfg.use_pmw:
             self.test_loader = DataLoader(
                 ds_test,
                 batch_size=bs,
@@ -189,121 +223,25 @@ class Trainer:
                 pin_memory=True,
             )
         else:
-            # Per-process batch size
-            pp_bs = bs // world_size
-            shard_size = math.ceil(len(ds_train) / world_size)
-            if pp_bs >= shard_size:
-                print(
-                    f"Per-process batch size {pp_bs} >= shard size {shard_size}; shard as single batch, overlap=0."
-                )
-                overlap = 0
+            shard_size_test = math.ceil(len(ds_test) / world_size)
+            pp_bs_test = bs // world_size
 
-            if pp_bs < 1:
-                raise ValueError(
-                    f"Per-process batch size {pp_bs} < 1; increase global batch size."
-                )
+            if pp_bs_test >= shard_size_test:
+                print(f"Per-process test batch size {pp_bs_test} >= shard size {shard_size_test}; "
+                    "using full shard as single batch.")
+            if pp_bs_test < 1:
+                raise ValueError(f"Per-process test batch size {pp_bs_test} < 1; increase global batch size.")
 
-            # Base distributed samplers
-            base_train = DistributedSampler(
-                ds_train,
-                num_replicas=world_size,
-                rank=rank,
-                shuffle=True,
-                drop_last=False,
-            )
-            base_test = DistributedSampler(
-                ds_test,
-                num_replicas=world_size,
-                rank=rank,
-                shuffle=False,
-                drop_last=False,
-            )
-
-            # Overlap samplers
-            train_ov = OverlapBatchSampler(
-                base_sampler=base_train,
-                batch_size=pp_bs,
-                overlap=overlap,
-                drop_last=False,
-            )
-            test_ov = OverlapBatchSampler(
-                base_sampler=base_test,
-                batch_size=pp_bs,
-                overlap=overlap,
-                drop_last=False,
-            )
-
-            # Micro-batch splitting based on cfg.num_subdomains
-            num_sub = getattr(cfg, "num_subdomains", 1)
-
-            if num_sub > 1:
-                if overlap > 0:
-                    # Create micro-batch samplers with overlap
-                    train_micro = MicroBatchOverlapSampler(
-                        overlap_sampler=train_ov,
-                        num_subdomains=num_sub,
-                        allow_empty_microbatches=False,
-                    )
-                    test_micro = MicroBatchOverlapSampler(
-                        overlap_sampler=test_ov,
-                        num_subdomains=num_sub,
-                        allow_empty_microbatches=False,
-                    )
-
-                    # Use flatten samplers for DataLoader compatibility
-                    train_sampler = MicroBatchFlattenSampler(train_micro)
-                    test_sampler = MicroBatchFlattenSampler(test_micro)
-                    print(
-                        f"Using micro-batching with {num_sub} subdomains and overlap={overlap}"
-                    )
-                else:
-                    # No overlap but subdomains requested - use regular batch samplers
-                    print(
-                        f"Warning: num_subdomains={num_sub} requested but overlap=0. Using regular batching."
-                    )
-                    train_sampler = train_ov
-                    test_sampler = test_ov
-            else:
-                # num_subdomains = 1: Use overlap samplers directly (overlap between mini-batches)
-                train_sampler = train_ov
-                test_sampler = test_ov
-                if overlap > 0:
-                    print(
-                        f"Using overlap={overlap} between mini-batches (num_subdomains=1)"
-                    )
-                else:
-                    print("Using regular batching (no overlap, num_subdomains=1)")
-
-            # DataLoaders
-            self.train_loader = DataLoader(
-                ds_train,
-                batch_sampler=train_sampler,
-                num_workers=cfg.num_workers,
-                pin_memory=True,
-            )
             self.test_loader = DataLoader(
                 ds_test,
-                batch_sampler=test_sampler,
+                batch_size=pp_bs_test,
+                sampler=DistributedSampler(
+                    ds_test, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False
+                ),
                 num_workers=cfg.num_workers,
                 pin_memory=True,
             )
 
-            dprint(f"Number of batches in train_loader: {len(self.train_loader)}")
-
-            # Print debug info
-            if num_sub > 1 and overlap > 0:
-                dprint(
-                    f"Micro-batching active: {num_sub} subdomains with overlap={overlap}"
-                )
-                if hasattr(train_sampler, "micro_batch_sampler"):
-                    overlap_info = train_sampler.micro_batch_sampler.get_overlap_info()
-                    dprint(f"Overlap info: {overlap_info}")
-            elif num_sub == 1 and overlap > 0:
-                print(
-                    f"Mini-batch overlap active: overlap={overlap} between consecutive mini-batches"
-                )
-            else:
-                print("Regular batching (no overlap or micro-batching)")
 
     def _asntr_present(self):
         # Check if ASNTR is the optimizer itself...
@@ -325,6 +263,13 @@ class Trainer:
             and "lssr1_tr" in self.optimizer.glob_opt.__class__.__name__.lower()
         )
         return lssr1_tr_is_glob_opt or lssr1_tr_is_opt
+
+    def _sgd_present(self):
+        """Check if the optimizer is a standard SGD optimizer."""
+        return "sgd" in self.optimizer.__class__.__name__.lower() or (
+            hasattr(self.optimizer, "glob_opt")
+            and "sgd" in self.optimizer.glob_opt.__class__.__name__.lower()
+        )
 
     def _stay_here(self) -> bool:
         """Return True if either optimizer requests to keep the current batch,
@@ -379,7 +324,10 @@ class Trainer:
             and not self.max_batch_size_reached
         )
 
-        if lssr1_tr_cond or asntr_cond:
+        # Condition that must be satisfied for SGD to increase batch size
+        sgd_cond = self._sgd_present() and loss_inc_and_still_not_max_bs
+
+        if lssr1_tr_cond or asntr_cond or sgd_cond:
             new_bs = min(
                 int(math.floor(self.current_batch_size * cfg.batch_inc_factor)),
                 len(self.train_dataset),
@@ -506,46 +454,45 @@ class Trainer:
         )
 
     def compute_accuracy(self):
+        """Compute test accuracy across all processes (and pipeline stages)."""
         model = self.model
         model.eval()
-        correct = 0
-        total = 0
 
+        # local counters
+        correct = torch.tensor(0, device=self.device)
+        total = torch.tensor(0, device=self.device)
+
+        # pipeline conditions
         cond_std = not hasattr(model, "model_handler")
         cond_d_a = (
             hasattr(model, "model_handler") and model.model_handler.is_last_stage()
         )
         cond_d_b = False
         if not cond_std:
-            first_last_stage_rank = model.model_handler.get_stage_ranks(
+            last_rank = model.model_handler.get_stage_ranks(
                 stage_name="last", mode="global"
             )[0]
-            cond_d_b = dist.get_rank() == first_last_stage_rank
+            cond_d_b = dist.get_rank() == last_rank
+
         with torch.no_grad():
-            for _, (x, y) in enumerate(self.test_loader):
+            for x, y in self.test_loader:
                 x, y = x.to(self.device), y.to(self.device)
                 outputs = model(x)
-
                 if not cond_std:
-                    assert len(outputs) == 1
                     outputs = outputs[0]
-
                 if cond_std or (cond_d_a and cond_d_b):
-                    outputs = outputs.to(x.device)
-                    _, predicted = torch.max(outputs, 1)
+                    _, preds = outputs.max(dim=1)
+                    correct += (preds == y).sum()
                     total += y.size(0)
-                    correct += (predicted == y).sum().item()
 
-            if not cond_std:
-                # Broadcast correct and total to all ranks
-                correct = torch.tensor(correct, device=model.tensor_device)
-                total = torch.tensor(total, device=model.tensor_device)
-                dist.broadcast(correct, src=first_last_stage_rank, async_op=False)
-                dist.broadcast(total, src=first_last_stage_rank, async_op=False)
-                correct = correct.item()
-                total = total.item()
+        # aggregate across all GPUs/ranks
+        if dist.is_initialized():
+            dist.all_reduce(correct, op=dist.ReduceOp.SUM)
+            dist.all_reduce(total,   op=dist.ReduceOp.SUM)
 
-            self.accuracy = 100.0 * correct / total
+        self.accuracy = 100.0 * correct.item() / total.item()
+        model.train()
+
 
     @torch.no_grad()
     def compute_current_train_perplexity(self):
@@ -634,9 +581,7 @@ class Trainer:
                 compute_grad=True,
                 grad_norm_clip=self.config.grad_norm_clip,
             )
-            if not hasattr(self.optimizer, "grad_evals"):
-                general = self._wrap_grad_counter(general)
-
+            
             sig = inspect.signature(self.optimizer.step).parameters
             step_args = {}
             if "final_subdomain_closure" in sig:
@@ -670,8 +615,6 @@ class Trainer:
                     compute_grad=True,
                     grad_norm_clip=self.config.grad_norm_clip,
                 )
-                if not hasattr(self.optimizer, "grad_evals"):
-                    closure_d = self._wrap_grad_counter(closure_d)
                 step_args = {
                     "closure_main": general,
                     "closure_d": closure_d,
@@ -681,9 +624,13 @@ class Trainer:
                 step_args = {"closure": general}
 
             result = self.optimizer.step(**step_args)
-            self.grad_evals += getattr(self.optimizer, "grad_evals", 0) / len(
-                self.train_loader
-            )
+            # self.grad_evals += getattr(self.optimizer, "grad_evals", 0) / len(
+            #     self.train_loader
+            # )
+            if hasattr(self.optimizer, "grad_evals"):
+                self.grad_evals += self.optimizer.grad_evals * (bs * self.world_size) / len(self.train_dataset)
+            else:
+                self.grad_evals += 1 * (bs * self.world_size) / len(self.train_dataset)
 
             if isinstance(result, numbers.Number) or (
                 torch.is_tensor(result) and result.ndim == 0
@@ -696,25 +643,26 @@ class Trainer:
         return batch_loss, batch_grad, bs
 
     def run_by_epoch(self):
-        """Run the training loop by epochs."""
-        self.num_training_samples_per_process = (
-            len(self.train_dataset) / self.world_size
-        )
+        """Run the training loop by epochs with correct global loss accumulation."""
+        # each rank processes N/world_size samples per epoch
+        self.num_training_samples_per_process = len(self.train_dataset) / self.world_size
         self.total_start_time = time.time()
         self.epoch_time = time.time()
         self.epoch_num = 0
 
-        dprint(
-            f"Total number of training samples per process: {self.num_training_samples_per_process}"
-        )
+        dprint(f"Total number of training samples per process: {self.num_training_samples_per_process}")
 
         while self.epoch_num <= self.config.epochs:
-            total_loss = 0.0
+            epoch_loss = 0.0
             total_samples = 0
             it = iter(self.train_loader)
-            stay = False
-            first = self.epoch_num == 0
-
+            first = (self.epoch_num == 0)
+            
+            if hasattr(self.train_loader.sampler, "set_epoch"):
+                # Set the epoch for the sampler to shuffle data correctly
+                self.train_loader.sampler.set_epoch(self.epoch_num)
+            
+            # loop until this rank has seen its shard (plus any overlap)
             while total_samples < self.num_training_samples_per_process:
                 try:
                     x, y = next(it)
@@ -723,25 +671,23 @@ class Trainer:
                     x, y = next(it)
 
                 batch_loss, batch_grad, bs = self._train_one_batch(x, y, first)
-
-                total_loss += batch_loss * bs
                 total_samples += bs
 
-                # print(
-                #     f"Total samples processed: {total_samples}/{self.num_training_samples_per_process}"
-                # )
-                self.loss = total_loss / total_samples
+                # weight by global sample count
+                epoch_loss += batch_loss * (bs * self.world_size / len(self.train_dataset))
+                self.loss = epoch_loss
 
                 stay = self._stay_here()
                 if stay:
                     it = chain([(x, y)], it)
                 elif self._asntr_present():
-                    old = len(self.train_loader)
+                    old_n = len(self.train_loader)
                     self._adjust_batch_size(self.loss)
-                    if len(self.train_loader) != old:
+                    if len(self.train_loader) != old_n:
                         it = iter(self.train_loader)
 
-            if self._lssr1_tr_present() and self.epoch_num % 3 == 0:
+            # optional full‐objective adjustment
+            if (self._lssr1_tr_present() or self._sgd_present()) and self.epoch_num % 3 == 0:
                 full = self._eval_full_objective()
                 self._adjust_batch_size(full)
 
@@ -751,6 +697,7 @@ class Trainer:
             self.epoch_time = time.time()
             self.trigger_callbacks("on_epoch_end")
             self.epoch_num += 1
+
 
     def run_by_iter(self):
         cfg = self.config
@@ -778,7 +725,7 @@ class Trainer:
             if self._asntr_present():
                 self._adjust_batch_size(self.loss)
             elif (
-                self._lssr1_tr_present()
+                (self._lssr1_tr_present() or self._sgd_present())
                 and self.iter_num > 0
                 and self.iter_num % cfg.adjust_batch_size_every_iters == 0
             ):

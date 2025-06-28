@@ -21,7 +21,7 @@ else
   TRIALS=3
   partition="normal"
   time="00:35:00"
-  BATCH_SIZES=(128 256 512)
+  BATCH_SIZES=(4096)
   NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)
   NUM_REP=(1)
@@ -29,7 +29,7 @@ fi
 
 USE_PMW=false
 GRAD_ACC=false
-SCALING_TYPE="weak"
+SCALING_TYPE="strong"
 
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=true # Set to true for debugging mode
+DEBUGGING=false # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
@@ -11,40 +11,48 @@ if $DEBUGGING; then
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
+  SCALING_TYPE="weak"
   BATCH_SIZES=(512)
-  NUM_SUBD=(1)
-  NUM_STAGES=(8)
+  NUM_SUBD=(8)
+  NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="thesis_results"     # wandb project name
-  TRIALS=3                     # Repetitions per configuration
-  partition="normal"           # Slurm partition for normal runs
-  time="01:00:00"              # Time limit for debugging
-  BATCH_SIZES=(1024 2048 4096) # weak: (128 256 512) strong: (512 1024 2048)
+  PROJECT="thesis_results" # wandb project name
+  TRIALS=3                 # Repetitions per configuration
+  partition="normal"       # Slurm partition for normal runs
+  time="00:40:00"          # Time limit for debugging
+
+  SCALING_TYPE="strong"
+  if [[ "$SCALING_TYPE" == "weak" ]]; then
+    BATCH_SIZES=(128 256 512)
+  else
+    # For strong scaling, we use larger batch sizes
+    BATCH_SIZES=(1024 2048 4096)
+  fi
+
   NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
 
-USE_PMW=false       # PMW optimizer flag
-GRAD_ACC=false      # Gradient accumulation flag
-SCALING_TYPE="weak" # "weak": scale up batch; "strong": scale down
+USE_PMW=false  # PMW optimizer flag
+GRAD_ACC=false # Gradient accumulation flag
 
 # Configuration sweeps
-OPTIMIZERS=(apts_ip)
+OPTIMIZERS=(apts_p)
 DATASETS=(mnist)
 MODELS=(simple_cnn)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(true)
+GLOB_SECOND_ORDERS=(false)
 LOC_SECOND_ORDERS=(false)
 # Dogleg toggles
-GLOB_DOGLEGS=(true)
+GLOB_DOGLEGS=(false)
 LOC_DOGLEGS=(false)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.
-APTS_LOC_OPTS=(sgd)       # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and adam*
+APTS_LOC_OPTS=(lssr1_tr)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and adam*
 FOC_OPTS=(true)
 
 # Evaluation parameters: epochs, max iterations, loss
@@ -282,6 +290,7 @@ for optimizer in "${OPTIMIZERS[@]}"; do
                                 }
                                 cp "./config_files/config_${optimizer}.yaml" "$config_file"
 
+                                update_config optimizer "$optimizer"
                                 update_config batch_size "$actual_bs"
                                 update_config effective_batch_size "$eff_bs"
                                 update_config dataset_name "$dataset"
