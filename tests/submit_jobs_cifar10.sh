@@ -21,12 +21,12 @@ else
   TRIALS=3                 # Repetitions per configuration
   partition="normal"       # Slurm partition for normal runs
   time="03:30:00"          # Time limit for debugging
-  SCALING_TYPE="weak"
+  SCALING_TYPE="strong"
   if [[ "$SCALING_TYPE" == "weak" ]]; then
     BATCH_SIZES=(256 512 1024) # For weak scaling, we use smaller batch sizes
   else
     # For strong scaling, we use larger batch sizes
-    BATCH_SIZES=(4096 8192 16384)
+    BATCH_SIZES=(2048 4096 8192)
   fi
   NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)

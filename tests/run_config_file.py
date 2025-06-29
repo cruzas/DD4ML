@@ -18,6 +18,8 @@ from dd4ml.utility import (
     set_seed,
 )
 
+from dd4ml.datasets.pinn_poisson import Poisson1DDataset
+
 try:
     import wandb
 
@@ -214,10 +216,15 @@ def main(
         else:
             delta = trainer.optimizer.delta
             thing_to_print = "delta"
-
-        dprint(
-            f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
-        )
+        
+        if isinstance(trainer.train_dataset, Poisson1DDataset):
+            dprint(
+                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4e}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
+            )
+        else:
+            dprint(
+                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
+            )
 
         if rank == 0 and use_wandb:
             log_fn(
