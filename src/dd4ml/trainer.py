@@ -789,11 +789,7 @@ class Trainer:
         
 
     def run_by_epoch_PINN(self):
-        """Simplified epoch loop for PINN datasets."""
-        if isinstance(self.train_dataset, Poisson2DDataset):
-            self.model.input_features = 2
-            
-        
+        """Simplified epoch loop for PINN datasets."""    
         self.num_training_samples_per_process = len(self.train_dataset) / self.world_size
         self.total_start_time = time.time()
         self.epoch_time = time.time()
