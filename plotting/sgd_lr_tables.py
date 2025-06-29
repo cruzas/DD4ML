@@ -91,13 +91,14 @@ def collect_gdf_all(
 
 
 def main(
-    entity="cruzas-universit-della-svizzera-italiana", project="sgd_overlap_sweep_ts"
+    entity="cruzas-universit-della-svizzera-italiana",
+    project="sgd_sweep_overlap",
 ):
     proj = f"{entity}/{project}"
-    datasets = ["tinyshakespeare"]
+    datasets = ["poisson2d"]
     learning_rates = [1e-3, 1e-2, 1e-1]
-    # batch_sizes = [1024, 2048, 4096]
-    batch_sizes = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
+    # batch_sizes = [2048, 4096, 8192]
+    batch_sizes = [64, 128, 256, 512]
 
     out_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     os.makedirs(out_dir, exist_ok=True)
