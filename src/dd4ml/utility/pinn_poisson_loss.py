@@ -4,9 +4,9 @@ import torch.nn as nn
 class PoissonPINNLoss(nn.Module):
     """Loss for 1D Poisson PINN (-u'' = f, u(0)=u(1)=0 with f=sin(pi x))."""
 
-    def __init__(self):
+    def __init__(self, current_x=None):
         super().__init__()
-        self.current_x = None
+        self.current_x = current_x
 
     def forward(self, u_pred, boundary_flag):
         if self.current_x is None:

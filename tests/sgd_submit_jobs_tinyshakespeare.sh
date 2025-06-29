@@ -31,7 +31,7 @@ else
     BATCH_SIZES=(1024 2048 4096)
     LEARNING_RATES=(0.01)
   fi
-  NUM_SUBD=(2 4 8)
+  NUM_SUBD=(8)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
