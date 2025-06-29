@@ -656,6 +656,7 @@ class Trainer:
     def _train_one_batch_PINN(self, x, y, first_grad: bool):
         """Specialized training step for the Poisson PINN dataset."""
         x, y = x.to(self.device), y.to(self.device)
+        x.requires_grad_(True)
         bs = y.size(0)
         if hasattr(self.criterion, "current_x"):
             self.criterion.current_x = x
@@ -808,6 +809,7 @@ class Trainer:
                 epoch_loss += batch_loss * (bs * self.world_size / len(self.train_dataset))
                 self.loss = epoch_loss
 
+            self.accuracy = float("nan")  # PINN datasets do not have accuracy
             self.epoch_dt = time.time() - self.epoch_time
             self.running_time = time.time() - self.total_start_time
             self.epoch_time = time.time()
