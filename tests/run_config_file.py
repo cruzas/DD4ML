@@ -19,6 +19,7 @@ from dd4ml.utility import (
 )
 
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
+from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 
 try:
     import wandb
@@ -217,7 +218,7 @@ def main(
             delta = trainer.optimizer.delta
             thing_to_print = "delta"
         
-        if isinstance(trainer.train_dataset, Poisson1DDataset):
+        if isinstance(trainer.train_dataset, Poisson1DDataset) or isinstance(trainer.train_dataset, Poisson2DDataset):
             dprint(
                 f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4e}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
             )
