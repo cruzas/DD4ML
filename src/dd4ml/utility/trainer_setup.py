@@ -15,6 +15,8 @@ from dd4ml.utility import (
     optimizer_factory,
     print_params_norm,
 )
+from dd4ml.datasets.pinn_poisson import Poisson1DDataset
+from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 
 from .config import get_config, make_std_config, GPT_MODEL_ALIASES
 
@@ -74,6 +76,15 @@ def get_config_model_and_trainer(args, wandb_config):
     test_dataset_config = copy.deepcopy(all_config.data)
     test_dataset_config.train = False
     test_dataset = dataset.__class__(test_dataset_config)
+
+    # Adjust model input dimension for PINN datasets based on the dataset
+    if (
+        hasattr(all_config.model, "input_features")
+        and all_config.model.input_features is not None
+        and isinstance(dataset, (Poisson1DDataset, Poisson2DDataset))
+    ):
+        sample_x, _ = dataset[0]
+        all_config.model.input_features = sample_x.numel()
 
     # Adjust config for text models (e.g., GPT).
     if hasattr(dataset, "vocab_size"):
