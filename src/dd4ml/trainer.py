@@ -18,6 +18,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
+from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure, dprint
 
@@ -375,7 +376,7 @@ class Trainer:
 
     def run(self):
         self.setup_data_loaders()
-        if isinstance(self.train_dataset, Poisson1DDataset):
+        if isinstance(self.train_dataset, (Poisson1DDataset, Poisson2DDataset)):
             self.run_by_epoch_PINN()
         elif self.config.run_by_epoch:
             self.run_by_epoch()
@@ -458,7 +459,7 @@ class Trainer:
 
     def compute_accuracy(self):
         """Compute test accuracy across all processes (and pipeline stages)."""
-        if isinstance(self.test_dataset, Poisson1DDataset):
+        if isinstance(self.test_dataset, (Poisson1DDataset, Poisson2DDataset)):
             self.accuracy = float("nan")
             return
 
@@ -559,8 +560,8 @@ class Trainer:
         x, y = x.to(self.device), y.to(self.device)
         bs = y.size(0)
 
-        # Special handling for Poisson1D PINN dataset
-        if isinstance(self.train_dataset, Poisson1DDataset):
+        # Special handling for PINN datasets
+        if isinstance(self.train_dataset, (Poisson1DDataset, Poisson2DDataset)):
             return self._train_one_batch_PINN(x, y, first_grad)
 
         # optional control batch for ASNTR
