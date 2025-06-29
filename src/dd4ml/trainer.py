@@ -659,6 +659,8 @@ class Trainer:
         x, y = x.to(self.device), y.to(self.device)
         x.requires_grad_(True)
         bs = y.size(0)
+        if hasattr(self.criterion, "current_xy"):
+            self.criterion.current_xy = x
         if hasattr(self.criterion, "current_x"):
             self.criterion.current_x = x
 
