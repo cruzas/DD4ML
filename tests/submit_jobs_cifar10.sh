@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=true # Set to true for debugging mode
+DEBUGGING=false # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
@@ -11,22 +11,22 @@ if $DEBUGGING; then
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
-  SCALING_TYPE="strong"
-  BATCH_SIZES=(64)
+  SCALING_TYPE="weak"
+  BATCH_SIZES=(1024)
   NUM_SUBD=(2)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="cifar10_results" # wandb project name
-  TRIALS=3                  # Repetitions per configuration
-  partition="normal"        # Slurm partition for normal runs
-  time="01:30:00"           # Time limit for debugging
+  PROJECT="thesis_results" # wandb project name
+  TRIALS=3                 # Repetitions per configuration
+  partition="normal"       # Slurm partition for normal runs
+  time="03:30:00"          # Time limit for debugging
   SCALING_TYPE="strong"
   if [[ "$SCALING_TYPE" == "weak" ]]; then
-    BATCH_SIZES=(512 1024 2048) # For weak scaling, we use smaller batch sizes
+    BATCH_SIZES=(256 512 1024) # For weak scaling, we use smaller batch sizes
   else
     # For strong scaling, we use larger batch sizes
-    BATCH_SIZES=(4096 8192 16384)
+    BATCH_SIZES=(2048 4096 8192)
   fi
   NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)
@@ -55,7 +55,7 @@ APTS_LOC_OPTS=(lssr1_tr)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP,
 FOC_OPTS=(true)
 
 # Evaluation parameters: epochs, max iterations, loss
-EVAL_PARAMS=(epochs=25 max_iters=0 criterion=cross_entropy)
+EVAL_PARAMS=(epochs=50 max_iters=0 criterion=cross_entropy)
 
 # Adaptive solver parameters (base)
 APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.33 glob_second_order=false)

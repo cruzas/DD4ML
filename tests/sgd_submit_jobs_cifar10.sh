@@ -11,27 +11,25 @@ if $DEBUGGING; then
   PROJECT="debugging"
   TRIALS=1
   partition="debug"
-  time="00:10:00"
+  time="00:30:00"
   SCALING_TYPE="weak"
-  BATCH_SIZES=(128)
+  BATCH_SIZES=(256 512 1024)
   NUM_SUBD=(1)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="thesis_results"
+  PROJECT="sgd_cifar10_overlap_sweep"
   TRIALS=3
   partition="normal"
-  time="01:00:00"
+  time="00:45:00"
   SCALING_TYPE="strong"
   if [[ "$SCALING_TYPE" == "weak" ]]; then
-    BATCH_SIZES=(128 256 512)
-    LEARNING_RATES=(0.1)
+    BATCH_SIZES=(512 1024) # For weak scaling, we use smaller batch sizes
   else
     # For strong scaling, we use larger batch sizes
-    BATCH_SIZES=(1024 2048 4096)
-    LEARNING_RATES=(0.01)
+    BATCH_SIZES=(2048 4096 8192)
   fi
-  NUM_SUBD=(8)
+  NUM_SUBD=(2 4 8)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
@@ -41,15 +39,16 @@ GRAD_ACC=false
 
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)
+LEARNING_RATES=(0.1)
 overlap=0.33
 batch_inc_factor=1.5
 
-DATASETS=(tinyshakespeare)
-MODELS=(minigpt)
+DATASETS=(cifar10)
+MODELS=(simple_resnet)
 
 # (Remove all APTS / TR / dogleg loops – they’re skipped since optimizer=sgd)
 
-EVAL_PARAMS=(epochs=5 max_iters=0 criterion=cross_entropy)
+EVAL_PARAMS=(epochs=50 max_iters=0 criterion=cross_entropy)
 
 set_optimizer_params() {
   local opt="$1"
@@ -63,8 +62,9 @@ set_optimizer_params() {
 
 set_model_params() {
   local mdl="$1"
-  if [[ "$mdl" == *"gpt"* ]]; then
+  if [[ "$mdl" == "nanogpt" ]]; then
     EVAL_PARAMS=(epochs=0 max_iters=2000 criterion=cross_entropy_transformers)
+    BATCH_SIZES=(128)
   fi
 }
 
@@ -158,7 +158,6 @@ for optimizer in "${OPTIMIZERS[@]}"; do
                   }
                   cp "./config_files/config_${optimizer}.yaml" "$config_file"
 
-                  update_config optimizer "$optimizer"
                   update_config batch_size "$actual_bs"
                   update_config effective_batch_size "$eff_bs"
                   update_config dataset_name "$dataset"

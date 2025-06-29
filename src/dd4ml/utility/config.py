@@ -108,9 +108,10 @@ def get_config(dataset_name: str, model_name: str, optimizer: str):
     # Model configuration via MODEL_MAP.
     from .factory import MODEL_MAP
 
-    key = next((k for k in MODEL_MAP if k in model_name.lower()), None)
-    if key is None:
+    key = model_name.lower()
+    if key not in MODEL_MAP:
         raise ValueError(f"Unknown model name: {model_name}.")
+    
     model_module, model_class_name = MODEL_MAP[key]
     model_module_obj = import_module(model_module)
     model_cls = getattr(model_module_obj, model_class_name)

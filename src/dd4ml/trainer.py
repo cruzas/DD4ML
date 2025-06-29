@@ -18,6 +18,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
+from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure, dprint
 
@@ -375,7 +376,7 @@ class Trainer:
 
     def run(self):
         self.setup_data_loaders()
-        if isinstance(self.train_dataset, Poisson1DDataset):
+        if isinstance(self.train_dataset, (Poisson1DDataset, Poisson2DDataset)):
             self.run_by_epoch_PINN()
         elif self.config.run_by_epoch:
             self.run_by_epoch()
@@ -458,7 +459,7 @@ class Trainer:
 
     def compute_accuracy(self):
         """Compute test accuracy across all processes (and pipeline stages)."""
-        if isinstance(self.test_dataset, Poisson1DDataset):
+        if isinstance(self.test_dataset, (Poisson1DDataset, Poisson2DDataset)):
             self.accuracy = float("nan")
             return
 
@@ -559,8 +560,8 @@ class Trainer:
         x, y = x.to(self.device), y.to(self.device)
         bs = y.size(0)
 
-        # Special handling for Poisson1D PINN dataset
-        if isinstance(self.train_dataset, Poisson1DDataset):
+        # Special handling for PINN datasets
+        if isinstance(self.train_dataset, (Poisson1DDataset, Poisson2DDataset)):
             return self._train_one_batch_PINN(x, y, first_grad)
 
         # optional control batch for ASNTR
@@ -655,7 +656,11 @@ class Trainer:
 
     def _train_one_batch_PINN(self, x, y, first_grad: bool):
         """Specialized training step for the Poisson PINN dataset."""
+        x, y = x.to(self.device), y.to(self.device)
+        x.requires_grad_(True)
         bs = y.size(0)
+        if hasattr(self.criterion, "current_xy"):
+            self.criterion.current_xy = x
         if hasattr(self.criterion, "current_x"):
             self.criterion.current_x = x
 
@@ -780,10 +785,11 @@ class Trainer:
             self.running_time = time.time() - self.total_start_time
             self.epoch_time = time.time()
             self.trigger_callbacks("on_epoch_end")
-        self.epoch_num += 1
+            self.epoch_num += 1
+        
 
     def run_by_epoch_PINN(self):
-        """Simplified epoch loop for PINN datasets."""
+        """Simplified epoch loop for PINN datasets."""    
         self.num_training_samples_per_process = len(self.train_dataset) / self.world_size
         self.total_start_time = time.time()
         self.epoch_time = time.time()
@@ -806,6 +812,7 @@ class Trainer:
                 epoch_loss += batch_loss * (bs * self.world_size / len(self.train_dataset))
                 self.loss = epoch_loss
 
+            self.accuracy = float("nan")  # PINN datasets do not have accuracy
             self.epoch_dt = time.time() - self.epoch_time
             self.running_time = time.time() - self.total_start_time
             self.epoch_time = time.time()

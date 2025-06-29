@@ -10,3 +10,4 @@ from .trainer_setup import *
 from .utils import *
 from .wandb_utils import *
 from .pinn_poisson_loss import PoissonPINNLoss
+from .pinn_poisson2d_loss import Poisson2DPINNLoss
