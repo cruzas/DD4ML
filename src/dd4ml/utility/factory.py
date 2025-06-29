@@ -65,6 +65,7 @@ DATASET_MAP = {
     "mnist": ("dd4ml.datasets.mnist", "MNISTDataset"),
     "cifar10": ("dd4ml.datasets.cifar10", "CIFAR10Dataset"),
     "tinyshakespeare": ("dd4ml.datasets.tinyshakespeare", "TinyShakespeareDataset"),
+    "poisson1d": ("dd4ml.datasets.pinn_poisson", "Poisson1DDataset"),
 }
 
 MODEL_MAP = {
@@ -76,6 +77,7 @@ MODEL_MAP = {
     "minigpt": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
     "microgpt": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
     "gpt2": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
+    "pinn_ffnn": ("dd4ml.models.ffnn.pinn_ffnn", "PINNFFNN"),
 }
 
 CRITERION_MAP = {
@@ -90,6 +92,10 @@ CRITERION_MAP = {
     "cross_entropy_transformers": (
         "",
         lambda ds=None: cross_entropy_transformers,  # Assumes defined elsewhere.
+    ),
+    "pinn_poisson": (
+        "dd4ml.utility.pinn_poisson_loss",
+        "PoissonPINNLoss",
     ),
 }
 

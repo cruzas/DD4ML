@@ -17,6 +17,7 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
+from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure, dprint
 
@@ -374,7 +375,9 @@ class Trainer:
 
     def run(self):
         self.setup_data_loaders()
-        if self.config.run_by_epoch:
+        if isinstance(self.train_dataset, Poisson1DDataset):
+            self.run_by_epoch_PINN()
+        elif self.config.run_by_epoch:
             self.run_by_epoch()
         else:
             self.run_by_iter()
@@ -455,6 +458,10 @@ class Trainer:
 
     def compute_accuracy(self):
         """Compute test accuracy across all processes (and pipeline stages)."""
+        if isinstance(self.test_dataset, Poisson1DDataset):
+            self.accuracy = float("nan")
+            return
+
         model = self.model
         model.eval()
 
@@ -552,6 +559,10 @@ class Trainer:
         x, y = x.to(self.device), y.to(self.device)
         bs = y.size(0)
 
+        # Special handling for Poisson1D PINN dataset
+        if isinstance(self.train_dataset, Poisson1DDataset):
+            return self._train_one_batch_PINN(x, y, first_grad)
+
         # optional control batch for ASNTR
         if self._asntr_present():
             x_d, y_d = self.sample_control_batch(1)
@@ -642,6 +653,79 @@ class Trainer:
 
         return batch_loss, batch_grad, bs
 
+    def _train_one_batch_PINN(self, x, y, first_grad: bool):
+        """Specialized training step for the Poisson PINN dataset."""
+        bs = y.size(0)
+        if hasattr(self.criterion, "current_x"):
+            self.criterion.current_x = x
+
+        x_d = y_d = None
+        if self._asntr_present():
+            x_d, y_d = self.sample_control_batch(1)
+
+        general = closure(
+            x,
+            y,
+            criterion=self.criterion,
+            model=self.model,
+            data_chunks_amount=self.config.data_chunks_amount,
+            compute_grad=True,
+            grad_norm_clip=self.config.grad_norm_clip,
+        )
+
+        sig = inspect.signature(self.optimizer.step).parameters
+        if "final_subdomain_closure" in sig:
+
+            def final_subdomain_closure(outputs, y=y):
+                ys = y.chunk(len(outputs))
+                return [self.criterion(o, yc) for o, yc in zip(outputs, ys)]
+
+            step_args = {
+                "closure": general,
+                "final_subdomain_closure": final_subdomain_closure,
+            }
+        elif any(
+            k in self.optimizer.__class__.__name__.lower() for k in ("apts_d", "apts_p")
+        ):
+            step_args = {
+                "inputs": x,
+                "labels": y,
+                "inputs_d": x_d,
+                "labels_d": y_d,
+                "hNk": self._compute_hNk(),
+            }
+        elif "asntr" in self.optimizer.__class__.__name__.lower():
+            closure_d = closure(
+                x_d,
+                y_d,
+                criterion=self.criterion,
+                model=self.model,
+                data_chunks_amount=1,
+                compute_grad=True,
+                grad_norm_clip=self.config.grad_norm_clip,
+            )
+            step_args = {
+                "closure_main": general,
+                "closure_d": closure_d,
+                "hNk": self._compute_hNk(),
+            }
+        else:
+            step_args = {"closure": general}
+
+        result = self.optimizer.step(**step_args)
+        if hasattr(self.optimizer, "grad_evals"):
+            self.grad_evals += self.optimizer.grad_evals * (bs * self.world_size) / len(self.train_dataset)
+        else:
+            self.grad_evals += 1 * (bs * self.world_size) / len(self.train_dataset)
+
+        if isinstance(result, numbers.Number) or (torch.is_tensor(result) and result.ndim == 0):
+            batch_loss = float(result)
+            batch_grad = None
+        else:
+            batch_loss, batch_grad = result
+
+        return batch_loss, batch_grad, bs
+
     def run_by_epoch(self):
         """Run the training loop by epochs with correct global loss accumulation."""
         # each rank processes N/world_size samples per epoch
@@ -692,6 +776,36 @@ class Trainer:
                 self._adjust_batch_size(full)
 
             self.compute_accuracy()
+            self.epoch_dt = time.time() - self.epoch_time
+            self.running_time = time.time() - self.total_start_time
+            self.epoch_time = time.time()
+            self.trigger_callbacks("on_epoch_end")
+        self.epoch_num += 1
+
+    def run_by_epoch_PINN(self):
+        """Simplified epoch loop for PINN datasets."""
+        self.num_training_samples_per_process = len(self.train_dataset) / self.world_size
+        self.total_start_time = time.time()
+        self.epoch_time = time.time()
+        self.epoch_num = 0
+
+        while self.epoch_num <= self.config.epochs:
+            epoch_loss = 0.0
+            total_samples = 0
+            it = iter(self.train_loader)
+
+            while total_samples < self.num_training_samples_per_process:
+                try:
+                    x, y = next(it)
+                except StopIteration:
+                    it = iter(self.train_loader)
+                    x, y = next(it)
+
+                batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, False)
+                total_samples += bs
+                epoch_loss += batch_loss * (bs * self.world_size / len(self.train_dataset))
+                self.loss = epoch_loss
+
             self.epoch_dt = time.time() - self.epoch_time
             self.running_time = time.time() - self.total_start_time
             self.epoch_time = time.time()
