@@ -4,14 +4,15 @@ import torch.nn as nn
 from .base_ffnn import BaseFFNN
 
 class PINNFFNN(BaseFFNN):
-    """Small fully-connected network for PINN regression tasks."""
+    """Fully‑connected network with at least eight hidden layers for PINN regression."""
 
     @staticmethod
     def get_default_config():
         C = BaseFFNN.get_default_config()
         C.input_features = 1
         C.output_classes = 1
-        C.fc_layers = [20, 20]
+        # Eight hidden layers of width 20
+        C.fc_layers = [20] * 8
         C.dropout_p = 0.0
         return C
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=true # Set to true for debugging mode
+DEBUGGING=false # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py"
@@ -18,17 +18,19 @@ if $DEBUGGING; then
     NUM_STAGES=(1)
     NUM_REP=(1)
 else
-    PROJECT="sgd_sweep_overlap" # thesis_results
+    PROJECT="thesis_results" # thesis_results
     TRIALS=3
     partition="normal"
     time="00:20:00"
 
-    SCALING_TYPE="weak"
+    SCALING_TYPE="strong"
     if [[ "$SCALING_TYPE" == "weak" ]]; then
+        # BATCH_SIZES=(64 128 256)
         BATCH_SIZES=(64)
     else
         # For strong scaling, we use larger batch sizes
-        BATCH_SIZES=(64 128 256)
+        # BATCH_SIZES=(128 256 512)
+        BATCH_SIZES=(512)
     fi
     NUM_SUBD=(2 4 8)
     NUM_STAGES=(1)
@@ -40,7 +42,7 @@ GRAD_ACC=false
 
 # --- Sweep settings: SGD only + one LR --- #
 OPTIMIZERS=(sgd)
-LEARNING_RATES=(0.01)
+LEARNING_RATES=(0.001)
 overlap=0.33
 batch_inc_factor=1.5
 
@@ -49,7 +51,7 @@ MODELS=(pinn_ffnn)
 
 # (Remove all APTS / TR / dogleg loops – they’re skipped since optimizer=sgd)
 
-EVAL_PARAMS=(epochs=1000 max_iters=0 criterion=pinn_poisson2d)
+EVAL_PARAMS=(epochs=500 max_iters=0 criterion=pinn_poisson2d)
 
 set_optimizer_params() {
     local opt="$1"
