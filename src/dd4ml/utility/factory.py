@@ -68,6 +68,7 @@ DATASET_MAP = {
     "poisson1d": ("dd4ml.datasets.pinn_poisson", "Poisson1DDataset"),
     "poisson2d": ("dd4ml.datasets.pinn_poisson2d", "Poisson2DDataset"),
     "poisson3d": ("dd4ml.datasets.pinn_poisson3d", "Poisson3DDataset"),
+    "deeponet_sine": ("dd4ml.datasets.deeponet_sine", "SineOperatorDataset"),
 }
 
 MODEL_MAP = {
@@ -80,6 +81,7 @@ MODEL_MAP = {
     "microgpt": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
     "gpt2": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
     "pinn_ffnn": ("dd4ml.models.ffnn.pinn_ffnn", "PINNFFNN"),
+    "deeponet": ("dd4ml.models.deeponet.deeponet", "DeepONet"),
 }
 
 CRITERION_MAP = {

@@ -20,6 +20,7 @@ from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
+from dd4ml.datasets.deeponet_sine import SineOperatorDataset
 from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure, dprint
 
@@ -371,9 +372,15 @@ class Trainer:
         """Randomly sample a small control batch from the training dataset."""
         idx = torch.randint(0, len(self.train_dataset), (batch_size,))
         xs, ys = zip(*(self.train_dataset[int(i)] for i in idx))
-        xs = torch.stack([torch.as_tensor(x) for x in xs])
-        ys = torch.as_tensor(ys)
-        return xs.to(self.device), ys.to(self.device)
+        if isinstance(xs[0], (tuple, list)):
+            branch, trunk = zip(*xs)
+            branch = torch.stack([torch.as_tensor(b) for b in branch])
+            trunk = torch.stack([torch.as_tensor(t) for t in trunk])
+            xs = (branch, trunk)
+        else:
+            xs = torch.stack([torch.as_tensor(x) for x in xs])
+        ys = torch.stack([torch.as_tensor(y) for y in ys])
+        return self._move_to_device(xs), self._move_to_device(ys)
 
     def run(self):
         self.setup_data_loaders()
@@ -449,7 +456,8 @@ class Trainer:
                 cond_d_b = dist.get_rank() == last_stage_rank
 
             for x, y in eval_loader:
-                x, y = x.to(self.device), y.to(self.device)
+                x = self._move_to_device(x)
+                y = self._move_to_device(y)
                 out = self.model(x)
                 if not cond_std:  # pipeline -> extract the shard
                     out = out[0]
@@ -475,9 +483,17 @@ class Trainer:
             or "apts" in self.optimizer.__class__.__name__.lower()
         )
 
+    def _move_to_device(self, data):
+        if isinstance(data, (list, tuple)):
+            return type(data)(d.to(self.device) for d in data)
+        return data.to(self.device)
+
     def compute_accuracy(self):
         """Compute test accuracy across all processes (and pipeline stages)."""
-        if isinstance(self.test_dataset, (Poisson1DDataset, Poisson2DDataset)):
+        if isinstance(
+            self.test_dataset,
+            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, SineOperatorDataset),
+        ):
             self.accuracy = float("nan")
             return
 
@@ -502,7 +518,8 @@ class Trainer:
 
         with torch.no_grad():
             for x, y in self.test_loader:
-                x, y = x.to(self.device), y.to(self.device)
+                x = self._move_to_device(x)
+                y = self._move_to_device(y)
                 outputs = model(x)
                 if not cond_std:
                     outputs = outputs[0]
@@ -549,7 +566,8 @@ class Trainer:
             cond_d_b = dist.get_rank() == last_stage_rank
 
         for x, y in self.test_loader:
-            x, y = x.to(self.device), y.to(self.device)
+            x = self._move_to_device(x)
+            y = self._move_to_device(y)
             outputs = model(x)
             if not cond_std:
                 outputs = outputs[0]
@@ -575,7 +593,8 @@ class Trainer:
 
     def _train_one_batch(self, x, y, first_grad: bool):
         """Runs forward/backward/step on a single (x,y). Returns (batch_loss, batch_grad, bs)."""
-        x, y = x.to(self.device), y.to(self.device)
+        x = self._move_to_device(x)
+        y = self._move_to_device(y)
         bs = y.size(0)
 
         # Special handling for PINN datasets
@@ -674,7 +693,8 @@ class Trainer:
 
     def _train_one_batch_PINN(self, x, y, first_grad: bool):
         """Specialized training step for the Poisson PINN dataset."""
-        x, y = x.to(self.device), y.to(self.device)
+        x = self._move_to_device(x)
+        y = self._move_to_device(y)
         x.requires_grad_(True)
         if isinstance(self.criterion, Poisson3DDataset):
             y.requires_grad_(True)
