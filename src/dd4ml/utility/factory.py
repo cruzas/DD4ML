@@ -1,5 +1,6 @@
 from .ml_utils import cross_entropy_transformers
 from .utils import import_attr
+from .deeponet_loss import DeepONetMSELoss
 
 
 class Factory:
@@ -110,8 +111,8 @@ CRITERION_MAP = {
         "Poisson3DPINNLoss",
     ),
     "deeponet_mse": (
-        "dd4ml.utility.deeponet_loss",
-        "DeepONetMSELoss",
+        "",
+        lambda ds=None: DeepONetMSELoss(),
     ),
 }
 
