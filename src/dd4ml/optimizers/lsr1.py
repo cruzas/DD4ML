@@ -68,28 +68,35 @@ class LSR1:
         if abs(curvature) <= self.tol * (torch.norm(s) * torch.norm(y)):
             # Reject pair - insufficient curvature information
             return
+        
+        Bs = self.B(s)
+        u = y - Bs
+        denom = u.dot(s)
+        if abs(denom) <= self.tol * s.norm() * u.norm(): 
+            return
 
         # Candidate gamma and psi
         gamma_cand = (y.dot(y) / curvature).clamp_min(self.tol)
-        # psi_cand = y - gamma_cand * s
-        # if psi_cand.norm() <= self.tol * y.norm():
-            # Reject pair - trivial or degenerate Psi
-            # return
+            
+        psi_cand = y - gamma_cand * s
+        if psi_cand.norm() <= self.tol * y.norm():
+            # Reject pair -# trivial or degenerate Psi
+            return
         
         # If we have an existing Psi, check if the new one is linearly dependent
-        # if len(self._S) > 0:
-        #     S_mat = torch.stack(self._S, dim=1)  # (n, k)
-        #     Y_mat = torch.stack(self._Y, dim=1)  # (n, k)
-        #     Psi_mat = Y_mat - self.gamma * S_mat  # (n, k)
-        #     # Full column QR decomposition of Psi_mat
-        #     self.Q, _ = torch.linalg.qr(Psi_mat, mode='reduced')
-        #     # Project psi_cand onto span(Psi_mat)
-        #     alpha_cand = self.Q.transpose(0,1) @ psi_cand # (k,)
-        #     psi_res = psi_cand - self.Q @ alpha_cand  # (n,)
-        #     if psi_res.norm() <= self.tol * psi_cand.norm():
-        #         # Reject pair - new Psi is linearly dependent on existing Psi
-        #         print("Rejecting pair: new Psi is linearly dependent on existing Psi.")
-        #         return
+        if len(self._S) > 0:
+            S_mat = torch.stack(self._S, dim=1)  # (n, k)
+            Y_mat = torch.stack(self._Y, dim=1)  # (n, k)
+            Psi_mat = Y_mat - self.gamma * S_mat  # (n, k)
+            # Full column QR decomposition of Psi_mat
+            self.Q, _ = torch.linalg.qr(Psi_mat, mode='reduced')
+            # Project psi_cand onto span(Psi_mat)
+            alpha_cand = self.Q.transpose(0,1) @ psi_cand # (k,)
+            psi_res = psi_cand - self.Q @ alpha_cand  # (n,)
+            if psi_res.norm() <= self.tol * psi_cand.norm():
+                # Reject pair - new Psi is linearly dependent on existing Psi
+                print("Rejecting pair: new Psi is linearly dependent on existing Psi.")
+                return
             
         # Maintain limited memory
         if len(self._S) >= self.memory_length:
