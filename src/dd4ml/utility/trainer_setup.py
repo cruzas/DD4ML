@@ -17,6 +17,7 @@ from dd4ml.utility import (
 )
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
+from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
 
 from .config import get_config, make_std_config, GPT_MODEL_ALIASES
 
@@ -81,7 +82,7 @@ def get_config_model_and_trainer(args, wandb_config):
     if (
         hasattr(all_config.model, "input_features")
         and all_config.model.input_features is not None
-        and isinstance(dataset, (Poisson1DDataset, Poisson2DDataset))
+        and isinstance(dataset, (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset))
     ):
         sample_x, _ = dataset[0]
         all_config.model.input_features = sample_x.numel()

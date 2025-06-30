@@ -659,6 +659,9 @@ class Trainer:
         """Specialized training step for the Poisson PINN dataset."""
         x, y = x.to(self.device), y.to(self.device)
         x.requires_grad_(True)
+        if isinstance(self.criterion, Poisson3DDataset):
+            y.requires_grad_(True)
+        
         bs = y.size(0)
         if hasattr(self.criterion, "current_xy"):
             self.criterion.current_xy = x
