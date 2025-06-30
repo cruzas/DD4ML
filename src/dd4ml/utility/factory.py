@@ -109,6 +109,10 @@ CRITERION_MAP = {
         "dd4ml.utility.pinn_poisson3d_loss",
         "Poisson3DPINNLoss",
     ),
+    "deeponet_mse": (
+        "dd4ml.utility.deeponet_loss",
+        "DeepONetMSELoss",
+    ),
 }
 
 OPTIMIZER_MAP = {

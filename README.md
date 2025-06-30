@@ -81,8 +81,9 @@ You can extend the library by adding your own files in any of these modules. If 
 
 ### DeepONet Example
 This project includes a basic DeepONet implementation (`deeponet`) together with
-a small synthetic dataset (`deeponet_sine`). To try it out, run
+a small synthetic dataset (`deeponet_sine`). To try it out locally you can run
 `tests/run_config_file.py` with `--model_name deeponet --dataset_name deeponet_sine`.
+For batch testing on a cluster, see `tests/submit_jobs_deeponet.sh`.
 
 ## Note
 In case it's necessary, you may need to run the following:
