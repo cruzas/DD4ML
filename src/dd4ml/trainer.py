@@ -377,14 +377,20 @@ class Trainer:
 
     def run(self):
         self.setup_data_loaders()
-        if isinstance(self.train_dataset, (Poisson1DDataset, Poisson2DDataset)):
+        if isinstance(
+            self.train_dataset,
+            (
+                Poisson1DDataset,
+                Poisson2DDataset,
+                Poisson3DDataset,
+            ),
+        ):
             self.run_by_epoch_PINN()
         elif self.config.run_by_epoch:
             self.run_by_epoch()
         else:
             self.run_by_iter()
 
-    @torch.no_grad()
     def _eval_full_objective(self) -> float:
         """
         Evaluate f(w) = (1/n) Σ_i f_i(w) over the *entire* training set
@@ -395,52 +401,63 @@ class Trainer:
         was_training = self.model.training
         self.model.eval()
 
-        cfg = self.config
-        if cfg.use_pmw:
-            # same class as the training loader
-            eval_loader = GeneralizedDistributedDataLoader(
-                model_handler=cfg.model_handler,
-                dataset=self.train_dataset,
-                batch_size=self.current_batch_size,
-                shuffle=False,
-                overlap=0,
-                num_workers=cfg.num_workers,
-                pin_memory=True,
-            )
-        else:
-            eval_loader = DataLoader(
-                self.train_dataset,
-                batch_size=self.current_batch_size,
-                shuffle=False,
-                num_workers=cfg.num_workers,
-                pin_memory=True,
-            )
-
-        total, n = 0.0, 0
-        crit = self.criterion
-
-        cond_std = not hasattr(self.model, "model_handler")
-        cond_d_a = (
-            hasattr(self.model, "model_handler")
-            and self.model.model_handler.is_last_stage()
+        requires_grad_eval = isinstance(
+            self.train_dataset,
+            (
+                Poisson1DDataset,
+                Poisson2DDataset,
+                Poisson3DDataset,
+            ),
         )
-        cond_d_b = False
-        if not cond_std:  # identify the global rank that owns the last stage
-            last_stage_rank = self.model.model_handler.get_stage_ranks(
-                stage_name="last", mode="global"
-            )[0]
-            cond_d_b = dist.get_rank() == last_stage_rank
+        context = torch.enable_grad if requires_grad_eval else torch.no_grad
 
-        for x, y in eval_loader:
-            x, y = x.to(self.device), y.to(self.device)
-            out = self.model(x)
-            if not cond_std:  # pipeline -> extract the shard
-                out = out[0]
-            if cond_std or (cond_d_a and cond_d_b):
-                loss = crit(out, y).item()
-                bs = y.size(0)
-                total += loss * bs
-                n += bs
+        with context():
+            cfg = self.config
+            if cfg.use_pmw:
+                # same class as the training loader
+                eval_loader = GeneralizedDistributedDataLoader(
+                    model_handler=cfg.model_handler,
+                    dataset=self.train_dataset,
+                    batch_size=self.current_batch_size,
+                    shuffle=False,
+                    overlap=0,
+                    num_workers=cfg.num_workers,
+                    pin_memory=True,
+                )
+            else:
+                eval_loader = DataLoader(
+                    self.train_dataset,
+                    batch_size=self.current_batch_size,
+                    shuffle=False,
+                    num_workers=cfg.num_workers,
+                    pin_memory=True,
+                )
+
+            total, n = 0.0, 0
+            crit = self.criterion
+
+            cond_std = not hasattr(self.model, "model_handler")
+            cond_d_a = (
+                hasattr(self.model, "model_handler")
+                and self.model.model_handler.is_last_stage()
+            )
+            cond_d_b = False
+            if not cond_std:  # identify the global rank that owns the last stage
+                last_stage_rank = self.model.model_handler.get_stage_ranks(
+                    stage_name="last", mode="global"
+                )[0]
+                cond_d_b = dist.get_rank() == last_stage_rank
+
+            for x, y in eval_loader:
+                x, y = x.to(self.device), y.to(self.device)
+                out = self.model(x)
+                if not cond_std:  # pipeline -> extract the shard
+                    out = out[0]
+                if cond_std or (cond_d_a and cond_d_b):
+                    loss = crit(out, y).item()
+                    bs = y.size(0)
+                    total += loss * bs
+                    n += bs
 
         if dist.is_initialized():
             buf = torch.tensor([total, n], device=self.device, dtype=torch.float32)
