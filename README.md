@@ -77,7 +77,12 @@ The src folder is structured as follows:
 - pmw
 - utility
 
-You can extend the library by adding your own files in any of these modules. If you create a new folder within them, make sure to add an ```__init__.py``` file and then re-run ```python3 -m pip install .```, or ```python3 -m pip install --force-reinstall .``` if necessary. 
+You can extend the library by adding your own files in any of these modules. If you create a new folder within them, make sure to add an ```__init__.py``` file and then re-run ```python3 -m pip install .```, or ```python3 -m pip install --force-reinstall .``` if necessary.
+
+### DeepONet Example
+This project includes a basic DeepONet implementation (`deeponet`) together with
+a small synthetic dataset (`deeponet_sine`). To try it out, run
+`tests/run_config_file.py` with `--model_name deeponet --dataset_name deeponet_sine`.
 
 ## Note
 In case it's necessary, you may need to run the following:
