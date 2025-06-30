@@ -19,6 +19,7 @@ from torch.utils.data.distributed import DistributedSampler
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
+from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
 from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure, dprint
 
@@ -561,7 +562,7 @@ class Trainer:
         bs = y.size(0)
 
         # Special handling for PINN datasets
-        if isinstance(self.train_dataset, (Poisson1DDataset, Poisson2DDataset)):
+        if isinstance(self.train_dataset, (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset)):
             return self._train_one_batch_PINN(x, y, first_grad)
 
         # optional control batch for ASNTR
