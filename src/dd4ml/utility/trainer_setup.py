@@ -78,6 +78,13 @@ def get_config_model_and_trainer(args, wandb_config):
     test_dataset_config.train = False
     test_dataset = dataset.__class__(test_dataset_config)
 
+    # Automatically infer branch input dimension for models like DeepONet
+    if getattr(all_config.model, "branch_input_dim", None) is None:
+        if hasattr(dataset, "branch_data") and hasattr(dataset.branch_data, "shape"):
+            all_config.model.branch_input_dim = dataset.branch_data.shape[1]
+        elif hasattr(all_config.data, "n_sensors"):
+            all_config.model.branch_input_dim = all_config.data.n_sensors
+
     # Adjust model input dimension for PINN datasets based on the dataset
     if (
         hasattr(all_config.model, "input_features")
