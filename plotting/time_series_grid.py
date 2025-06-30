@@ -55,6 +55,7 @@ def plot_grid_time_series(
     x_limits: dict[str, tuple[float, float]] | None = None,
     y_limits: dict[str, tuple[float, float]] | None = None,
     save_path: str | None = None,
+    y_log: bool = False,
 ):
     """
     Fetch runs with general + optional per-size SGD filters, then plot time-series grid.
@@ -118,7 +119,11 @@ def plot_grid_time_series(
 
     # Create subplot grid
     fig, axes = plt.subplots(
-        nrows=len(metrics), ncols=len(batch_sizes), figsize=figsize, sharex=True
+        nrows=len(metrics),
+        ncols=len(batch_sizes),
+        figsize=figsize,
+        sharex=True,
+        squeeze=False,
     )
     xlabel_map = {"grad_evals": r"$\#\mathrm{grad}$", "running_time": "time (s)"}
 
@@ -162,6 +167,8 @@ def plot_grid_time_series(
                 ax.set_xlim(*x_limits[x_axis])
             if y_limits and metric in y_limits:
                 ax.set_ylim(*y_limits[metric])
+            if y_log:
+                ax.set_yscale("log")
 
     fig.subplots_adjust(top=0.88)
     plt.tight_layout(rect=[0, 0, 1, 0.88])
@@ -194,7 +201,7 @@ def main():
     proj = f"{entity}/{project}"
     base_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
 
-    datasets = ["tinyshakespeare"]
+    datasets = ["poisson2d"]
     configs = {
         "mnist": {
             "filters": {"config.model_name": "simple_cnn"},
@@ -214,17 +221,17 @@ def main():
         "cifar10": {
             "filters": {"config.model_name": "simple_resnet"},
             "sgd_filters_strong": {
-                4096: {"learning_rate": 1e-2},
-                8192: {"learning_rate": 5e-3},
-                16384: {"learning_rate": 2e-3},
+                2048: {"learning_rate": 0.1},
+                4096: {"learning_rate": 0.1},
+                8192: {"learning_rate": 0.1},
             },
             "sgd_filters_weak": {
-                512: {"learning_rate": 2e-2},
-                1024: {"learning_rate": 1e-2},
-                2048: {"learning_rate": 5e-3},
+                256: {"learning_rate": 0.01},
+                512: {"learning_rate": 0.1},
+                1024: {"learning_rate": 0.1},
             },
-            "x_limits": {"grad_evals": (0, 2e5), "running_time": (0, 2000)},
-            "y_limits": {"loss": (0, 5.0), "accuracy": (0, 1.0)},
+            "x_limits": {"grad_evals": (0, 40), "running_time": (0, 2000)},
+            "y_limits": {"loss": (0, 5.0), "accuracy": (20, 100)},
         },
         "tinyshakespeare": {
             "filters": {"config.model_name": "minigpt"},
@@ -241,31 +248,51 @@ def main():
             "x_limits": {"grad_evals": (0, 5), "running_time": (0, 500)},
             "y_limits": {"loss": (2.0, 3.0), "train_perplexity": (10, 20)},
         },
+        "poisson2d": {
+            "filters": {"config.model_name": "pinn_ffnn"},
+            "sgd_filters_strong": {
+                128: {"learning_rate": 0.001},
+                256: {"learning_rate": 0.10},
+                512: {"learning_rate": 0.001},
+            },
+            "sgd_filters_weak": {
+                64: {"learning_rate": 0.01},
+                128: {"learning_rate": 0.001},
+                256: {"learning_rate": 0.10},
+            },
+            # "x_limits": {"grad_evals": (0, 10), "running_time": (0, 1000)},
+            # "y_limits": {"loss": (0, 1.0), "accuracy": (20, 100)},
+        },
     }
 
     x_axes = ["grad_evals", "running_time"]
-    regimes = {
-        "strong": {
-            "sizes": [1024, 2048, 4096],
-            "base_key": "batch_size",
-            "sgd_key": "sgd_filters_strong",
-        },
-        "weak": {
-            "sizes": [128, 256, 512],
-            "base_key": "effective_batch_size", 
-            "sgd_key": "sgd_filters_weak",
-        },
-    }
 
-    for regime, params in regimes.items():
-        for dataset in datasets:
-            cfg = configs[dataset]
-            fb = {"config.dataset_name": dataset, **cfg["filters"]}
-            metrics = (
-                ["loss", "train_perplexity"]
-                if dataset == "tinyshakespeare"
-                else ["loss", "accuracy"]
-            )
+    for dataset in datasets:
+        cfg = configs[dataset]
+        # build regimes from this dataset’s own sgd_filters
+        regimes = {
+            "strong": {
+                "sizes": sorted(cfg["sgd_filters_strong"].keys()),
+                "base_key": "batch_size",
+                "sgd_key": "sgd_filters_strong",
+            },
+            "weak": {
+                "sizes": sorted(cfg["sgd_filters_weak"].keys()),
+                "base_key": "effective_batch_size",
+                "sgd_key": "sgd_filters_weak",
+            },
+        }
+
+        fb = {"config.dataset_name": dataset, **cfg["filters"]}
+
+        if dataset == "poisson2d":
+            metrics = ["loss"]
+        elif dataset == "tinyshakespeare":
+            metrics = ["loss", "train_perplexity"]
+        else:
+            metrics = ["loss", "accuracy"]
+
+        for regime, params in regimes.items():
             for x_axis in x_axes:
                 fname = f"{dataset}_{regime}_{x_axis}_grid.pdf"
                 save_path = os.path.join(base_dir, fname)
@@ -281,6 +308,7 @@ def main():
                     x_limits=cfg.get("x_limits"),
                     y_limits=cfg.get("y_limits"),
                     save_path=save_path,
+                    y_log=(dataset == "poisson2d"),
                 )
 
 

@@ -67,6 +67,7 @@ DATASET_MAP = {
     "tinyshakespeare": ("dd4ml.datasets.tinyshakespeare", "TinyShakespeareDataset"),
     "poisson1d": ("dd4ml.datasets.pinn_poisson", "Poisson1DDataset"),
     "poisson2d": ("dd4ml.datasets.pinn_poisson2d", "Poisson2DDataset"),
+    "poisson3d": ("dd4ml.datasets.pinn_poisson3d", "Poisson3DDataset"),
 }
 
 MODEL_MAP = {
@@ -101,6 +102,10 @@ CRITERION_MAP = {
     "pinn_poisson2d": (
         "dd4ml.utility.pinn_poisson2d_loss",
         "Poisson2DPINNLoss",
+    ),
+    "pinn_poisson3d": (
+        "dd4ml.utility.pinn_poisson3d_loss",
+        "Poisson3DPINNLoss",
     ),
 }
 

@@ -161,7 +161,7 @@ def main(
     keep_track_of_acc = ["mnist", "cifar10"]
 
     # select dataset
-    choice = "tinyshakespeare"
+    choice = "poisson2d"  # "mnist", "cifar10", "tinyshakespeare", "poisson2d"
     configs = {
         "mnist": {
             "datasets": ["mnist"],
@@ -181,18 +181,18 @@ def main(
         },
         "cifar10": {
             "datasets": ["cifar10"],
-            "strong_sizes": [4096, 8192, 16384],
-            "weak_sizes": [512, 1024, 2048],
-            "filters": {"config.model_name": "resnet"},
+            "strong_sizes": [2048, 4096, 8192],
+            "weak_sizes": [256, 512, 1024],
+            "filters": {"config.model_name": "simple_resnet"},
             "sgd_filters_strong": {
-                4096: {"config.learning_rate": 1e-2},
-                8192: {"config.learning_rate": 5e-3},
-                16384: {"config.learning_rate": 2e-3},
+                2048: {"config.learning_rate": 0.1},
+                4096: {"config.learning_rate": 0.1},
+                8192: {"config.learning_rate": 0.1},
             },
             "sgd_filters_weak": {
-                512: {"config.learning_rate": 2e-2},
-                1024: {"config.learning_rate": 1e-2},
-                2048: {"config.learning_rate": 5e-3},
+                256: {"config.learning_rate": 0.01},
+                512: {"config.learning_rate": 0.1},
+                1024: {"config.learning_rate": 0.1},
             },
         },
         "tinyshakespeare": {
@@ -209,6 +209,22 @@ def main(
                 128: {"config.learning_rate": 0.10},
                 256: {"config.learning_rate": 0.10},
                 512: {"config.learning_rate": 0.10},
+            },
+        },
+        "poisson2d": {
+            "datasets": ["poisson2d"],
+            "strong_sizes": [128, 256, 512],
+            "weak_sizes": [64, 128, 256],
+            "filters": {"config.model_name": "pinn_ffnn"},
+            "sgd_filters_strong": {
+                128: {"config.learning_rate": 0.001},
+                256: {"config.learning_rate": 0.10},
+                512: {"config.learning_rate": 0.001},
+            },
+            "sgd_filters_weak": {
+                64: {"config.learning_rate": 0.01},
+                128: {"config.learning_rate": 0.001},
+                256: {"config.learning_rate": 0.10},
             },
         },
     }
