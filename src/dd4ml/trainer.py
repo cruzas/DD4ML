@@ -663,6 +663,8 @@ class Trainer:
             self.criterion.current_xy = x
         if hasattr(self.criterion, "current_x"):
             self.criterion.current_x = x
+        if hasattr(self.criterion, "current_xyz"):
+            self.criterion.current_xyz = x
 
         x_d = y_d = None
         if self._asntr_present():
