@@ -99,7 +99,13 @@ def closure(
                 return [output for output in outputs]
 
         losses = [0] * data_chunks_amount if has_model_handler else []
-        loss = torch.tensor(0.0, device=inputs.device)
+        if hasattr(inputs, "device"):
+            inp_device = inputs.device
+        elif isinstance(inputs, (list, tuple)) and len(inputs) > 0 and hasattr(inputs[0], "device"):
+            inp_device = inputs[0].device
+        else:
+            inp_device = model.tensor_device if hasattr(model, "tensor_device") else get_device()
+        loss = torch.tensor(0.0, device=inp_device)
 
         if has_model_handler and model.model_handler.is_last_stage():
             for i, out in enumerate(outputs):
