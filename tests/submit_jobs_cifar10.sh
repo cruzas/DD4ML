@@ -17,7 +17,7 @@ if $DEBUGGING; then
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="thesis_results" # wandb project name
+  PROJECT="apts_p_cifar10" # wandb project name
   TRIALS=3                 # Repetitions per configuration
   partition="normal"       # Slurm partition for normal runs
   time="03:30:00"          # Time limit for debugging
@@ -37,17 +37,17 @@ USE_PMW=false  # PMW optimizer flag
 GRAD_ACC=false # Gradient accumulation flag
 
 # Configuration sweeps
-OPTIMIZERS=(apts_d)
+OPTIMIZERS=(apts_p)
 DATASETS=(cifar10)
 MODELS=(simple_resnet)
 
 # Second-order toggles
-GLOB_SECOND_ORDERS=(true)
-LOC_SECOND_ORDERS=(true)
+GLOB_SECOND_ORDERS=(false)
+LOC_SECOND_ORDERS=(false)
 
 # Dogleg toggles
-GLOB_DOGLEGS=(true)
-LOC_DOGLEGS=(true)
+GLOB_DOGLEGS=(false)
+LOC_DOGLEGS=(false)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.
