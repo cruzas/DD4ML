@@ -147,7 +147,7 @@ class SimpleResNet(BaseResNet):
             "relu": {
                 "callable": {
                     "object": nn.ReLU,
-                    "settings": {"inplace": True},
+                    "settings": {"inplace": False},
                 },
                 "dst": {"to": ["maxpool"]},
                 "rcv": {"src": ["bn1"], "strategy": None},
