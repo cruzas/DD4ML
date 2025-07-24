@@ -271,6 +271,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
 
         tot_replicas = model_handler.tot_replicas
         num_stages = model_handler.num_stages
+        world_size = dist.get_world_size()
 
         first_layer_ranks = model_handler.get_stage_ranks(
             stage_name="first", mode="global"
@@ -318,20 +319,45 @@ class GeneralizedDistributedDataLoader(DataLoader):
                 )
         # rank in the middle does not require any real data
         elif rank not in first_layer_ranks + last_layer_ranks:
-            # Make a mock dataset with the same amount of batches as the original dataset (this is needed to keep iterations consistent across all ranks)
-            # amount_of_batches = (
-            #     1 if len(dataset) == batch_size else len(dataset) // batch_size
-            # )
+            # Middle ranks hold mock data just to keep the pipeline synchronized.
             dataset = MockDataset(dataset, len(dataset), device=device, first=None)
-            super(GeneralizedDistributedDataLoader, self).__init__(
+
+            base_sampler = GeneralizedDistributedSampler(
+                layer_ranks=list(range(world_size)),
                 dataset=dataset,
-                batch_size=batch_size // tot_replicas,
+                num_replicas=world_size,
+                rank=rank,
                 shuffle=False,
-                num_workers=num_workers,
-                pin_memory=pin_memory,
                 drop_last=True,
+                seed=seed,
                 **kwargs,
             )
+
+            if overlap:
+                batch_sampler = OverlapBatchSampler(
+                    base_sampler=base_sampler,
+                    batch_size=batch_size // tot_replicas,
+                    overlap=overlap,
+                    drop_last=True,
+                )
+                super(GeneralizedDistributedDataLoader, self).__init__(
+                    dataset=dataset,
+                    batch_sampler=batch_sampler,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    **kwargs,
+                )
+            else:
+                super(GeneralizedDistributedDataLoader, self).__init__(
+                    dataset=dataset,
+                    batch_size=batch_size // tot_replicas,
+                    shuffle=False,
+                    sampler=base_sampler,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    drop_last=True,
+                    **kwargs,
+                )
         elif rank in first_layer_ranks:
             dataset = MockDataset(dataset, len(dataset), device=device, first=True)
             base_sampler = GeneralizedDistributedSampler(
