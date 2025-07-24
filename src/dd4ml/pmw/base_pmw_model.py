@@ -33,7 +33,7 @@ class BasePMWModel(nn.Module):
         #     self.tensor_device = torch.device("mps")
         #     self.default_device = torch.device("mps")
 
-        self.DEBUG = False
+        self.DEBUG = True
 
     def backend_device(self, tensor=torch.tensor([0])):
         backend_device = torch.device("cpu")

@@ -179,13 +179,13 @@ class Trainer:
                 raise ValueError(f"Per-process batch size {pp_bs} < 1; increase global batch size.")
 
             base_train = DistributedSampler(
-                ds_train, num_replicas=world_size, rank=rank, shuffle=True, drop_last=False
+                ds_train, num_replicas=world_size, rank=rank, shuffle=True, drop_last=self._apts_ip_present()
             )
             train_ov = OverlapBatchSampler(
                 base_sampler=base_train,
                 batch_size=pp_bs,
                 overlap=cfg.overlap,
-                drop_last=False,
+                drop_last=self._apts_ip_present(),
             )
 
             num_sub = getattr(cfg, "num_subdomains", 1)
@@ -240,11 +240,15 @@ class Trainer:
                 ds_test,
                 batch_size=pp_bs_test,
                 sampler=DistributedSampler(
-                    ds_test, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False
+                    ds_test, num_replicas=world_size, rank=rank, shuffle=False, drop_last=self._apts_ip_present()
                 ),
                 num_workers=cfg.num_workers,
                 pin_memory=True,
             )
+
+    def _apts_ip_present(self):
+        """Check if APTS_IP is the optimizer itself..."""
+        return "apts_ip" in self.optimizer.__class__.__name__.lower()
 
 
     def _asntr_present(self):

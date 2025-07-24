@@ -73,3 +73,5 @@ parameters:
     value: "SGD"
   paper_tr_update:
     value: False
+  drop_last:
+    value: True # at least for now
