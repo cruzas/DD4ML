@@ -181,8 +181,26 @@ class WeightParallelizedSubdomain(BasePMWModel):
                         device=backend_dev,
                         requires_grad=True,
                     )
+                    if self.DEBUG:
+                        exp_shape = torch.Size(self.shapes[key](num_samples_in_chunk))
+                        print(
+                            f"(FWD rank={self.rank} iter={chunk_id}) expecting {exp_shape} from {src_rank}"
+                        )
                     recv_handle = dist.irecv(tensor=temp, src=src_rank)
                     recv_handle.wait()
+                    if self.DEBUG:
+                        print(
+                            f"(FWD rank={self.rank} iter={chunk_id}) received tensor {tuple(temp.shape)} from {src_rank}"
+                        )
+                    exp_shape = torch.Size(self.shapes[key](num_samples_in_chunk))
+                    if temp.shape != exp_shape:
+                        if self.DEBUG:
+                            print(
+                                f"(FWD rank={self.rank}) shape mismatch: expected {exp_shape}, got {tuple(temp.shape)}. Rebuilding cache"
+                            )
+                        self.shapes[key] = (
+                            lambda z, ts=list(temp.shape[1:]): [z] + ts
+                        )
                     self._ensure_list(self.inputs, key, num_chunks)
                     self.inputs[key][chunk_id] = temp.to(tensor_dev)
             if net_dict["rcv"]["strategy"] is None:
@@ -240,8 +258,16 @@ class WeightParallelizedSubdomain(BasePMWModel):
                             print(
                                 f"(FWD rank={self.rank}) Layer {layer_name} sent a tensor to rank {dst_rank}"
                             )
+                    if self.DEBUG:
+                        print(
+                            f"(FWD rank={self.rank} iter={chunk_id}) sending tensor {tuple(temp.shape)} to {dst_rank}"
+                        )
                     send_handle = dist.isend(tensor=temp, dst=dst_rank)
                     send_handle.wait()
+                    if self.DEBUG:
+                        print(
+                            f"(FWD rank={self.rank} iter={chunk_id}) sent tensor to {dst_rank}"
+                        )
                     self._ensure_list(self.outputs, key, num_chunks)
                     self.outputs[key][chunk_id] = temp.to(tensor_dev)
                 else:

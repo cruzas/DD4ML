@@ -326,9 +326,8 @@ class ModelHandler:
                 }
                 model_ranks = nn_structure[f"sd{sd}"][f"r{rep}"]["ranks"]
                 old_ranks_per_this_stage = 0
-                for s, (stage, layers_in_stage) in enumerate(
-                    self.organized_layers.items()
-                ):
+                for s, stage in enumerate(sorted(self.organized_layers.keys())):
+                    layers_in_stage = self.organized_layers[stage]
                     ranks_per_this_stage = self.net_dict[layers_in_stage[0]][
                         "num_layer_shards"
                     ]

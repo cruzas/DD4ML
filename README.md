@@ -102,5 +102,14 @@ wandb login --relogin --host=http://127.0.0.1
 You will need your API key: https://wandb.ai/authorize
 Once you have done this, your credentials are saved. For more information, please consult: https://docs.wandb.ai/quickstart/
 
+## Troubleshooting
+
+### Pipeline shape mismatches
+If tensors exchanged between stages report unexpected shapes, enable `DEBUG` in
+`WeightParallelizedSubdomain` to log the shapes sent and received each iteration.
+When a mismatch is detected the shape cache is rebuilt automatically. Ensure
+`ModelHandler.create_distributed_model_rank_structure()` sorts stages so each
+layer is assigned to the correct pipeline stage.
+
 ## Funding
 This work was initially supported by the Swiss Platform for Advanced Scientific Computing (PASC) project **ExaTrain** (funding periods 2017-2021 and 2021-2024) and by the Swiss National Science Foundation through the projects "ML<sup>2</sup> -- Multilevel and Domain Decomposition Methods for Machine Learning" (197041) and "Multilevel training of DeepONets -- multiscale and multiphysics applications" (206745). 
