@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=false # Set to true for debugging mode
+DEBUGGING=true # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
@@ -11,7 +11,7 @@ if $DEBUGGING; then
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
-  SCALING_TYPE="weak"
+  SCALING_TYPE="strong"
   BATCH_SIZES=(1024)
   NUM_SUBD=(2)
   NUM_STAGES=(1)
@@ -37,7 +37,7 @@ USE_PMW=false  # PMW optimizer flag
 GRAD_ACC=false # Gradient accumulation flag
 
 # Configuration sweeps
-OPTIMIZERS=(apts_p)
+OPTIMIZERS=(apts_ip)
 DATASETS=(cifar10)
 MODELS=(simple_resnet)
 
@@ -50,9 +50,9 @@ GLOB_DOGLEGS=(false)
 LOC_DOGLEGS=(false)
 
 # APTS solver options to sweep
-APTS_GLOB_OPTS=(lssr1_tr) # options: tr, lssr1_tr, sgd, adam*, etc.
-APTS_LOC_OPTS=(lssr1_tr)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and adam*
-FOC_OPTS=(true)
+APTS_GLOB_OPTS=(TR) # options: tr, lssr1_tr, sgd, adam*, etc.
+APTS_LOC_OPTS=(SGD)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and adam*
+FOC_OPTS=(false)
 
 # Evaluation parameters: epochs, max iterations, loss
 EVAL_PARAMS=(epochs=50 max_iters=0 criterion=cross_entropy)
@@ -66,7 +66,7 @@ set_optimizer_params() {
   if [[ "$opt" == "apts_ip" ]]; then
     USE_PMW=true
     NUM_SUBD=(1)
-    NUM_STAGES=(2)
+    NUM_STAGES=(4)
     NUM_REP=(1)
   fi
 }

@@ -14,7 +14,7 @@ if $DEBUGGING; then
   SCALING_TYPE="strong"
   BATCH_SIZES=(1024)
   NUM_SUBD=(1)
-  NUM_STAGES=(2)
+  NUM_STAGES=(4)
   NUM_REP=(1)
 else
   PROJECT="thesis_results" # wandb project name

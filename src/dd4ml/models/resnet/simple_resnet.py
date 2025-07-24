@@ -77,37 +77,43 @@ class SimpleResNet(BaseResNet):
 
     def __init__(self, config, block=BasicBlock, layers=[2, 2, 2, 2], num_classes=10):
         super().__init__(config)
-        self.backbone = resnet18(pretrained=False)
-        # self.layers_config = layers  # store configuration for use in as_model_dict
-        # self.in_channels = 64
-        # self.start = nn.Conv2d(
-        #     config.input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False
-        # )
-        # self.bn1 = nn.BatchNorm2d(64)
-        # self.relu = nn.ReLU(inplace=True)
-        # self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        # self.layer1 = ResNetLayer(self.in_channels, block, 64, layers[0], stride=1)
-        # self.in_channels = 64 * block.expansion
-        # self.layer2 = ResNetLayer(self.in_channels, block, 128, layers[1], stride=2)
-        # self.in_channels = 128 * block.expansion
-        # self.layer3 = ResNetLayer(self.in_channels, block, 256, layers[2], stride=2)
-        # self.in_channels = 256 * block.expansion
-        # self.layer4 = ResNetLayer(self.in_channels, block, 512, layers[3], stride=2)
-        # self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        # self.flatten = FlattenBlock()
-        # self.finish = nn.Linear(512 * block.expansion, num_classes)
+        # For all others
+        # self.backbone = resnet18(pretrained=False)
+        
+        # For APTS_IP
+        self.layers_config = layers  # store configuration for use in as_model_dict
+        self.in_channels = 64
+        self.start = nn.Conv2d(
+            config.input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False
+        )
+        self.bn1 = nn.BatchNorm2d(64)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.layer1 = ResNetLayer(self.in_channels, block, 64, layers[0], stride=1)
+        self.in_channels = 64 * block.expansion
+        self.layer2 = ResNetLayer(self.in_channels, block, 128, layers[1], stride=2)
+        self.in_channels = 128 * block.expansion
+        self.layer3 = ResNetLayer(self.in_channels, block, 256, layers[2], stride=2)
+        self.in_channels = 256 * block.expansion
+        self.layer4 = ResNetLayer(self.in_channels, block, 512, layers[3], stride=2)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.flatten = FlattenBlock()
+        self.finish = nn.Linear(512 * block.expansion, num_classes)
 
     def forward(self, x):
-        return self.backbone(x)
-        # x = self.relu(self.bn1(self.start(x)))
-        # x = self.maxpool(x)
-        # x = self.layer1(x)
-        # x = self.layer2(x)
-        # x = self.layer3(x)
-        # x = self.layer4(x)
-        # x = self.avgpool(x)
-        # x = self.flatten(x)
-        # return self.finish(x)
+        # For APTS_IP
+        # return self.backbone(x)
+        
+        # For all others
+        x = self.relu(self.bn1(self.start(x)))
+        x = self.maxpool(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.avgpool(x)
+        x = self.flatten(x)
+        return self.finish(x)
 
     def as_model_dict(self):
         model_dict = {
