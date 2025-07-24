@@ -105,18 +105,29 @@ set_apts_lssr1_tr_params() {
     )
     if [[ "$opt" != "lssr1_tr" ]]; then
       APTS_PARAMS+=(glob_opt=lssr1_tr max_glob_iters=1 glob_second_order=true
-        loc_opt=lssr1_tr max_loc_iters=3 loc_second_order=true)
+                    loc_opt=lssr1_tr max_loc_iters=3 loc_second_order=true)
       case "$opt" in
-      apts_d) APTS_PARAMS+=(glob_pass=true foc=true) ;;
-      apts_p) APTS_PARAMS+=(glob_pass=true) ;;
-      apts_ip) APTS_PARAMS+=(loc_opt=sgd loc_second_order=false glob_pass=true) ;;
-      tr) APTS_PARAMS+=(glob_second_order=false) ;;
+        apts_d)
+          APTS_PARAMS+=(glob_pass=true foc=true)
+          ;;
+        apts_p)
+          APTS_PARAMS+=(glob_pass=true)
+          ;;
+        apts_ip)
+          # override defaults for apts_ip
+          APTS_PARAMS+=(batch_inc_factor=1.0 overlap=0.0)
+          APTS_PARAMS+=(loc_opt=sgd loc_second_order=false glob_pass=true)
+          ;;
+        tr)
+          APTS_PARAMS+=(glob_second_order=false)
+          ;;
       esac
     else
       APTS_PARAMS+=(glob_second_order=false)
     fi
   fi
 }
+
 
 extract_apts_details() {
   APTS_GLOB_OPT="none"
