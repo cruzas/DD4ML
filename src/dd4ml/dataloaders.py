@@ -319,13 +319,13 @@ class GeneralizedDistributedDataLoader(DataLoader):
         # rank in the middle does not require any real data
         elif rank not in first_layer_ranks + last_layer_ranks:
             # Make a mock dataset with the same amount of batches as the original dataset (this is needed to keep iterations consistent across all ranks)
-            amount_of_batches = (
-                1 if len(dataset) == batch_size else len(dataset) // batch_size
-            )
-            dataset = MockDataset(dataset, amount_of_batches, device=device, first=None)
+            # amount_of_batches = (
+            #     1 if len(dataset) == batch_size else len(dataset) // batch_size
+            # )
+            dataset = MockDataset(dataset, len(dataset), device=device, first=None)
             super(GeneralizedDistributedDataLoader, self).__init__(
                 dataset=dataset,
-                batch_size=1,
+                batch_size=batch_size // tot_replicas,
                 shuffle=False,
                 num_workers=num_workers,
                 pin_memory=pin_memory,

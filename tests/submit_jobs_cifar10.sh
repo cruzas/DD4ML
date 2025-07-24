@@ -115,7 +115,7 @@ set_apts_lssr1_tr_params() {
           ;;
         apts_ip)
           # override defaults for apts_ip
-          APTS_PARAMS+=(batch_inc_factor=1.0 overlap=0.0)
+          APTS_PARAMS+=(batch_inc_factor=1.0 overlap=0.25)
           APTS_PARAMS+=(loc_opt=sgd loc_second_order=false glob_pass=true)
           ;;
         tr)
