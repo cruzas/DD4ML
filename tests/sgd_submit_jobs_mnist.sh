@@ -13,7 +13,7 @@ if $DEBUGGING; then
     partition="debug"
     time="00:10:00"
     SCALING_TYPE="strong" # weak or strong
-    BATCH_SIZES=(1024)
+    BATCH_SIZES=(10000)
     NUM_SUBD=(1)
     NUM_STAGES=(1)
     NUM_REP=(1)

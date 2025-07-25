@@ -320,7 +320,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
         # rank in the middle does not require any real data
         elif rank not in first_layer_ranks + last_layer_ranks:
             # Middle ranks hold mock data just to keep the pipeline synchronized.
-            dataset = MockDataset(dataset, len(dataset), device=device, first=None)
+            # dataset = MockDataset(dataset, len(dataset), device=device, first=None)
 
             base_sampler = GeneralizedDistributedSampler(
                 layer_ranks=list(range(world_size)),
@@ -359,7 +359,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
                     **kwargs,
                 )
         elif rank in first_layer_ranks:
-            dataset = MockDataset(dataset, len(dataset), device=device, first=True)
+            # dataset = MockDataset(dataset, len(dataset), device=device, first=True)
             base_sampler = GeneralizedDistributedSampler(
                 layer_ranks=first_layer_ranks,
                 dataset=dataset,
@@ -396,7 +396,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
                     **kwargs,
                 )
         else:
-            dataset = MockDataset(dataset, len(dataset), device=device, first=False)
+            # dataset = MockDataset(dataset, len(dataset), device=device, first=False)
             base_sampler = GeneralizedDistributedSampler(
                 layer_ranks=last_layer_ranks,
                 dataset=dataset,

@@ -781,11 +781,14 @@ class Trainer:
     def run_by_epoch(self):
         """Run the training loop by epochs with correct global loss accumulation."""
         # each rank processes N/world_size samples per epoch
-        self.num_training_samples_per_process = len(self.train_dataset) / self.world_size
         self.total_start_time = time.time()
         self.epoch_time = time.time()
         self.epoch_num = 0
 
+        if not self._apts_ip_present():
+            self.num_training_samples_per_process = len(self.train_dataset) / self.world_size
+        else:
+            self.num_training_samples_per_process = len(self.train_dataset)
         dprint(f"Total number of training samples per process: {self.num_training_samples_per_process}")
 
         while self.epoch_num <= self.config.epochs:
@@ -856,6 +859,7 @@ class Trainer:
 
                 batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, False)
                 total_samples += bs
+                print(f"Rank {dist.get_rank()}: number of samples processed: {total_samples}")
                 epoch_loss += batch_loss * (bs * self.world_size / len(self.train_dataset))
                 self.loss = epoch_loss
 
