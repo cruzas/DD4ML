@@ -680,10 +680,16 @@ class Trainer:
             # self.grad_evals += getattr(self.optimizer, "grad_evals", 0) / len(
             #     self.train_loader
             # )
-            if hasattr(self.optimizer, "grad_evals"):
-                self.grad_evals += self.optimizer.grad_evals * (bs * self.world_size) / len(self.train_dataset)
+            if not self._apts_ip_present():
+                if hasattr(self.optimizer, "grad_evals"):
+                    self.grad_evals += self.optimizer.grad_evals * (bs * self.world_size) / len(self.train_dataset)
+                else:
+                    self.grad_evals += 1 * (bs * self.world_size) / len(self.train_dataset)
             else:
-                self.grad_evals += 1 * (bs * self.world_size) / len(self.train_dataset)
+                if hasattr(self.optimizer, "grad_evals"):
+                    self.grad_evals += self.optimizer.grad_evals * bs / len(self.train_dataset)
+                else:
+                    self.grad_evals += 1 * bs / len(self.train_dataset)
 
             if isinstance(result, numbers.Number) or (
                 torch.is_tensor(result) and result.ndim == 0

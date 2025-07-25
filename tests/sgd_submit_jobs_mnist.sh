@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=true # Set to true for debugging mode
+DEBUGGING=false # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py"
@@ -18,19 +18,19 @@ if $DEBUGGING; then
     NUM_STAGES=(1)
     NUM_REP=(1)
 else
-    PROJECT="sgd_sweep_overlap" # thesis_results
+    PROJECT="gamm2025sgd" # thesis_results
     TRIALS=3
     partition="normal"
-    time="00:20:00"
+    time="01:00:00"
 
-    SCALING_TYPE="weak"
+    SCALING_TYPE="strong"
     if [[ "$SCALING_TYPE" == "weak" ]]; then
         BATCH_SIZES=(128)
     else
         # For strong scaling, we use larger batch sizes
-        BATCH_SIZES=(128 256 512 1024 2048 4096)
+        BATCH_SIZES=(10000)
     fi
-    NUM_SUBD=(2 4 8)
+    NUM_SUBD=(1)
     NUM_STAGES=(1)
     NUM_REP=(1)
 fi
@@ -40,7 +40,7 @@ GRAD_ACC=false
 
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)
-LEARNING_RATES=(0.01)
+LEARNING_RATES=(0.001 0.01 0.1)
 overlap=0.0
 batch_inc_factor=1.0
 
@@ -49,14 +49,14 @@ MODELS=(medium_ffnn)
 
 # (Remove all APTS / TR / dogleg loops – they’re skipped since optimizer=sgd)
 
-EVAL_PARAMS=(epochs=10 max_iters=0 criterion=cross_entropy)
+EVAL_PARAMS=(epochs=100 max_iters=0 criterion=cross_entropy)
 
 set_optimizer_params() {
     local opt="$1"
     if [[ "$opt" == "apts_ip" ]]; then
         USE_PMW=true
         NUM_SUBD=(1)
-        NUM_STAGES=(2)
+        NUM_STAGES=(1)
         NUM_REP=(1)
     fi
 }

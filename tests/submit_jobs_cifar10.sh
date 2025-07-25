@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=true # Set to true for debugging mode
+DEBUGGING=false # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
@@ -13,22 +13,22 @@ if $DEBUGGING; then
   time="00:10:00"     # Time limit for debugging
   SCALING_TYPE="strong"
   BATCH_SIZES=(200)
-  NUM_SUBD=(2)
+  NUM_SUBD=(1)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="apts_p_cifar10" # wandb project name
+  PROJECT="gamm2025" # wandb project name
   TRIALS=3                 # Repetitions per configuration
   partition="normal"       # Slurm partition for normal runs
-  time="03:30:00"          # Time limit for debugging
+  time="01:00:00"          # Time limit for debugging
   SCALING_TYPE="strong"
   if [[ "$SCALING_TYPE" == "weak" ]]; then
     BATCH_SIZES=(256 512 1024) # For weak scaling, we use smaller batch sizes
   else
     # For strong scaling, we use larger batch sizes
-    BATCH_SIZES=(2048 4096 8192)
+    BATCH_SIZES=(200)
   fi
-  NUM_SUBD=(2 4 8)
+  NUM_SUBD=(1)
   NUM_STAGES=(1)
   NUM_REP=(1)
 fi
@@ -39,7 +39,7 @@ GRAD_ACC=false # Gradient accumulation flag
 # Configuration sweeps
 OPTIMIZERS=(apts_ip)
 DATASETS=(cifar10)
-MODELS=(big_resnet)
+MODELS=(simple_resnet)
 
 # Second-order toggles
 GLOB_SECOND_ORDERS=(false)
@@ -66,7 +66,7 @@ set_optimizer_params() {
   if [[ "$opt" == "apts_ip" ]]; then
     USE_PMW=true
     NUM_SUBD=(1)
-    NUM_STAGES=(4)
+    NUM_STAGES=(2 4 8)
     NUM_REP=(1)
   fi
 }

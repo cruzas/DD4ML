@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=true # Set to true for debugging mode
+DEBUGGING=false # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
@@ -17,21 +17,21 @@ if $DEBUGGING; then
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="thesis_results" # wandb project name
+  PROJECT="gamm2025" # wandb project name
   TRIALS=3                 # Repetitions per configuration
   partition="normal"       # Slurm partition for normal runs
-  time="00:40:00"          # Time limit for debugging
+  time="01:00:00"          # Time limit for debugging
 
   SCALING_TYPE="strong"
   if [[ "$SCALING_TYPE" == "weak" ]]; then
     BATCH_SIZES=(128 256 512)
   else
     # For strong scaling, we use larger batch sizes
-    BATCH_SIZES=(1024 2048 4096)
+    BATCH_SIZES=(10000)
   fi
 
-  NUM_SUBD=(2 4 8)
-  NUM_STAGES=(1)
+  NUM_SUBD=(1)
+  NUM_STAGES=(2 4 8)
   NUM_REP=(1)
 fi
 
@@ -56,7 +56,7 @@ APTS_LOC_OPTS=(sgd)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only
 FOC_OPTS=(false)
 
 # Evaluation parameters: epochs, max iterations, loss
-EVAL_PARAMS=(epochs=10 max_iters=0 criterion=cross_entropy)
+EVAL_PARAMS=(epochs=100 max_iters=0 criterion=cross_entropy)
 
 # Adaptive solver parameters (base)
 APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.33 glob_second_order=false)
@@ -67,7 +67,7 @@ set_optimizer_params() {
   if [[ "$opt" == "apts_ip" ]]; then
     USE_PMW=true
     NUM_SUBD=(1)
-    NUM_STAGES=(8)
+    NUM_STAGES=(2 4 8)
     NUM_REP=(1)
   fi
 }
