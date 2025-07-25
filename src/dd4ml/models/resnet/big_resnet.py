@@ -90,7 +90,7 @@ class BigResNet(BaseResNet):
                         "object": BasicBlock,
                         "settings": settings
                     },
-                    "dst":      {"to": [f"stage{i+1}"] if i < 7 else {"to": ["finish"]}},
+                    "dst":      {"to": [f"stage{i+1}" if i < 7 else "finish"]},
                     "rcv":      {"src": ["start"] if i == 2 else [f"stage{i-1}"], "strategy": None},
                     "stage":    i - 1,
                     "num_layer_shards": 1
