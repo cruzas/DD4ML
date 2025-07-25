@@ -7,14 +7,14 @@ DEBUGGING=true # Set to true for debugging mode
 SCRIPT="run_config_file.py" # Python script to execute
 PAPER_TR_UPDATES=(true)     # For LSSR1-TR: use TR updates from paper
 if $DEBUGGING; then
-  PROJECT="debugging" # wandb project name
+  PROJECT="gamm2025debug" # wandb project name
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
   SCALING_TYPE="strong"
-  BATCH_SIZES=(1024)
+  BATCH_SIZES=(10000)
   NUM_SUBD=(1)
-  NUM_STAGES=(4)
+  NUM_STAGES=(1)
   NUM_REP=(1)
 else
   PROJECT="thesis_results" # wandb project name
@@ -41,7 +41,7 @@ GRAD_ACC=false # Gradient accumulation flag
 # Configuration sweeps
 OPTIMIZERS=(apts_ip)
 DATASETS=(mnist)
-MODELS=(simple_cnn)
+MODELS=(medium_ffnn)
 
 # Second-order toggles
 GLOB_SECOND_ORDERS=(false)
@@ -56,7 +56,7 @@ APTS_LOC_OPTS=(sgd)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only
 FOC_OPTS=(false)
 
 # Evaluation parameters: epochs, max iterations, loss
-EVAL_PARAMS=(epochs=5 max_iters=0 criterion=cross_entropy)
+EVAL_PARAMS=(epochs=10 max_iters=0 criterion=cross_entropy)
 
 # Adaptive solver parameters (base)
 APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.33 glob_second_order=false)
@@ -67,7 +67,7 @@ set_optimizer_params() {
   if [[ "$opt" == "apts_ip" ]]; then
     USE_PMW=true
     NUM_SUBD=(1)
-    NUM_STAGES=(2)
+    NUM_STAGES=(8)
     NUM_REP=(1)
   fi
 }
@@ -106,12 +106,22 @@ set_apts_lssr1_tr_params() {
     )
     if [[ "$opt" != "lssr1_tr" ]]; then
       APTS_PARAMS+=(glob_opt=lssr1_tr max_glob_iters=1 glob_second_order=true
-        loc_opt=lssr1_tr max_loc_iters=3 loc_second_order=true)
+                    loc_opt=lssr1_tr max_loc_iters=3 loc_second_order=true)
       case "$opt" in
-      apts_d) APTS_PARAMS+=(glob_pass=true foc=true) ;;
-      apts_p) APTS_PARAMS+=(glob_pass=true) ;;
-      apts_ip) APTS_PARAMS+=(loc_opt=sgd loc_second_order=false glob_pass=true) ;;
-      tr) APTS_PARAMS+=(glob_second_order=false) ;;
+        apts_d)
+          APTS_PARAMS+=(glob_pass=true foc=true)
+          ;;
+        apts_p)
+          APTS_PARAMS+=(glob_pass=true)
+          ;;
+        apts_ip)
+          # override defaults for apts_ip
+          APTS_PARAMS+=(batch_inc_factor=1.0 overlap=0.0)
+          APTS_PARAMS+=(loc_opt=sgd loc_second_order=false glob_pass=true)
+          ;;
+        tr)
+          APTS_PARAMS+=(glob_second_order=false)
+          ;;
       esac
     else
       APTS_PARAMS+=(glob_second_order=false)

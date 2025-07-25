@@ -12,7 +12,7 @@ if $DEBUGGING; then
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
   SCALING_TYPE="strong"
-  BATCH_SIZES=(1024)
+  BATCH_SIZES=(200)
   NUM_SUBD=(2)
   NUM_STAGES=(1)
   NUM_REP=(1)
@@ -66,7 +66,7 @@ set_optimizer_params() {
   if [[ "$opt" == "apts_ip" ]]; then
     USE_PMW=true
     NUM_SUBD=(1)
-    NUM_STAGES=(8)
+    NUM_STAGES=(4)
     NUM_REP=(1)
   fi
 }
@@ -115,7 +115,7 @@ set_apts_lssr1_tr_params() {
           ;;
         apts_ip)
           # override defaults for apts_ip
-          APTS_PARAMS+=(batch_inc_factor=1.0 overlap=0.25)
+          APTS_PARAMS+=(batch_inc_factor=1.0 overlap=0.0)
           APTS_PARAMS+=(loc_opt=sgd loc_second_order=false glob_pass=true)
           ;;
         tr)

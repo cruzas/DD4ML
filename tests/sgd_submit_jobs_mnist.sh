@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=false # Set to true for debugging mode
+DEBUGGING=true # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py"
@@ -12,9 +12,9 @@ if $DEBUGGING; then
     TRIALS=1
     partition="debug"
     time="00:10:00"
-    SCALING_TYPE="weak" # weak or strong
-    BATCH_SIZES=(2048)
-    NUM_SUBD=(2)
+    SCALING_TYPE="strong" # weak or strong
+    BATCH_SIZES=(1024)
+    NUM_SUBD=(1)
     NUM_STAGES=(1)
     NUM_REP=(1)
 else
@@ -41,15 +41,15 @@ GRAD_ACC=false
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)
 LEARNING_RATES=(0.01)
-overlap=0.33
-batch_inc_factor=1.5
+overlap=0.0
+batch_inc_factor=1.0
 
 DATASETS=(mnist)
-MODELS=(simple_cnn)
+MODELS=(medium_ffnn)
 
 # (Remove all APTS / TR / dogleg loops – they’re skipped since optimizer=sgd)
 
-EVAL_PARAMS=(epochs=5 max_iters=0 criterion=cross_entropy)
+EVAL_PARAMS=(epochs=10 max_iters=0 criterion=cross_entropy)
 
 set_optimizer_params() {
     local opt="$1"

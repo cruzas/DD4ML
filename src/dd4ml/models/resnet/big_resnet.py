@@ -7,7 +7,7 @@ class BigResNet(BaseResNet):
     def __init__(self, config, input_channels: int = 3, num_classes: int = 10):
         super().__init__(config)
         self.start = nn.Sequential(
-            nn.Conv2d(input_channels, 64, 7, 2, 3, bias=False),
+            nn.Conv2d(self.config.input_channels, 64, 7, 2, 3, bias=False),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(3, 2, 1),
