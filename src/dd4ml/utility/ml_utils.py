@@ -28,19 +28,37 @@ def cross_entropy_transformers(logits, targets):
 
 # Helper to detect function-only modules (no learned parameters).
 def is_function_module(info):
-    """
-    Return True if 'info' is for a 'function-like' module (e.g. relu),
-    False if it is a trainable nn.Module.
-    """
-    obj = info["callable"]["object"]
+    """Return ``True`` if ``info`` describes a module without trainable
+    parameters.
 
-    # If 'obj' is a class inheriting from nn.Module, it has parameters.
-    if inspect.isclass(obj) and issubclass(obj, nn.Module):
-        return False
-    # If it's a Python function or a custom label (like 'method_view'),
-    # treat it as function-only (param-free).
+    ``BaseModel.set_stage`` relies on this helper to merge consecutive
+    parameterless operations (e.g. activations, pooling) into the
+    neighbouring stage.  The previous implementation only classified pure
+    Python functions as parameterless which caused modules like
+    ``nn.ReLU`` or ``nn.MaxPool2d`` to be treated as trainable despite
+    having no parameters.  When the pipeline split these modules into
+    individual stages the optimiser received an empty parameter list and
+    training failed.  By instantiating the module using the provided
+    settings we can accurately determine whether it has parameters.
+    """
+
+    obj = info["callable"]["object"]
+    settings = info["callable"].get("settings", {})
+
+    # ``obj`` can either be an ``nn.Module`` subclass, a plain function or a
+    # custom string identifier.  Functions and strings are always
+    # considered parameterless.
     if isinstance(obj, FunctionType) or isinstance(obj, str):
         return True
+
+    if inspect.isclass(obj) and issubclass(obj, nn.Module):
+        try:
+            module = obj(**settings)
+        except Exception:
+            # If instantiation fails we conservatively assume it has parameters
+            return False
+        return sum(p.numel() for p in module.parameters()) == 0
+
     return False
 
 
