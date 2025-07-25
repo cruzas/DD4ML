@@ -1,267 +1,231 @@
+import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
+from torchvision.models.resnet import BasicBlock
 from dd4ml.models.resnet.base_resnet import BaseResNet
-from torchvision.models import resnet34
-
-
-# Basic residual block.
-class BasicBlock(nn.Module):
-    expansion = 1
-
-    def __init__(self, in_channels, out_channels, stride=1, downsample=None):
-        super(BasicBlock, self).__init__()
-        self.start = nn.Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size=3,
-            stride=stride,
-            padding=1,
-            bias=False,
-        )
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(
-            out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False
-        )
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.downsample = downsample
-
-    def forward(self, x):
-        identity = x
-        out = self.relu(self.bn1(self.start(x)))
-        out = self.bn2(self.conv2(out))
-        if self.downsample is not None:
-            identity = self.downsample(x)
-        out += identity
-        return self.relu(out)
-
-
-# Helper module that encapsulates a ResNet layer.
-class ResNetLayer(nn.Module):
-    def __init__(self, in_channels, block, out_channels, blocks, stride):
-        super(ResNetLayer, self).__init__()
-        downsample = None
-        if stride != 1 or in_channels != out_channels * block.expansion:
-            downsample = nn.Sequential(
-                nn.Conv2d(
-                    in_channels,
-                    out_channels * block.expansion,
-                    kernel_size=1,
-                    stride=stride,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(out_channels * block.expansion),
-            )
-        layers = [block(in_channels, out_channels, stride, downsample)]
-        for _ in range(1, blocks):
-            layers.append(block(out_channels * block.expansion, out_channels))
-        self.layer = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.layer(x)
-
-
-# Simple flatten module.
-class FlattenBlock(nn.Module):
-    def forward(self, x):
-        return x.view(x.size(0), -1)
 
 class BigResNet(BaseResNet):
-    @staticmethod
-    def get_default_config():
-        C = BaseResNet.get_default_config()
-        return C
-
-    def __init__(
-        self,
-        config,
-        block=BasicBlock,
-        layers=[3, 4, 6, 3],       # ← ResNet‑34 configuration
-        num_classes=10,
-    ):
+    def __init__(self, config, input_channels: int = 3, num_classes: int = 10):
         super().__init__(config)
-        self.layers_config = layers
-        self.in_channels = 64
-
-        self.start = nn.Conv2d(
-            config.input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False
+        # Stage 1: conv → BN → ReLU
+        self.stage1 = nn.Sequential(
+            nn.Conv2d(input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
         )
-        self.bn1 = nn.BatchNorm2d(64)
-        self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
-        self.layer1 = ResNetLayer(self.in_channels, block, 64,  layers[0], stride=1)
-        self.in_channels = 64 * block.expansion
-        self.layer2 = ResNetLayer(self.in_channels, block, 128, layers[1], stride=2)
-        self.in_channels = 128 * block.expansion
-        self.layer3 = ResNetLayer(self.in_channels, block, 256, layers[2], stride=2)
-        self.in_channels = 256 * block.expansion
-        self.layer4 = ResNetLayer(self.in_channels, block, 512, layers[3], stride=2)
+        # Stages 2–7: six BasicBlock modules
+        self.stage2 = BasicBlock(64, 64)
+        self.stage3 = BasicBlock(64, 64)
+        self.stage4 = BasicBlock(64, 128, stride=2, downsample=nn.Sequential(
+            nn.Conv2d(64, 128, 1, stride=2, bias=False),
+            nn.BatchNorm2d(128),
+        ))
+        self.stage5 = BasicBlock(128, 128)
+        self.stage6 = BasicBlock(128, 256, stride=2, downsample=nn.Sequential(
+            nn.Conv2d(128, 256, 1, stride=2, bias=False),
+            nn.BatchNorm2d(256),
+        ))
+        self.stage7 = BasicBlock(256, 256)
 
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.flatten = FlattenBlock()
-        self.finish  = nn.Linear(512 * block.expansion, num_classes)
+        # Stage 8: global pool → FC
+        self.stage8 = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(256, num_classes),
+        )
 
-    def forward(self, x):
-        x = self.relu(self.bn1(self.start(x)))
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.stage1(x)
         x = self.maxpool(x)
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-        x = self.avgpool(x)
-        x = self.flatten(x)
-        x = self.finish(x)
-        return x
+        x = self.stage2(x)
+        x = self.stage3(x)
+        x = self.stage4(x)
+        x = self.stage5(x)
+        x = self.stage6(x)
+        x = self.stage7(x)
+        return self.stage8(x)
 
     def as_model_dict(self):
-            model_dict = {
-                "start": {
-                    "callable": {
-                        "object": nn.Conv2d,
-                        "settings": {
-                            "in_channels": self.config.input_channels,
-                            "out_channels": 64,
-                            "kernel_size": 7,
-                            "stride": 2,
-                            "padding": 3,
-                            "bias": False,
-                        },
-                    },
-                    "dst": {"to": ["bn1"]},
-                    "rcv": {"src": [], "strategy": None},
-                    "stage": 0,
-                    "num_layer_shards": 1,
+        md = {
+            "start": {
+                "callable": {
+                    "object": nn.Conv2d,
+                    "settings": {
+                        "in_channels":   self.config.input_channels,
+                        "out_channels":  64,
+                        "kernel_size":   7,
+                        "stride":        2,
+                        "padding":       3,
+                        "bias":          False
+                    }
                 },
-                "bn1": {
-                    "callable": {
-                        "object": nn.BatchNorm2d,
-                        "settings": {"num_features": 64},
-                    },
-                    "dst": {"to": ["relu"]},
-                    "rcv": {"src": ["start"], "strategy": None},
-                    "stage": 1,
-                    "num_layer_shards": 1,
+                "dst":      {"to": ["bn1"]},
+                "rcv":      {"src": [],           "strategy": None},
+                "stage":    0,
+                "num_layer_shards": 1
+            },
+            "bn1": {
+                "callable": {
+                    "object": nn.BatchNorm2d,
+                    "settings": {"num_features": 64}
                 },
-                "relu": {
-                    "callable": {
-                        "object": nn.ReLU,
-                        "settings": {"inplace": False},
-                    },
-                    "dst": {"to": ["maxpool"]},
-                    "rcv": {"src": ["bn1"], "strategy": None},
-                    "stage": 2,
-                    "num_layer_shards": 1,
+                "dst":      {"to": ["relu"]},
+                "rcv":      {"src": ["start"],    "strategy": None},
+                "stage":    1,
+                "num_layer_shards": 1
+            },
+            "relu": {
+                "callable": {
+                    "object": nn.ReLU,
+                    "settings": {"inplace": True}
                 },
-                "maxpool": {
-                    "callable": {
-                        "object": nn.MaxPool2d,
-                        "settings": {"kernel_size": 3, "stride": 2, "padding": 1},
-                    },
-                    "dst": {"to": ["layer1"]},
-                    "rcv": {"src": ["relu"], "strategy": None},
-                    "stage": 3,
-                    "num_layer_shards": 1,
+                "dst":      {"to": ["maxpool"]},
+                "rcv":      {"src": ["bn1"],      "strategy": None},
+                "stage":    2,
+                "num_layer_shards": 1
+            },
+            "maxpool": {
+                "callable": {
+                    "object": nn.MaxPool2d,
+                    "settings": {"kernel_size": 3, "stride": 2, "padding": 1}
                 },
-                "layer1": {
-                    "callable": {
-                        "object": ResNetLayer,
-                        "settings": {
-                            "in_channels": 64,
-                            "block": BasicBlock,
-                            "out_channels": 64,
-                            "blocks": self.layers_config[0],
-                            "stride": 1,
-                        },
-                    },
-                    "dst": {"to": ["layer2"]},
-                    "rcv": {"src": ["maxpool"], "strategy": None},
-                    "stage": 4,
-                    "num_layer_shards": 1,
+                "dst":      {"to": ["stage2"]},
+                "rcv":      {"src": ["relu"],     "strategy": None},
+                "stage":    3,
+                "num_layer_shards": 1
+            },
+            # each BasicBlock as its own stage
+            "stage2": {
+                "callable": {
+                    "object": BasicBlock,
+                    "settings": {
+                        "inplanes": 64,
+                        "planes":   64,
+                        "stride":   1,
+                        "downsample": None
+                    }
                 },
-                "layer2": {
-                    "callable": {
-                        "object": ResNetLayer,
-                        "settings": {
-                            "in_channels": 64 * BasicBlock.expansion,
-                            "block": BasicBlock,
-                            "out_channels": 128,
-                            "blocks": self.layers_config[1],
-                            "stride": 2,
-                        },
-                    },
-                    "dst": {"to": ["layer3"]},
-                    "rcv": {"src": ["layer1"], "strategy": None},
-                    "stage": 5,
-                    "num_layer_shards": 1,
+                "dst":      {"to": ["stage3"]},
+                "rcv":      {"src": ["maxpool"],  "strategy": None},
+                "stage":    4,
+                "num_layer_shards": 1
+            },
+            "stage3": {
+                "callable": {
+                    "object": BasicBlock,
+                    "settings": {
+                        "inplanes": 64,
+                        "planes":   64,
+                        "stride":   1,
+                        "downsample": None
+                    }
                 },
-                "layer3": {
-                    "callable": {
-                        "object": ResNetLayer,
-                        "settings": {
-                            "in_channels": 128 * BasicBlock.expansion,
-                            "block": BasicBlock,
-                            "out_channels": 256,
-                            "blocks": self.layers_config[2],
-                            "stride": 2,
-                        },
-                    },
-                    "dst": {"to": ["layer4"]},
-                    "rcv": {"src": ["layer2"], "strategy": None},
-                    "stage": 6,
-                    "num_layer_shards": 1,
+                "dst":      {"to": ["stage4"]},
+                "rcv":      {"src": ["stage2"],   "strategy": None},
+                "stage":    5,
+                "num_layer_shards": 1
+            },
+            "stage4": {
+                "callable": {
+                    "object": BasicBlock,
+                    "settings": {
+                        "inplanes": 64,
+                        "planes":   128,
+                        "stride":   2,
+                        "downsample": nn.Sequential(
+                            nn.Conv2d(64, 128, 1, stride=2, bias=False),
+                            nn.BatchNorm2d(128)
+                        )
+                    }
                 },
-                "layer4": {
-                    "callable": {
-                        "object": ResNetLayer,
-                        "settings": {
-                            "in_channels": 256 * BasicBlock.expansion,
-                            "block": BasicBlock,
-                            "out_channels": 512,
-                            "blocks": self.layers_config[3],
-                            "stride": 2,
-                        },
-                    },
-                    "dst": {"to": ["avgpool"]},
-                    "rcv": {"src": ["layer3"], "strategy": None},
-                    "stage": 7,
-                    "num_layer_shards": 1,
+                "dst":      {"to": ["stage5"]},
+                "rcv":      {"src": ["stage3"],   "strategy": None},
+                "stage":    6,
+                "num_layer_shards": 1
+            },
+            "stage5": {
+                "callable": {
+                    "object": BasicBlock,
+                    "settings": {
+                        "inplanes": 128,
+                        "planes":   128,
+                        "stride":   1,
+                        "downsample": None
+                    }
                 },
-                "avgpool": {
-                    "callable": {
-                        "object": nn.AdaptiveAvgPool2d,
-                        "settings": {"output_size": (1, 1)},
-                    },
-                    "dst": {"to": ["flatten"]},
-                    "rcv": {"src": ["layer4"], "strategy": None},
-                    "stage": 8,
-                    "num_layer_shards": 1,
+                "dst":      {"to": ["stage6"]},
+                "rcv":      {"src": ["stage4"],   "strategy": None},
+                "stage":    7,
+                "num_layer_shards": 1
+            },
+            "stage6": {
+                "callable": {
+                    "object": BasicBlock,
+                    "settings": {
+                        "inplanes": 128,
+                        "planes":   256,
+                        "stride":   2,
+                        "downsample": nn.Sequential(
+                            nn.Conv2d(128, 256, 1, stride=2, bias=False),
+                            nn.BatchNorm2d(256)
+                        )
+                    }
                 },
-                "flatten": {
-                    "callable": {
-                        "object": FlattenBlock,
-                        "settings": {},
-                    },
-                    "dst": {"to": ["finish"]},
-                    "rcv": {"src": ["avgpool"], "strategy": None},
-                    "stage": 9,
-                    "num_layer_shards": 1,
+                "dst":      {"to": ["stage7"]},
+                "rcv":      {"src": ["stage5"],   "strategy": None},
+                "stage":    8,
+                "num_layer_shards": 1
+            },
+            "stage7": {
+                "callable": {
+                    "object": BasicBlock,
+                    "settings": {
+                        "inplanes": 256,
+                        "planes":   256,
+                        "stride":   1,
+                        "downsample": None
+                    }
                 },
-                "finish": {
-                    "callable": {
-                        "object": nn.Linear,
-                        "settings": {
-                            "in_features": 512 * BasicBlock.expansion,
-                            "out_features": self.finish.out_features,
-                        },
-                    },
-                    "dst": {"to": []},
-                    "rcv": {"src": ["flatten"], "strategy": None},
-                    "stage": 10,
-                    "num_layer_shards": 1,
+                "dst":      {"to": ["avgpool"]},
+                "rcv":      {"src": ["stage6"],   "strategy": None},
+                "stage":    9,
+                "num_layer_shards": 1
+            },
+            "avgpool": {
+                "callable": {
+                    "object": nn.AdaptiveAvgPool2d,
+                    "settings": {"output_size": (1, 1)}
                 },
-            }
-            self.model_dict = model_dict
-            self.set_stage()
-            return self.model_dict
+                "dst":      {"to": ["flatten"]},
+                "rcv":      {"src": ["stage7"],   "strategy": None},
+                "stage":    10,
+                "num_layer_shards": 1
+            },
+            "flatten": {
+                "callable": {
+                    "object": nn.Flatten,
+                    "settings": {}
+                },
+                "dst":      {"to": ["finish"]},
+                "rcv":      {"src": ["avgpool"],  "strategy": None},
+                "stage":    11,
+                "num_layer_shards": 1
+            },
+            "finish": {
+                "callable": {
+                    "object": nn.Linear,
+                    "settings": {
+                        "in_features": 256 * BasicBlock.expansion,
+                        "out_features": 10
+                    }
+                },
+                "dst":      {"to": []},
+                "rcv":      {"src": ["flatten"],  "strategy": None},
+                "stage":    12,
+                "num_layer_shards": 1
+            },
+        }
+        self.model_dict = md
+        self.set_stage()
+        return md

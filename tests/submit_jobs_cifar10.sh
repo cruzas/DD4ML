@@ -39,7 +39,7 @@ GRAD_ACC=false # Gradient accumulation flag
 # Configuration sweeps
 OPTIMIZERS=(apts_ip)
 DATASETS=(cifar10)
-MODELS=(simple_resnet)
+MODELS=(big_resnet)
 
 # Second-order toggles
 GLOB_SECOND_ORDERS=(false)
