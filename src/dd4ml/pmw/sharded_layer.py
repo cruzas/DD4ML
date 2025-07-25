@@ -33,11 +33,19 @@ class ShardedLayer(BasePMWModel):
                 else:
                     # Single-rank trainable module
                     try:
-                        self.layer = obj(**layer_dict["callable"]["settings"]).to(
-                            self.tensor_device
-                        )
-                    except:
+                        if obj is nn.Sequential and "modules" in layer_dict["callable"]["settings"]:
+                            mods = [
+                                m["object"](**m.get("settings", {}))
+                                for m in layer_dict["callable"]["settings"]["modules"]
+                            ]
+                            self.layer = obj(*mods).to(self.tensor_device)
+                        else:
+                            self.layer = obj(**layer_dict["callable"]["settings"]).to(
+                                self.tensor_device
+                            )
+                    except Exception as e:
                         print("asd")
+                        raise e
 
                     # Optional initialization
                     if isinstance(self.layer, nn.Linear):
