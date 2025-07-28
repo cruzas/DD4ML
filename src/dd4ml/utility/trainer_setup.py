@@ -21,6 +21,7 @@ from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
 
 from .config import get_config, make_std_config, GPT_MODEL_ALIASES
 
+
 # You can now add new components dynamically at runtime by calling, e.g.:
 # dataset_factory.register("new_dataset", "dd4ml.datasets.new_dataset", "NewDatasetClass")
 
@@ -50,6 +51,14 @@ def get_config_model_and_trainer(args, wandb_config):
     dataset_name = config_src["dataset_name"]
     model_name = config_src["model_name"]
     optimizer_name = config_src["optimizer"]
+
+    if isinstance(optimizer_name, str):
+        optimizer_name = optimizer_name.lower()
+        config_src["optimizer"] = optimizer_name
+
+    for opt_key in ("loc_opt", "glob_opt"):
+        if opt_key in config_src and isinstance(config_src[opt_key], str):
+            config_src[opt_key] = config_src[opt_key].lower()
 
     all_config = get_config(dataset_name, model_name, optimizer_name)
 

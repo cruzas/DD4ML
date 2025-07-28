@@ -46,7 +46,6 @@ def parse_cmd_args() -> argparse.Namespace:
     default_use_pmw = temp_args.optimizer == "apts_ip"
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
-    # default_project = "thesis" + temp_args.optimizer + "_tests"
     default_project = "debugging"
 
     parser.add_argument(
@@ -122,7 +121,6 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--num_subdomains", type=int, default=1, help="Number of subdomains"
     )
-
     parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
     parser.add_argument(
         "--num_replicas_per_subdomain",
@@ -131,9 +129,8 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Number of replicas per subdomain",
     )
 
-    # temp_args, _ = parser.parse_known_args()
+    # Development branch: finalise parsing here
     return parser.parse_args()
-
 
 def wait_and_exit(rank: int) -> None:
     """Wait at the barrier and exit gracefully."""
