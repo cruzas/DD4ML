@@ -130,5 +130,6 @@ class WeightParallelizedModel(BasePMWModel):
             self.subdomain.backward(loss, chunk_id=i, is_in_pipeline=True)
 
         # Rescale the gradients by the number of chunks
-        for param in self.parameters():
-            param.grad /= num_chunks
+        for param in self.parameters(clone=False):
+            if param.grad is not None:
+                param.grad /= num_chunks

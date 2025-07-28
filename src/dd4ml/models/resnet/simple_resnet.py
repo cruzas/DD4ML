@@ -2,6 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from dd4ml.models.resnet.base_resnet import BaseResNet
+from torchvision.models import resnet18
 
 
 # Basic residual block.
@@ -76,6 +77,10 @@ class SimpleResNet(BaseResNet):
 
     def __init__(self, config, block=BasicBlock, layers=[2, 2, 2, 2], num_classes=10):
         super().__init__(config)
+        # For all others
+        # self.backbone = resnet18(pretrained=False)
+        
+        # For APTS_IP
         self.layers_config = layers  # store configuration for use in as_model_dict
         self.in_channels = 64
         self.start = nn.Conv2d(
@@ -96,6 +101,10 @@ class SimpleResNet(BaseResNet):
         self.finish = nn.Linear(512 * block.expansion, num_classes)
 
     def forward(self, x):
+        # For APTS_IP
+        # return self.backbone(x)
+        
+        # For all others
         x = self.relu(self.bn1(self.start(x)))
         x = self.maxpool(x)
         x = self.layer1(x)
@@ -138,7 +147,7 @@ class SimpleResNet(BaseResNet):
             "relu": {
                 "callable": {
                     "object": nn.ReLU,
-                    "settings": {"inplace": True},
+                    "settings": {"inplace": False},
                 },
                 "dst": {"to": ["maxpool"]},
                 "rcv": {"src": ["bn1"], "strategy": None},

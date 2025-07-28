@@ -1,5 +1,15 @@
 from .utils import CfgNode
 
+GPT_MODEL_ALIASES = {
+    "nanogpt": "gpt-nano",
+    "gptnano": "gpt-nano",
+    "microgpt": "gpt-micro",
+    "gptmicro": "gpt-micro",
+    "minigpt": "gpt-mini",
+    "gptmini": "gpt-mini",
+    "gpt2": "gpt2",
+}
+
 
 def remove_keys(config, keys_to_remove):
     """
@@ -37,33 +47,30 @@ def make_std_config(config):
             and not "apts_p" in config.optimizer.lower()
         ):
             keys_to_remove.append("num_subdomains")
-        config = remove_keys(config, keys_to_remove)
-    if "apts" not in config.optimizer.lower():
-        keys_to_remove = [
-            "loc_opt",
-            "loc_opt_hparams",
-            "glob_opt",
-            "glob_opt_hparams",
-            "max_loc_iters",
-            "max_glob_iters",
-            "norm_type",
-            "delta",
-            "min_delta",
-            "max_delta",
-            "glob_pass",
-            "foc",
-            "dogleg" "glob_second_order",
-            "loc_second_order",
-            "max_wolfe_iters",
-            "mem_length",
-        ]
-        config = remove_keys(config, keys_to_remove)
-    if config.optimizer.lower() == "apts_d" or config.optimizer.lower() == "apts_p":
-        keys_to_remove = [
-            "glob_opt",
-            "loc_opt",
-        ]
-        config = remove_keys(config, keys_to_remove)
+    if "apts" not in config.optimizer.lower() and "tr" not in config.optimizer.lower():
+        keys_to_remove.extend(
+            [
+                "loc_opt",
+                "loc_opt_hparams",
+                "glob_opt",
+                "glob_opt_hparams",
+                "max_loc_iters",
+                "max_glob_iters",
+                "norm_type",
+                "delta",
+                "min_delta",
+                "max_delta",
+                "glob_pass",
+                "foc",
+                "dogleg",
+                "glob_second_order",
+                "loc_second_order",
+                "max_wolfe_iters",
+                "mem_length",
+            ]
+        )
+
+    config = remove_keys(config, keys_to_remove)
     return config
 
 
@@ -84,6 +91,9 @@ def get_config(dataset_name: str, model_name: str, optimizer: str):
     C.system.seed = 3407
     C.system.trial = 0
     C.system.work_dir = f"../../saved_networks/{dataset_name}/{model_name}/{optimizer}/"
+    C.dataset_name = dataset_name
+    C.model_name = model_name
+    C.optimizer = optimizer
 
     # Data configuration via DATASET_MAP.
     from .factory import DATASET_MAP
@@ -98,14 +108,17 @@ def get_config(dataset_name: str, model_name: str, optimizer: str):
     # Model configuration via MODEL_MAP.
     from .factory import MODEL_MAP
 
-    key = next((k for k in MODEL_MAP if k in model_name.lower()), None)
-    if key is None:
+    key = model_name.lower()
+    if key not in MODEL_MAP:
         raise ValueError(f"Unknown model name: {model_name}.")
+    
     model_module, model_class_name = MODEL_MAP[key]
     model_module_obj = import_module(model_module)
     model_cls = getattr(model_module_obj, model_class_name)
     C.model = model_cls.get_default_config()
     C.model.model_class = model_cls
+    if key in GPT_MODEL_ALIASES:
+        C.model.model_type = GPT_MODEL_ALIASES[key]
 
     # Propagate image-specific properties if available.
     for attr in ["input_channels", "input_height", "input_width", "output_classes"]:

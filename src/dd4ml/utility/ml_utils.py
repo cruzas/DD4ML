@@ -8,7 +8,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
-def get_device(device=None):    
+
+def get_device(device=None):
     if device is not None:
         return device
     else:
@@ -18,8 +19,12 @@ def get_device(device=None):
             else "cpu"
         )
 
+
 def cross_entropy_transformers(logits, targets):
-    return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+    return F.cross_entropy(
+        logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
+    )
+
 
 # Helper to detect function-only modules (no learned parameters).
 def is_function_module(info):
@@ -27,8 +32,8 @@ def is_function_module(info):
     Return True if 'info' is for a 'function-like' module (e.g. relu),
     False if it is a trainable nn.Module.
     """
-    obj = info['callable']['object']
-    
+    obj = info["callable"]["object"]
+
     # If 'obj' is a class inheriting from nn.Module, it has parameters.
     if inspect.isclass(obj) and issubclass(obj, nn.Module):
         return False
@@ -39,23 +44,46 @@ def is_function_module(info):
     return False
 
 
-def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True, return_output=False, data_chunks_amount=1, grad_norm_clip=None, outputs_only=False):
+def closure(
+    inputs,
+    targets,
+    criterion,
+    model,
+    compute_grad=True,
+    zero_grad=True,
+    return_output=False,
+    data_chunks_amount=1,
+    grad_norm_clip=None,
+    outputs_only=False,
+):
     """
     NOTE: Losses from different chunks are averaged.
     """
     if isinstance(criterion, type):
-        raise ValueError('Criterion must be an instance of a class.')
+        raise ValueError("Criterion must be an instance of a class.")
 
-    has_model_handler = hasattr(model, 'model_handler')
+    has_model_handler = hasattr(model, "model_handler")
 
-    if has_model_handler and model.model_handler.is_last_stage() and targets is not None and not outputs_only:
+    if (
+        has_model_handler
+        and model.model_handler.is_last_stage()
+        and targets is not None
+        and not outputs_only
+    ):
         targets = targets.chunk(data_chunks_amount)
 
-    def closure2(compute_grad=compute_grad, zero_grad=zero_grad, data_chunks_amount=data_chunks_amount, sync_loss='global', grad_norm_clip=grad_norm_clip, outputs_only=outputs_only):
-        '''
+    def closure2(
+        compute_grad=compute_grad,
+        zero_grad=zero_grad,
+        data_chunks_amount=data_chunks_amount,
+        sync_loss="global",
+        grad_norm_clip=grad_norm_clip,
+        outputs_only=outputs_only,
+    ):
+        """
         sync_loss: 'global' or 'local' ('global' means every rank, 'local' means only the ranks within the same subdomain in data)
-        '''
-        if sync_loss not in ['global', 'local']:
+        """
+        if sync_loss not in ["global", "local"]:
             raise ValueError('sync_loss must be either "global" or "local".')
 
         if zero_grad:
@@ -71,7 +99,13 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
                 return [output for output in outputs]
 
         losses = [0] * data_chunks_amount if has_model_handler else []
-        loss = torch.tensor(0.0, device=inputs.device)
+        if hasattr(inputs, "device"):
+            inp_device = inputs.device
+        elif isinstance(inputs, (list, tuple)) and len(inputs) > 0 and hasattr(inputs[0], "device"):
+            inp_device = inputs[0].device
+        else:
+            inp_device = model.tensor_device if hasattr(model, "tensor_device") else get_device()
+        loss = torch.tensor(0.0, device=inp_device)
 
         if has_model_handler and model.model_handler.is_last_stage():
             for i, out in enumerate(outputs):
@@ -82,23 +116,56 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
 
         # Distributed processing (only if model_handler is present)
         if has_model_handler:
-            if sync_loss == 'global':
+            # Determine original data type
+            orig_dtype = loss.dtype
+            # Cast to float64 for all_reduce
+            loss_64 = loss.to(torch.float64)
+
+            if sync_loss == "global":
                 if model.model_handler.is_last_stage():
-                    dist.all_reduce(loss, op=dist.ReduceOp.SUM, group=model.model_handler.get_layers_copy_group(mode='global'))
+                    dist.all_reduce(
+                        loss,
+                        op=dist.ReduceOp.SUM,
+                        group=model.model_handler.get_layers_copy_group(mode="global"),
+                    )
                     loss = loss / model.model_handler.tot_replicas
-                last_ranks = model.model_handler.get_stage_ranks(stage_name='last', mode='global')
-                loss_broadcast = dist.broadcast(loss.detach(), src=last_ranks[0], group=model.model_handler.global_model_group, async_op=True)
+                last_ranks = model.model_handler.get_stage_ranks(
+                    stage_name="last", mode="global"
+                )
+                loss_broadcast = dist.broadcast(
+                    loss.detach(),
+                    src=last_ranks[0],
+                    group=model.model_handler.global_model_group,
+                    async_op=True,
+                )
             else:
                 if model.model_handler.is_last_stage():
-                    dist.all_reduce(loss, op=dist.ReduceOp.SUM, group=model.model_handler.get_layers_copy_group(mode='local'))
+                    dist.all_reduce(
+                        loss,
+                        op=dist.ReduceOp.SUM,
+                        group=model.model_handler.get_layers_copy_group(mode="local"),
+                    )
                     loss = loss / model.num_replicas_per_subdomain
-                last_stage_ranks = model.model_handler.get_stage_ranks(stage_name='last', mode='local')
+                last_stage_ranks = model.model_handler.get_stage_ranks(
+                    stage_name="last", mode="local"
+                )
                 if len(last_stage_ranks) > 1:
-                    raise ValueError('Tensor sharding not implemented yet.')
-                loss_broadcast = dist.broadcast(loss.detach(), src=last_stage_ranks[0], group=model.model_handler.get_sd_group(), async_op=True)
-        elif not has_model_handler and dist.is_initialized() and dist.get_world_size() > 1:
+                    raise ValueError("Tensor sharding not implemented yet.")
+                loss_broadcast = dist.broadcast(
+                    loss.detach(),
+                    src=last_stage_ranks[0],
+                    group=model.model_handler.get_sd_group(),
+                    async_op=True,
+                )
+        elif (
+            not has_model_handler
+            and dist.is_initialized()
+            and dist.get_world_size() > 1
+        ):
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
-            loss /= dist.get_world_size() # gradient averaging taken care of by DDP, assuming model is wrapped by DDP
+            loss /= (
+                dist.get_world_size()
+            )  # gradient averaging taken care of by DDP, assuming model is wrapped by DDP
 
         # Compute gradients
         if compute_grad and torch.is_grad_enabled():
@@ -106,15 +173,17 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
                 model.backward(losses)
             else:
                 loss.backward()
-            
+
             if grad_norm_clip is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm_clip) 
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm_clip)
 
         if has_model_handler:
             loss_broadcast.wait()
 
         if return_output:
-            return loss, [output for output in outputs] if has_model_handler else outputs
+            return loss, (
+                [output for output in outputs] if has_model_handler else outputs
+            )
 
         return loss
 
@@ -122,28 +191,30 @@ def closure(inputs, targets, criterion, model, compute_grad=True, zero_grad=True
 
 
 def decide_tensor_device(ws, backend, gpu_id):
-    loc_rank = os.environ['LOCAL_RANK']
+    loc_rank = os.environ["LOCAL_RANK"]
     if torch.cuda.is_available():
-        if backend == 'gloo':
+        if backend == "gloo":
             if torch.cuda.device_count() < ws:
-                return f'cuda:{gpu_id}'
+                return f"cuda:{gpu_id}"
             else:
                 # Local rank
-                return f'cuda:{loc_rank}'
+                return f"cuda:{loc_rank}"
         else:
             if gpu_id is None:
                 gpu_id = loc_rank
-            return f'cuda:{gpu_id}'
+            return f"cuda:{gpu_id}"
     else:
-        return 'cpu'
+        return "cpu"
+
 
 def list_flattener(l):
-    '''
+    """
     Flattens a list of lists of lists of ... to a single list.
-    '''
+    """
     while any(isinstance(i, list) for i in l):
         l = [item for sublist in l for item in sublist]
     return l
+
 
 def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
     starting_epoch = 0
@@ -154,11 +225,12 @@ def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
 
     # Check if the model has already been trained
     max_epoch_already_trained = -1
-    saved_networks = os.listdir('../saved_networks')
+    saved_networks = os.listdir("../saved_networks")
     for saved_network in saved_networks:
         if base_file_name in saved_network:
             saved_network_epoch = int(
-                saved_network.split('_epoch_')[1].split('.pth')[0])
+                saved_network.split("_epoch_")[1].split(".pth")[0]
+            )
 
             if saved_network_epoch > max_epoch_already_trained:
                 max_epoch_already_trained = saved_network_epoch
@@ -168,24 +240,30 @@ def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
     if max_epoch_already_trained > -1:
         if os.path.exists(epoch_file_name):
             starting_epoch = max_epoch_already_trained + 1
-            if starting_epoch > num_epochs+1:
+            if starting_epoch > num_epochs + 1:
                 if rank == 0:
                     print("Model already fully trained. Exiting...")
                 exit(0)
             # Load epoch results
             df = pd.read_csv(epoch_file_name)
-            epoch_results = df.to_dict('records')
+            epoch_results = df.to_dict("records")
             # Load iteration results
-            df = pd.read_csv(epoch_file_name.replace('.csv', '_iter.csv'))
-            iter_results = df.to_dict('records')
+            df = pd.read_csv(epoch_file_name.replace(".csv", "_iter.csv"))
+            iter_results = df.to_dict("records")
             # Get the number of iterations
-            starting_num_iters = iter_results[-1]['iteration']
+            starting_num_iters = iter_results[-1]["iteration"]
             # Print details
             if rank == 0 and max_epoch_already_trained > -1:
                 print(
-                    f"Model with parameters {base_file_name} already trained for {max_epoch_already_trained} epochs")
+                    f"Model with parameters {base_file_name} already trained for {max_epoch_already_trained} epochs"
+                )
         else:
             starting_network = ""
 
-    return starting_epoch, starting_num_iters, epoch_results, iter_results, starting_network
-
+    return (
+        starting_epoch,
+        starting_num_iters,
+        epoch_results,
+        iter_results,
+        starting_network,
+    )

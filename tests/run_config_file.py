@@ -18,6 +18,10 @@ from dd4ml.utility import (
     set_seed,
 )
 
+from dd4ml.datasets.pinn_poisson import Poisson1DDataset
+from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
+from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
+
 try:
     import wandb
 
@@ -33,9 +37,7 @@ def parse_cmd_args() -> argparse.Namespace:
         description="Parse command line arguments.",
     )
 
-    parser.add_argument(
-        "--optimizer", type=str, default="apts_d", help="Optimizer name"
-    )
+    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
     )
@@ -44,7 +46,7 @@ def parse_cmd_args() -> argparse.Namespace:
     default_use_pmw = temp_args.optimizer == "apts_ip"
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
-    default_project = temp_args.optimizer + "_tests"
+    default_project = "debugging"
 
     parser.add_argument(
         "--use_pmw",
@@ -79,12 +81,15 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset_name", type=str, default="mnist", help="Dataset name"
     )
-    parser.add_argument("--overlap", type=float, default=0.01, help="Overlap factor")
+    parser.add_argument("--overlap", type=float, default=0.0, help="Overlap factor")
     parser.add_argument(
-        "--model_name", type=str, default="simple_resnet", help="Model name"
+        "--model_name", type=str, default="simple_cnn", help="Model name"
     )
     parser.add_argument(
-        "--criterion", type=str, default="cross_entropy", help="Criterion name"
+        "--criterion",
+        type=str,
+        default="cross_entropy_transformers",
+        help="Criterion name",
     )
     parser.add_argument(
         "--learning_rate", type=float, default=0.01, help="Learning rate"
@@ -114,9 +119,8 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Trial number. Used to generate seed for reproducibility.",
     )
     parser.add_argument(
-        "--num_subdomains", type=int, default=2, help="Number of subdomains"
+        "--num_subdomains", type=int, default=1, help="Number of subdomains"
     )
-
     parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
     parser.add_argument(
         "--num_replicas_per_subdomain",
@@ -125,32 +129,8 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Number of replicas per subdomain",
     )
 
-    temp_args, _ = parser.parse_known_args()
-    if "apts" in temp_args.sweep_config.lower():
-        parser.add_argument(
-            "--glob_opt",
-            type=str,
-            default="TR",
-            help="Global optimizer",
-        )
-        parser.add_argument(
-            "--loc_opt", type=str, default="SGD", help="Local optimizer"
-        )
-        parser.add_argument(
-            "--max_loc_iters",
-            type=int,
-            default=3,
-            help="Max iterations for local optimizer",
-        )
-
-    args = parser.parse_args()
-    args.optimizer = args.optimizer.lower()
-    if hasattr(args, "glob_opt") and isinstance(args.glob_opt, str):
-        args.glob_opt = args.glob_opt.lower()
-    if hasattr(args, "loc_opt") and isinstance(args.loc_opt, str):
-        args.loc_opt = args.loc_opt.lower()
-    return args
-
+    # Development branch: finalise parsing here
+    return parser.parse_args()
 
 def wait_and_exit(rank: int) -> None:
     """Wait at the barrier and exit gracefully."""
@@ -166,7 +146,7 @@ def wait_and_exit(rank: int) -> None:
 def save_model_if_needed(
     trainer, count, frequency, work_dir, project, use_pmw, filename_template
 ):
-    if count % frequency == 0:
+    if count % frequency == 0 and count > 0:
         dprint("Saving model...")
         model_path = os.path.join(
             work_dir, filename_template.format(project=project, count=count)
@@ -228,12 +208,22 @@ def main(
         trainer, save_model: bool = False, save_frequency: int = 5
     ) -> None:
 
-        delta = trainer.optimizer.param_groups[0]["lr"]
-        thing_to_print = "lr"
-
-        dprint(
-            f"Epoch {trainer.epoch_num}, Loss: {trainer.loss:.4f}, Accuracy: {trainer.accuracy:.2f}%, Time: {trainer.epoch_dt * 1000:.2f}ms, {thing_to_print}: {delta:.6e}"
-        )
+        # Check if delta is present in the optimizer's attributes
+        if not hasattr(trainer.optimizer, "delta"):
+            delta = trainer.optimizer.param_groups[0]["lr"]
+            thing_to_print = "lr"
+        else:
+            delta = trainer.optimizer.delta
+            thing_to_print = "delta"
+        
+        if isinstance(trainer.train_dataset, (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset)):
+            dprint(
+                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4e}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
+            )
+        else:
+            dprint(
+                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
+            )
 
         if rank == 0 and use_wandb:
             log_fn(
@@ -243,6 +233,9 @@ def main(
                     "loss": trainer.loss,
                     "accuracy": trainer.accuracy,
                     "running_time": trainer.running_time,
+                    "grad_evals": trainer.grad_evals,
+                    f"{thing_to_print}": delta,
+                    "batch_size": trainer.current_batch_size,
                 }
             )
         if save_model:
@@ -258,33 +251,46 @@ def main(
             )
 
     def batch_end_callback(
-        trainer, save_model: bool = True, save_frequency: int = 500
+        trainer, save_model: bool = True, save_frequency: int = 2000
     ) -> None:
-        if rank == 0 and use_wandb:
-            log_fn(
-                {
-                    "iter": trainer.iter_num,
-                    "loss": trainer.loss,
-                    "running_time": trainer.running_time,
-                }
-            )
+        # Check if delta is present in the optimizer's attributes
+        if not hasattr(trainer.optimizer, "delta"):
+            delta = trainer.optimizer.param_groups[0]["lr"]
+            thing_to_print = "lr"
+        else:
+            delta = trainer.optimizer.delta
+            thing_to_print = "delta"
 
-        if trainer.iter_num % 100 == 0:
+        if trainer.iter_num % 50 == 0:
+            if rank == 0 and use_wandb:
+                log_fn(
+                    {
+                        "iter": trainer.iter_num,
+                        "loss": trainer.loss,
+                        "train_perplexity": trainer.curr_train_perplexity,
+                        "running_time": trainer.running_time,
+                        "grad_evals": trainer.grad_evals,
+                        f"{thing_to_print}": delta,
+                        "batch_size": trainer.current_batch_size,
+                    }
+                )
+
             dprint(
-                f"iter_dt {trainer.iter_dt * 1000:.2f}ms; iter {trainer.iter_num}: train loss {trainer.loss:.5f}"
+                f"Iter {trainer.iter_num}, g-evals: {trainer.grad_evals}, time {trainer.iter_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, loss {trainer.loss:.5f}, train perplexity: {trainer.curr_train_perplexity:.5f}, {thing_to_print}: {delta:.6e}"
             )
-        if save_model:
-            proj = wandb_config.get("project", trial_args["project"])
-            filename = f"{proj}_{apts_id}_iter_{{count}}.pt"
-            save_model_if_needed(
-                trainer,
-                count=trainer.iter_num,
-                frequency=save_frequency,
-                work_dir=trial_args["work_dir"],
-                project=proj,
-                use_pmw=trial_args["use_pmw"],
-                filename_template=filename,
-            )
+            if save_model:
+                proj = wandb_config.get("project", trial_args["project"])
+                filename = f"{proj}_{apts_id}_iter_{{count}}.pt"
+                    
+                save_model_if_needed(
+                    trainer,
+                    count=trainer.iter_num,
+                    frequency=save_frequency,
+                    work_dir=trial_args["work_dir"],
+                    project=proj,
+                    use_pmw=trial_args["use_pmw"],
+                    filename_template=filename,
+                )
 
     generic_run(
         rank=rank,
@@ -298,7 +304,7 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 2
+    world_size = 1
     if args["use_pmw"]:
         world_size = (
             args["num_subdomains"]

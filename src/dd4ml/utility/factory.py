@@ -1,5 +1,6 @@
 from .ml_utils import cross_entropy_transformers
 from .utils import import_attr
+from .deeponet_loss import DeepONetMSELoss
 
 
 class Factory:
@@ -65,13 +66,26 @@ DATASET_MAP = {
     "mnist": ("dd4ml.datasets.mnist", "MNISTDataset"),
     "cifar10": ("dd4ml.datasets.cifar10", "CIFAR10Dataset"),
     "tinyshakespeare": ("dd4ml.datasets.tinyshakespeare", "TinyShakespeareDataset"),
+    "poisson1d": ("dd4ml.datasets.pinn_poisson", "Poisson1DDataset"),
+    "poisson2d": ("dd4ml.datasets.pinn_poisson2d", "Poisson2DDataset"),
+    "poisson3d": ("dd4ml.datasets.pinn_poisson3d", "Poisson3DDataset"),
+    "deeponet_sine": ("dd4ml.datasets.deeponet_sine", "SineOperatorDataset"),
 }
 
 MODEL_MAP = {
+    "ffnn": ("dd4ml.models.ffnn.simple_ffnn", "SimpleFFNN"),
+    "medium_ffnn": ("dd4ml.models.ffnn.medium_ffnn", "MediumFFNN"),
     "simple_cnn": ("dd4ml.models.cnn.simple_cnn", "SimpleCNN"),
+    "medium_cnn": ("dd4ml.models.cnn.medium_cnn", "MediumCNN"),
     "big_cnn": ("dd4ml.models.cnn.big_cnn", "BigCNN"),
     "simple_resnet": ("dd4ml.models.resnet.simple_resnet", "SimpleResNet"),
-    "mingpt": ("dd4ml.models.gpt.mingpt.model", "GPT"),
+    "big_resnet": ("dd4ml.models.resnet.big_resnet", "BigResNet"),
+    "nanogpt": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
+    "minigpt": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
+    "microgpt": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
+    "gpt2": ("dd4ml.models.gpt.nanogpt.model", "GPT"),
+    "pinn_ffnn": ("dd4ml.models.ffnn.pinn_ffnn", "PINNFFNN"),
+    "deeponet": ("dd4ml.models.deeponet.deeponet", "DeepONet"),
 }
 
 CRITERION_MAP = {
@@ -86,6 +100,22 @@ CRITERION_MAP = {
     "cross_entropy_transformers": (
         "",
         lambda ds=None: cross_entropy_transformers,  # Assumes defined elsewhere.
+    ),
+    "pinn_poisson": (
+        "dd4ml.utility.pinn_poisson_loss",
+        "PoissonPINNLoss",
+    ),
+    "pinn_poisson2d": (
+        "dd4ml.utility.pinn_poisson2d_loss",
+        "Poisson2DPINNLoss",
+    ),
+    "pinn_poisson3d": (
+        "dd4ml.utility.pinn_poisson3d_loss",
+        "Poisson3DPINNLoss",
+    ),
+    "deeponet_mse": (
+        "",
+        lambda ds=None: DeepONetMSELoss(),
     ),
 }
 

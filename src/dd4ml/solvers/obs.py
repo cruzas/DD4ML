@@ -10,8 +10,8 @@ import scipy
 import scipy.linalg
 import torch
 from numpy import linalg as LA
-from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 try:
     from scipy import array, dot
@@ -28,7 +28,9 @@ class OBS:
         super(OBS, self).__init__()
         self.tol = 1e-6
 
-    def _vec_to_wpt(self, vec: torch.Tensor, like: WeightParallelizedTensor) -> WeightParallelizedTensor:
+    def _vec_to_wpt(
+        self, vec: torch.Tensor, like: WeightParallelizedTensor
+    ) -> WeightParallelizedTensor:
         """Convert flat tensor ``vec`` to a ``WeightParallelizedTensor`` with
         the same sharding as ``like``."""
         shards = []
@@ -37,7 +39,9 @@ class OBS:
             n = t.numel()
             shards.append(vec[offset : offset + n].view_as(t))
             offset += n
-        return WeightParallelizedTensor(shards, like.backend, like.master_group, like.rank)
+        return WeightParallelizedTensor(
+            shards, like.backend, like.master_group, like.rank
+        )
 
     def solve_tr_subproblem(self, g, delta, gamma, Psi, Minv):
         # Check that g, delta, gamma, Psi, and Minv do not have NaN or Inf values
@@ -55,6 +59,9 @@ class OBS:
             raise ValueError(f"Delta must be non-negative. Delta: {delta}")
 
         PsiPsi = torch.matmul(Psi.transpose(0, 1), Psi)
+        # eps = self.tol * torch.norm(PsiPsi, p='fro')
+        # PsiPsi_reg = PsiPsi + eps * torch.eye(PsiPsi.shape[0], device=PsiPsi.device, dtype=PsiPsi.dtype)
+        # PsiPsi = PsiPsi_reg
         R = torch.linalg.cholesky(PsiPsi, upper=True)
 
         MR = torch.linalg.solve(Minv, R.transpose(0, 1))
@@ -90,7 +97,7 @@ class OBS:
         if lambda_min > 0 and torch.norm(helpp) <= delta:
             pStar = self.ComputeSBySMW(gamma, g, PsiTg, Psi, Minv, PsiPsi)
             return pStar
-        elif lambda_min <= 0 and self.phiBar_f(-lambda_min, Lambda, a_j, delta) > 0:
+        elif lambda_min <= 0 and self.phiBar_f(-lambda_min, Lambda, a_j, delta) >= 0:
             sigmaStar = -lambda_min
             v = torch.zeros(sizeD + 1)
             idx_pseudo = torch.where(torch.abs(Lambda + sigmaStar) > self.tol)

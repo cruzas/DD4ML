@@ -29,6 +29,7 @@ class APTS_D(APTS_Base):
         *,
         glob_pass=True,
         foc=True,
+        soc=False,
         norm_type=2,
         max_loc_iters=3,
         max_glob_iters=3,
@@ -60,17 +61,38 @@ class APTS_D(APTS_Base):
 
         # Subclass-specific state
         self.foc = bool(foc)
+        self.soc = bool(soc)
 
         # Clone model for local updates; avoids overwriting global params
         self.loc_model = clone_model(model)
 
-        # Instantiate local optimiser (trust-region or LSSR1_TR)
+        # Instantiate local optimizer (trust-region or LSSR1_TR)
         self.loc_opt = loc_opt(self.loc_model.parameters(), **loc_opt_hparams)
 
         # Choose local closure based on first-order correction flag
         self.loc_closure = (
             self.foc_loc_closure if self.foc else self.non_foc_loc_closure
         )
+        if isinstance(self.loc_opt, ASNTR):
+            self.loc_closure_d = (
+                self.foc_loc_closure_d if self.foc else self.non_foc_loc_closure_d
+            )
+
+        # Compute number of parameters in local and global models
+        self.n_global = self.glob_params_to_vector().numel()
+        self.n_local = self.loc_params_to_vector().numel()
+        self.sqrt_n_global = math.sqrt(self.n_global)
+        self.sqrt_n_local = math.sqrt(self.n_local)
+        
+        if self.norm_type == math.inf:        
+            # Modify delta for global and local optimizers
+            self.glob_opt.min_delta = self.min_delta * self.sqrt_n_global
+            self.glob_opt.max_delta = self.max_delta * self.sqrt_n_global
+            self.loc_opt.min_delta  = self.min_delta * self.sqrt_n_local
+            self.loc_opt.max_delta  = self.max_delta * self.sqrt_n_local
+            
+            self.glob_opt.delta = min(self.glob_opt.max_delta, self.delta * self.sqrt_n_global)
+            self.loc_opt.delta = min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local)
 
         # Print name of glob_opt and loc_opt
         dprint(
@@ -94,14 +116,18 @@ class APTS_D(APTS_Base):
                 step /= self.nr_models
         return step, loc_red
 
-    def step(self, inputs, labels):
+    def step(self, inputs, labels, inputs_d=None, labels_d=None, hNk=None):
         """
         Performs one APTS_D step: evaluate initial losses/gradients,
         run local iterations, propose a step, test acceptance, and possibly
         run additional global iterations.
+
+        inputs_d, labels_d are only used in case we are using ASNTR as the global/local optimizer.
         """
         # Store inputs and labels for closures
         self.inputs, self.labels = inputs, labels
+        self.inputs_d, self.labels_d = inputs_d, labels_d
+        self.hNk = hNk
 
         # Reset gradient evaluation counters (as Python floats)
         # Note: closures will increment these
@@ -111,7 +137,7 @@ class APTS_D(APTS_Base):
         self.init_glob_flat = self.glob_params_to_vector()
 
         # Compute initial global/local loss and gradient
-        self.init_glob_loss, self.init_loc_loss = self.glob_closure(
+        self.init_glob_loss, self.init_loc_loss = self.glob_closure_main(
             compute_grad=True
         ), self.loc_closure(compute_grad=True)
 
@@ -120,20 +146,13 @@ class APTS_D(APTS_Base):
             self.glob_grad_to_vector(),
             self.loc_grad_to_vector(),
         )
-        
-        # Print init glob_grad shape
-        dprint(
-            f"Rank {dist.get_rank()}. Initial global grad shape: {self.init_glob_grad.shape}"
-        )
 
         # Calculate residual between global and local gradients
-        self.resid = self.init_glob_grad - self.init_loc_grad
+        if self.foc:
+            self.resid = self.init_glob_grad - self.init_loc_grad
 
         # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)
-
-        # Account for local gradient evaluations across all models
-        self.grad_evals += self.loc_grad_evals * self.nr_models
 
         # Compute local step and reduction, then aggregate across all models:
         # step becomes global trial step

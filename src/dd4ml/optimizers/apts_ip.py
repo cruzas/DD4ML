@@ -6,13 +6,13 @@ class APTS_IP(APTS_Base):
 
     @staticmethod
     def setup_APTS_hparams(config):
-        loc_opts = {
+        loc_map = {
             "adam": torch.optim.Adam,
             "adamw": torch.optim.AdamW,
             "sgd": torch.optim.SGD,
         }
         try:
-            config.loc_opt = loc_opts[config.loc_opt.lower()]
+            config.loc_opt = loc_map[config.loc_opt.lower()]
         except KeyError:
             raise ValueError(f"Unknown subdomain optimizer: {config.loc_opt}")
 
@@ -22,15 +22,27 @@ class APTS_IP(APTS_Base):
         elif config.loc_opt == torch.optim.SGD:
             config.loc_opt_hparams["momentum"] = 0.9
 
-        config.glob_opt, config.glob_opt_hparams = (
-            (LSSR1_TR, get_lssr1_tr_hparams(config))
-            if config.glob_second_order
-            else (TR, get_tr_hparams(config))
-        )
+        glob_map = {
+            "tr": (TR, get_tr_hparams),
+            "lssr1_tr": (LSSR1_TR, get_lssr1_tr_hparams),
+        }
+
+        if isinstance(config.glob_opt, str):
+            key = config.glob_opt.lower()
+            try:
+                config.glob_opt, hp_fn = glob_map[key]
+            except KeyError:
+                raise ValueError(f"Unknown glob_opt: {config.glob_opt}")
+            config.glob_opt_hparams = hp_fn(config)
+        else:
+            raise ValueError(
+                f"glob_opt must be a string (e.g., 'tr', 'lssr1_tr'), got {type(config.glob_opt)}"
+            )
+
         # Disable gradient broadcast in the global optimizer as each rank
         # holds only a shard of the model when running APTS_IP.
         config.glob_opt_hparams["sync"] = False
-        config.apts_params = get_apts_params(config)
+        config.apts_params = get_apts_hparams(config)
         return config
 
     def __init__(
@@ -53,7 +65,6 @@ class APTS_IP(APTS_Base):
         norm_type=2,
         max_loc_iters=0,
         max_glob_iters=3,
-        dogleg=False,
         tol=1e-6,
         APTS_in_data_sync_strategy="average",
         step_strategy="mean",
@@ -92,17 +103,15 @@ class APTS_IP(APTS_Base):
             raise ValueError(
                 'The APTS in data synchronization strategy must be either "average" or "sum".'
             )
-        if self.APTS_in_data_sync_strategy == "sum" and dist.get_rank() == 0:
+        if self.APTS_in_data_sync_strategy == "sum" and dist.is_initialized() and dist.get_rank() == 0:
             print(
                 '(WARNING) APTS in data "sum" synchronization strategy still has to be tested/verified.'
             )
 
         self.loc_opt = loc_opt(params=model.subdomain_params(), **loc_opt_hparams)
-        
+
         glob_opt_hparams["flat_params"] = self.model.parameters()
-        self.glob_opt = glob_opt(
-            params=list(model.parameters()), **glob_opt_hparams
-        )
+        self.glob_opt = glob_opt(params=list(model.parameters()), **glob_opt_hparams)
         self.glob_opt._flat_grads_fn = self.model.grad
         self.glob_opt._flat_params_fn = self.model.parameters
 
@@ -141,15 +150,15 @@ class APTS_IP(APTS_Base):
         self.loc_steps(final_subdomain_closure)
 
         # Compute global trial step
-        step = self.model.parameters(clone=False) - self.init_glob_flat
+        step = self.model.parameters(clone=True) - self.init_glob_flat
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
-        flat_grads_fn = self.model.grad
         loss, grad, self.glob_opt.delta = self.control_step(step, closure=closure)
 
         # Optional global pass
         if self.glob_pass:
             loss, grad = self.glob_steps(loss, grad, closure=closure)
+            self.grad_evals += 1
 
         self.delta = self.glob_opt.delta
         self._update_param_group()

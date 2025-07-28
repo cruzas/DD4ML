@@ -65,6 +65,7 @@ Note:
 - The code works with or without wandb. If you need it, make sure to install wandb accordingly. 
 - In a cluster environment, you can set wandb usage by setting ```export USE_WANDB=1``` in ```./tests/submit_job.sh```.
 - The ```Factory``` class defined in ```src/dd4ml/utility/factory.py``` allows you to dynamically add new classes, datasets, etc.
+- Ensure that the configured ```batch_size``` is at least the number of processes (```world_size```). If it is smaller, each process defaults to a per-process batch size of 1.
 
 ## Structure
 This library is meant to be general. 
@@ -76,7 +77,13 @@ The src folder is structured as follows:
 - pmw
 - utility
 
-You can extend the library by adding your own files in any of these modules. If you create a new folder within them, make sure to add an ```__init__.py``` file and then re-run ```python3 -m pip install .```, or ```python3 -m pip install --force-reinstall .``` if necessary. 
+You can extend the library by adding your own files in any of these modules. If you create a new folder within them, make sure to add an ```__init__.py``` file and then re-run ```python3 -m pip install .```, or ```python3 -m pip install --force-reinstall .``` if necessary.
+
+### DeepONet Example
+This project includes a basic DeepONet implementation (`deeponet`) together with
+a small synthetic dataset (`deeponet_sine`). To try it out locally you can run
+`tests/run_config_file.py` with `--model_name deeponet --dataset_name deeponet_sine`.
+For batch testing on a cluster, see `tests/submit_jobs_deeponet.sh`.
 
 ## Note
 In case it's necessary, you may need to run the following:

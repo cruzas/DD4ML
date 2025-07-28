@@ -97,6 +97,23 @@ class DropoutFCBlock(nn.Module):
         return self.fc(x)
 
 
+class FlattenFCBlock(nn.Module):
+    """Flatten input then apply a linear layer."""
+
+    def __init__(self, in_features, out_features, activation="relu"):
+        super(FlattenFCBlock, self).__init__()
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(in_features, out_features)
+        self.activation = nn.ReLU(inplace=True) if activation == "relu" else None
+
+    def forward(self, x):
+        x = self.flatten(x)
+        x = self.fc(x)
+        if self.activation:
+            x = self.activation(x)
+        return x
+
+
 # BigCNN uses BaseCNN and its configuration.
 class BigCNN(BaseCNN):
     @staticmethod
@@ -151,9 +168,7 @@ class BigCNN(BaseCNN):
             )
         )
         # Stage 7: Flatten and fully connected layer.
-        self.stage7 = nn.Sequential(
-            FlattenBlock(), FCBlock(128 * 3 * 3, 256, activation="relu")
-        )
+        self.stage7 = FlattenFCBlock(128 * 3 * 3, 256, activation="relu")
         # Stage 8: Dropout and final fully connected layer.
         self.finish = DropoutFCBlock(256, 10, p=0.5)
 
@@ -276,7 +291,7 @@ class BigCNN(BaseCNN):
             },
             "stage7": {
                 "callable": {
-                    "object": FCBlock,
+                    "object": FlattenFCBlock,
                     "settings": {
                         "in_features": 128 * 3 * 3,
                         "out_features": 256,

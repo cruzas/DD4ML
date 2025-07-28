@@ -1,7 +1,9 @@
 import torch
 import torch.distributed as dist
-from .base_pmw_model import BasePMWModel
+
 from dd4ml.utility.ml_utils import get_device
+
+from .base_pmw_model import BasePMWModel
 
 
 class WeightParallelizedTensor(BasePMWModel):
@@ -33,8 +35,9 @@ class WeightParallelizedTensor(BasePMWModel):
 
         # Fallback: detach any WPTs and delegate to PyTorch
         new_args = tuple(x.detach() if isinstance(x, cls) else x for x in args)
-        new_kwargs = {k: (v.detach() if isinstance(v, cls) else v)
-                      for k, v in kwargs.items()}
+        new_kwargs = {
+            k: (v.detach() if isinstance(v, cls) else v) for k, v in kwargs.items()
+        }
         return func(*new_args, **new_kwargs)
 
     def norm(self, p=2, dim=None, keepdim=False, **ignored):
@@ -46,7 +49,8 @@ class WeightParallelizedTensor(BasePMWModel):
         """
         if dim is not None:
             raise NotImplementedError("Per-dimension norms are not supported yet.")
-        if p in (2, float("inf")):
+        if p in (2, "fro", float("inf")):
+            p = 2 if p == "fro" else p
             return torch.norm(self.detach(), p=p)
         raise NotImplementedError("Only L-2 and L-∞ norms are implemented.")
 
@@ -88,16 +92,6 @@ class WeightParallelizedTensor(BasePMWModel):
     def numel(self):
         return sum(p.numel() for p in self.tensor)
 
-    def clone(self):
-        new_wpt = WeightParallelizedTensor(
-            [p.clone() for p in self.tensor],
-            backend=self.backend,
-            master_group=self.master_group,
-            rank=self.rank,
-        )
-        new_wpt._cached_shape = self._cached_shape
-        return new_wpt
-
     def to_device(self, device):
         """
         Move all local shards to the specified device.
@@ -112,7 +106,9 @@ class WeightParallelizedTensor(BasePMWModel):
     def __repr__(self):
         # return f"Rank {self.rank}\nTensor shards: {self.tensor}"
         # Return just the class
-        return f"Rank {self.rank} WeightParallelizedTensor with {len(self.tensor)} shards"
+        return (
+            f"Rank {self.rank} WeightParallelizedTensor with {len(self.tensor)} shards"
+        )
 
     def __neg__(self):
         return WeightParallelizedTensor(
@@ -148,7 +144,8 @@ class WeightParallelizedTensor(BasePMWModel):
             if self.numel() != other.numel() or len(self.tensor) != len(other.tensor):
                 raise ValueError("Tensors must have the same shape")
             local_dp = sum(
-                torch.dot(p.flatten(), q.flatten()) for p, q in zip(self.tensor, other.tensor)
+                torch.dot(p.flatten(), q.flatten())
+                for p, q in zip(self.tensor, other.tensor)
             )
         elif isinstance(other, torch.Tensor):
             flat_other = other.flatten()
@@ -165,7 +162,7 @@ class WeightParallelizedTensor(BasePMWModel):
         )
         local_dp = local_dp.to(device)
         dist.all_reduce(local_dp, group=self.master_group, op=dist.ReduceOp.SUM)
-        return local_dp.item()
+        return local_dp
 
     def __add__(self, other):
         if isinstance(other, WeightParallelizedTensor):
@@ -277,7 +274,7 @@ class WeightParallelizedTensor(BasePMWModel):
             return self
 
         return NotImplemented
-    
+
     @property
     def dtype(self):
         return self.tensor[0].dtype if self.tensor else torch.float32
@@ -285,7 +282,7 @@ class WeightParallelizedTensor(BasePMWModel):
     def invalidate_shape_cache(self):
         """Clear the cached global shape."""
         self._cached_shape = None
-    
+
     def clone(self):
         """
         Create a deep copy of this WeightParallelizedTensor, preserving:
@@ -307,7 +304,32 @@ class WeightParallelizedTensor(BasePMWModel):
 
         # If you'd rather store device as an explicit attribute instead of using property(),
         #    you can set new_wpt._device here; however, since `device` is now a @property
-        #    that inspects each shard, no further action is required. :contentReference[oaicite:0]{index=0}
+        #    that inspects each shard, no further action is required.
 
         new_wpt.device = self.device  # Ensure the device is set correctly
         return new_wpt
+
+    def abs(self):
+        """
+        Return element-wise absolute value across all shards.
+        """
+        return WeightParallelizedTensor(
+            [p.abs() for p in self.tensor],
+            backend=self.backend,
+            master_group=self.master_group,
+            rank=self.rank,
+        )
+    
+    def max(self, dim=None, keepdim=False):
+        """
+        Compute the global maximum across all shards.
+
+        Only global (``dim is None``) max is implemented.
+        """
+        if dim is not None:
+            raise NotImplementedError("Per-dimension max is not supported yet.")
+        # Local maximum
+        local_max = max(p.max() for p in self.tensor).to(get_device())
+        # Reduce globally
+        dist.all_reduce(local_max, group=self.master_group, op=dist.ReduceOp.MAX)
+        return local_max

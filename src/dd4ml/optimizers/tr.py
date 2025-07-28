@@ -1,19 +1,19 @@
 from __future__ import annotations
+
 from typing import Iterable, Tuple
+
 import torch
 from torch.optim import Optimizer
-from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
+
 from dd4ml.optimizers.lsr1 import LSR1
+from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.solvers.obs import OBS
-from dd4ml.utility import (
-    get_tr_hparams,
-    solve_tr_first_order,
-    solve_tr_second_order,
-)
+from dd4ml.utility import get_tr_hparams, solve_tr_first_order, solve_tr_second_order
+
 
 class TR(Optimizer):
     __name__ = "TR"
-    
+
     @staticmethod
     def setup_TR_hparams(cfg):
         # Add trust-region hyperparameters to the config
@@ -21,12 +21,24 @@ class TR(Optimizer):
             setattr(cfg, k, v)
         return cfg
 
-    def __init__(self, params: Iterable[torch.nn.Parameter], **kwargs) -> None:
+    def __init__(
+        self,
+        params: Iterable[torch.nn.Parameter],
+        *,
+        flat_grads_fn: Callable[[], torch.Tensor] | None = None,
+        flat_params_fn: Callable[[], torch.Tensor] | None = None,
+        **kwargs,
+    ) -> None:
         # Extract trust-region hyperparameters from kwargs
         self.delta = kwargs.pop("delta", 0.1)
         self.norm_type = kwargs.pop("norm_type", 2)
-        self.tol = kwargs.pop("tol", 1e-6)
+        self.tol = float(kwargs.pop("tol", 1e-6))
         self.second_order = bool(kwargs.pop("second_order", False))
+        self.dogleg = bool(
+            kwargs.pop("dogleg", False)
+        )  # only used if second_order is True
+        if self.dogleg and not self.second_order:
+            raise ValueError("Dogleg is only applicable in second-order mode")
         self.mem_length = int(kwargs.pop("mem_length", 10))
         self.nu_dec = kwargs.pop("nu_dec")
         self.nu_inc = kwargs.pop("nu_inc")
@@ -34,6 +46,10 @@ class TR(Optimizer):
         self.inc_factor = kwargs.pop("inc_factor")
         self.min_delta = kwargs.pop("min_delta")
         self.dec_factor = kwargs.pop("dec_factor")
+
+        # Hooks for custom flatten operations
+        self._flat_grads_fn = flat_grads_fn
+        self._flat_params_fn = flat_params_fn
 
         # Only 'lr' remains in defaults
         defaults = {"lr": self.delta}
@@ -55,17 +71,24 @@ class TR(Optimizer):
 
         # Optional second-order support
         if self.second_order:
-            tol = self.tol
             mem_len = self.mem_length
             device = self.ps[0].device
-            self.hess = LSR1(1.0, mem_len, device, tol)
+            self.hess = LSR1(
+                gamma=1.0, memory_length=mem_len, device=device, tol=self.tol
+            )
             self.obs = OBS()
         else:
             self.hess = None  # type: ignore
-            self.obs = None   # type: ignore
+            self.obs = None  # type: ignore
 
     def _flat_grad(self) -> torch.Tensor:
         """Return the current gradient as a single flat vector."""
+        if self._flat_grads_fn is not None:
+            grad = self._flat_grads_fn()
+            if isinstance(grad, WeightParallelizedTensor):
+                grad = grad.detach()
+            return grad.clone() if isinstance(grad, torch.Tensor) else grad
+
         self._grad_buf.zero_()
         for i, p in enumerate(self.ps):
             if p.grad is not None:
@@ -74,14 +97,34 @@ class TR(Optimizer):
                 if isinstance(g, WeightParallelizedTensor):
                     g = g.detach()
                 self._grad_buf[s:e].copy_(g.view(-1))
-        return self._grad_buf
+        return self._grad_buf.clone()
 
     def _apply_update(self, sign: float = 1.0) -> None:
         """Add sign * step to each parameter tensor in-place."""
         with torch.no_grad():
-            for i, p in enumerate(self.ps):
-                s, e = int(self.offsets[i]), int(self.offsets[i + 1])
-                p.add_(self._step_buf[s:e].view(self.shapes[i]) * sign)
+            if self._flat_params_fn is not None:
+                flat_params = self._flat_params_fn()
+                if isinstance(flat_params, WeightParallelizedTensor):
+                    if isinstance(self._step_buf, WeightParallelizedTensor):
+                        for p, base, upd in zip(
+                            self.ps,
+                            flat_params.tensor,
+                            self._step_buf.tensor,
+                        ):
+                            p.copy_(base.view_as(p) + sign * upd.view_as(p))
+                    else:
+                        for i, (p, base) in enumerate(zip(self.ps, flat_params.tensor)):
+                            s, e = int(self.offsets[i]), int(self.offsets[i + 1])
+                            p.copy_(
+                                base.view_as(p) + sign * self._step_buf[s:e].view_as(p)
+                            )
+                else:
+                    updated = flat_params + sign * self._step_buf
+                    torch.nn.utils.vector_to_parameters(updated, self.ps)
+            else:
+                for i, p in enumerate(self.ps):
+                    s, e = int(self.offsets[i]), int(self.offsets[i + 1])
+                    p.add_(self._step_buf[s:e].view(self.shapes[i]) * sign)
 
     def update_pytorch_lr(self) -> None:
         """Keep PyTorch's recorded lr in sync with the current δ."""
@@ -91,7 +134,7 @@ class TR(Optimizer):
     def step(self, closure, **_) -> Tuple[float, torch.Tensor]:
         # Evaluate loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
-        grad = _["grad"] if "grad" in _ else self._flat_grad()
+        grad = _["grad"].clone() if "grad" in _ else self._flat_grad()
         if isinstance(grad, WeightParallelizedTensor):
             grad = grad.detach()
         gn = torch.norm(grad, p=self.norm_type)
@@ -101,22 +144,20 @@ class TR(Optimizer):
             return loss, grad
 
         # First- or second-order TR step
-        use_second = (
-            self.second_order
-            and self.hess
-            and len(self.hess._S) > 0  # type: ignore
-        )
-        if use_second:
-            self._step_buf, predicted = solve_tr_second_order(
-                grad,
-                gn,
-                self.delta,
-                self.hess,      # type: ignore[arg-type]
-                self.obs,       # type: ignore[arg-type]
-                self.tol,
+        if self.second_order and len(self.hess._S) > 0:
+            # pred_red = -(g*p + 0.5*p*B*p)
+            self._step_buf, pred_red = solve_tr_second_order(
+                gradient=grad,
+                grad_norm=gn,
+                trust_radius=self.delta,
+                lsr1_hessian=self.hess,  # type: ignore[arg-type]
+                obs_solver=self.obs,  # type: ignore[arg-type]
+                tol=self.tol,
+                dogleg=self.dogleg,
             )
         else:
-            self._step_buf, predicted = solve_tr_first_order(
+            # pred_red = -g*p
+            self._step_buf, pred_red = solve_tr_first_order(
                 grad, gn, self.delta, self.tol
             )
 
@@ -126,20 +167,23 @@ class TR(Optimizer):
         trial_grad = self._flat_grad()
 
         # Acceptance ratio ρ
-        actual = (loss - trial_loss)
-        rho = actual / (predicted + 1e-12)
+        if abs(float(pred_red)) < self.tol:
+            rho = float("inf")  # Avoid division by zero
+        else:
+            rho = (loss - trial_loss) / pred_red
 
-        if actual > 0 and rho >= self.nu_dec:
+        if rho > self.nu_dec:
             # Accept
-            if use_second:
-                self.hess.update_memory(  # type: ignore[union-attr]
-                    self._step_buf.clone(), (trial_grad - grad).clone()
-                )
-            # Optional expansion of trust region 
-            if (
-                rho >= self.nu_inc
-                and self._step_buf.norm() >= 0.9 * self.delta
-            ):
+            if self.second_order:
+                # Update Hessian memory
+                sk = self._step_buf.clone()
+                yk = (trial_grad - grad).clone()
+
+                if sk.norm() > self.tol and yk.norm() > self.tol:
+                    # Also takes care of updating gamma
+                    self.hess.update_memory(sk, yk)
+
+            if rho > self.nu_inc and self._step_buf.norm() >= 0.9 * self.delta:
                 self.delta = min(
                     self.max_delta,
                     self.inc_factor * self.delta,

@@ -4,21 +4,21 @@ metric:
   goal: minimize
 parameters:
   optimizer: 
-    value: "sgd" # pmw compatible
+    value: "sgd"
   batch_size:
-    value: 200
+    value: 128
   effective_batch_size:
-    value: 200 
+    value: 128 
   epochs: 
-    value: 10 # used for any other model other than LLMs
+    value: 5
   max_iters:
-    value: 10000
+    value: 2000
   learning_rate:
-    value: 0.1
+    value: 0.01
   dataset_name: 
-    value: "cifar10"
+    value: "mnist"
   model_name: 
-    value: "simple_resnet"
+    value: "simple_cnn"
   criterion:
     value: "cross_entropy"
   seed:
@@ -34,4 +34,7 @@ parameters:
     value: False
   accumulation_steps:
     value: None
-  
+  batch_inc_factor:
+    value: 1.0
+  overlap:
+    value: 0.0

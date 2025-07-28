@@ -9,12 +9,12 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
 from dd4ml.utility import (
-    Timer,
+    apts_ip_restore_params,
     clone_model,
     dprint,
     ensure_tensor,
     flatten_params,
-    get_apts_params,
+    get_apts_hparams,
     get_device,
     get_loc_tr_hparams,
     get_lssr1_loc_tr_hparams,
@@ -23,10 +23,11 @@ from dd4ml.utility import (
     get_tr_hparams,
     mark_trainable,
     restore_params,
+    trainable_grads_to_vector,
     trainable_params_to_vector,
-    apts_ip_restore_params,
 )
 
+from .asntr import ASNTR
 from .lssr1_tr import LSSR1_TR
 from .tr import TR
 
@@ -40,18 +41,42 @@ class APTS_Base(Optimizer):
         Configure global and local optimizer classes and arguments
         based on whether second-order methods are required.
         """
-        config.glob_opt, config.glob_opt_hparams = (
-            (LSSR1_TR, get_lssr1_tr_hparams(config))
-            if config.glob_second_order
-            else (TR, get_tr_hparams(config))
-        )
-        config.loc_opt, config.loc_opt_hparams = (
-            (LSSR1_TR, get_lssr1_loc_tr_hparams(config))
-            if config.loc_second_order
-            else (TR, get_loc_tr_hparams(config))
-        )
+        glob_map = {
+            "tr": (TR, get_tr_hparams),
+            "lssr1_tr": (LSSR1_TR, get_lssr1_tr_hparams),
+        }
+        loc_map = {
+            "tr": (TR, get_loc_tr_hparams),
+            "lssr1_tr": (LSSR1_TR, get_lssr1_loc_tr_hparams),
+            "sgd": (torch.optim.SGD, lambda _: {"lr": 0.01}),
+        }
 
-        config.apts_params = get_apts_params(config)
+        if isinstance(config.glob_opt, str):
+            key = config.glob_opt.lower()
+            try:
+                config.glob_opt, hp_fn = glob_map[key]
+            except KeyError:
+                raise ValueError(f"Unknown glob_opt: {config.glob_opt}")
+            config.glob_opt_hparams = hp_fn(config)
+        else:
+            raise ValueError(
+                "glob_opt must be a string specifying the optimizer type, e.g., 'tr' or 'lssr1_tr'."
+            )
+
+        loc_value = getattr(config, "loc_opt", None)
+        if isinstance(loc_value, str):
+            key = loc_value.lower()
+            try:
+                config.loc_opt, hp_fn = loc_map[key]
+            except KeyError:
+                raise ValueError(f"Unknown loc_opt: {loc_value}")
+            config.loc_opt_hparams = hp_fn(config)
+        else:
+            raise ValueError(
+                "loc_opt must be a string specifying the optimizer type, e.g., 'tr', 'lssr1_tr', or 'sgd'."
+            )
+
+        config.apts_params = get_apts_hparams(config)
         return config
 
     def __init__(
@@ -79,7 +104,7 @@ class APTS_Base(Optimizer):
         max_glob_iters=None,
         tol=1e-6,
     ):
-        # Only 'lr' remains in defaults
+        # Only ``lr" remains in defaults
         super().__init__(params, {"lr": delta})
 
         # Assign hyperparameters as attributes
@@ -100,8 +125,9 @@ class APTS_Base(Optimizer):
         self.nr_models = nr_models  # number of models in the distributed environment
         self.device = get_device(device)
         self.criterion = criterion
+        self.dataset_len = 0
 
-        # Instantiate global optimizer (trust-region or LSSR1_TR)
+        # Instantiate global optimizer (LSSR1_TR, TR, or ASNTR)
         self.model = model
         self.glob_opt = glob_opt(self.model.parameters(), **glob_opt_hparams)
 
@@ -109,6 +135,7 @@ class APTS_Base(Optimizer):
         self.loc_model = None
         self.loc_opt = None
         self.loc_closure = None
+        self.loc_closure_d = None  # For ASNTR only
 
         # Keep delta in sync with underlying global optimizer
         self.delta = self.glob_opt.delta
@@ -119,36 +146,7 @@ class APTS_Base(Optimizer):
         self._loc_flat_buffer = torch.empty_like(sample_flat)  # for local models
 
         # Track number of gradient evaluations as simple Python floats
-        self.grad_evals = 0.0
-        self.loc_grad_evals = 0.0
-
-    def zero_timers(self):
-        self.timings = {key: 0 for key in self.timings}
-        if hasattr(self.loc_opt, "zero_timers"):
-            self.loc_opt.zero_timers()
-
-    def get_timings(self):
-        timings = self.timings.copy()
-        if "tradam" in str(self.loc_opt).lower():
-            timings.update(self.loc_opt.get_timings())
-        return timings
-
-    def display_avg_timers(self):
-        timings = self.get_timings()
-        timings.pop("precond", None)
-        total_time = sum(timings.values())
-        headers = ["Timer", "Time (s)", "Percentage (%)"]
-        rows = [
-            [k, f"{v:.4f}", f"{(v / total_time) * 100:.2f}%"]
-            for k, v in sorted(timings.items())
-        ]
-        col_widths = [max(len(row[i]) for row in rows + [headers]) for i in range(3)]
-        row_fmt = "  ".join(f"{{:<{w}}}" for w in col_widths)
-        table = [row_fmt.format(*headers), "-" * sum(col_widths)]
-        table.extend(row_fmt.format(*row) for row in rows)
-        table_str = "\n".join(table)
-        print(table_str)
-        return table_str
+        self.grad_evals, self.loc_grad_evals = 0.0, 0.0
 
     def _update_param_group(self):
         for key in self.param_groups[0].keys():
@@ -182,9 +180,11 @@ class APTS_Base(Optimizer):
         Converts the local model's gradients to a flattened vector.
         Returns a tensor containing the gradients of the local model parameters.
         """
-        return parameters_to_vector(
-            [p.grad for p in self.loc_model.parameters()]
-        ).detach()
+        return (
+            parameters_to_vector([p.grad for p in self.loc_model.parameters()])
+            .clone()
+            .detach()
+        )
 
     @torch.no_grad()
     def glob_params_to_vector(self):
@@ -192,7 +192,7 @@ class APTS_Base(Optimizer):
         Converts the global model's parameters to a flattened vector.
         Returns a tensor containing the parameters of the global model.
         """
-        return flatten_params(self.model, self._flat_params_buffer).detach()
+        return flatten_params(self.model, self._flat_params_buffer).clone().detach()
 
     @torch.no_grad()
     def loc_params_to_vector(self):
@@ -200,21 +200,7 @@ class APTS_Base(Optimizer):
         Converts the local model's parameters to a flattened vector.
         Returns a tensor containing the parameters of the local model.
         """
-        return flatten_params(self.loc_model, self._loc_flat_buffer).detach()
-
-    @torch.no_grad()
-    def ensure_step_within_tr(self, step):
-        """
-        Ensure the step is within the trust region delta.
-        If the step norm exceeds delta, scale it down.
-        """
-        step_norm = step.norm(p=self.norm_type)
-        if step_norm > self.delta:
-            dprint(
-                f"Warning: step norm {step_norm:.6e} exceeds delta {self.delta:.4f}. Scaling down step."
-            )
-            step = (self.delta / step_norm) * step
-        return step
+        return flatten_params(self.loc_model, self._loc_flat_buffer).clone().detach()
 
     @torch.no_grad()
     def sync_glob_to_loc(self):
@@ -222,16 +208,17 @@ class APTS_Base(Optimizer):
         self.update_pytorch_lr()
 
         self.loc_opt.delta = self.glob_opt.delta
-        if self.norm_type != math.inf and self.nr_models > 1:
+        if self.norm_type == 2 and self.nr_models > 1:
             self.loc_opt.delta /= self.nr_models
-        self.loc_opt.update_pytorch_lr()
+        if hasattr(self.loc_opt, "update_pytorch_lr"):
+            self.loc_opt.update_pytorch_lr()
 
-        # Ensure local model matches global model for next iteration
+        # Ensure local model matches global model for the next iteration
         self.loc_model.load_state_dict(get_state_dict(self.model))
 
     def non_foc_loc_closure(self, compute_grad: bool = False):
         """
-        Local closure when no first-order correction is used.
+        Local closure when no first-order consistency is used.
         Computes and optionally backpropagates the local loss.
         """
         self.loc_opt.zero_grad()
@@ -243,8 +230,8 @@ class APTS_Base(Optimizer):
 
     def foc_loc_closure(self, compute_grad: bool = False):
         """
-        Local closure with first-order correction. Adds residual term
-        to local loss if global vs. local parameters diverge.
+        Local closure with first-order consistency. Adds residual term
+        to local loss if global vs local parameters diverge.
         """
         self.loc_opt.zero_grad()
         loss = self.non_foc_loc_closure(compute_grad)
@@ -261,7 +248,7 @@ class APTS_Base(Optimizer):
             loss = loss + (self.resid @ diff)
         return loss
 
-    def glob_closure(self, compute_grad: bool = False):
+    def glob_closure_main(self, compute_grad: bool = False):
         """
         Global closure: zeroes gradients, computes loss on the global model,
         optionally backpropagates, and reduces loss across processes if needed.
@@ -269,95 +256,172 @@ class APTS_Base(Optimizer):
         self.zero_grad()
         loss = self.criterion(self.model(self.inputs), self.labels)
         if torch.is_grad_enabled() or compute_grad:
-            loss.backward()  # DDP will handle gradient averaging
+            loss.backward()  # DDP handles gradient averaging
+            # Check if model is DDP-wrapped
+            if not isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+                # Handle gradient averaging for non-DDP models
+                if self.nr_models > 1 and dist.is_available() and dist.is_initialized():
+                    # flatten grads, sum across ranks, then average
+                    flat_grad = self.glob_grad_to_vector()
+                    dist.all_reduce(flat_grad, op=dist.ReduceOp.SUM)
+                    flat_grad.div_(self.nr_models)
+                    # unpack back into each parameter's grad
+                    vector_to_parameters(
+                        flat_grad, [p.grad for p in self.model.parameters()]
+                    )
+
             self.grad_evals += 1.0  # Count global gradient evaluation
         if self.nr_models > 1:
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
             loss /= self.nr_models
         return loss
 
-    def _step_loop(self, optim, max_iters, loss, grad, closure=None):
+    # For ASNTR
+    def non_foc_loc_closure_d(self, compute_grad: bool = False):
+        self.loc_opt.zero_grad()
+        loss = self.criterion(self.loc_model(self.inputs_d), self.labels_d)
+        if torch.is_grad_enabled() or compute_grad:
+            loss.backward()
+        return loss
+
+    def foc_loc_closure_d(self, compute_grad: bool = False):
+        self.loc_opt.zero_grad()
+        loss = self.non_foc_loc_closure_d(compute_grad)
+
+        # Flatten global and local parameters into pre-allocated buffers
+        glob_flat = flatten_params(self.model, self._flat_params_buffer)
+        loc_flat = flatten_params(self.loc_model, self._loc_flat_buffer)
+        diff = loc_flat - glob_flat
+
+        # If difference above tolerance, add residual inner-product term
+        if not torch.all(torch.abs(diff) < self.tol):
+            if self.resid.dim() == 0 and self.resid.item() == 0:
+                self.resid = torch.zeros_like(diff)
+            loss = loss + (self.resid @ diff)
+        return loss
+
+    def glob_closure_d(self, compute_grad: bool = False):
+        self.zero_grad()
+        loss = self.criterion(self.model(self.inputs_d), self.labels_d)
+        if torch.is_grad_enabled() or compute_grad:
+            loss.backward()  # DDP will handle gradient averaging
+        if self.nr_models > 1:
+            dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+            loss /= self.nr_models
+        return loss
+
+    def _step_loop(self, optim, max_iters, loss, grad, closure=None, closure_d=None):
         for _ in range(max_iters):
-            # Perform an optimization step (trust-region or LSSR1) with precomputed values
+            # Perform an optimization step (trust-region, LSSR1, or ASNTR) with precomputed values
             if closure is not None:
-                loss, grad = optim.step(closure=closure, loss=loss, grad=grad)
+                # Check if TR or LSSR1_TR optimizer
+                if isinstance(optim, (TR, LSSR1_TR)):
+                    loss, grad = optim.step(closure=closure, loss=loss, grad=grad)
+                else:
+                    # For ASNTR, we need to provide closure_d as well
+                    loss, grad = optim.step(
+                        closure_main=closure,
+                        closure_d=closure_d,
+                        loss=loss,
+                        grad=grad,
+                    )
             else:
                 raise ValueError(
                     "Closure must be provided for global/local optimization step in APTS. To be modified in future."
                 )
 
             # Stop iterations if gradient norm is below tolerance
-            grad_norm = grad.norm(p=self.norm_type)
-            if grad_norm <= optim.tol:
+            if grad.norm(p=self.norm_type) <= optim.tol:
                 break
 
         return loss, grad
 
     def loc_steps(self, loss, grad):
-        return self._step_loop(
-            optim=self.loc_opt,
-            max_iters=self.max_loc_iters,
-            loss=loss,
-            grad=grad,
-            closure=self.loc_closure,
-        )
+        step_loop_args = {
+            "optim": self.loc_opt,
+            "max_iters": self.max_loc_iters,
+            "loss": loss,
+            "grad": grad,
+            "closure": self.loc_closure,
+            "closure_d": self.loc_closure_d,
+        }
 
-    def glob_steps(self, loss, grad, closure=None):
-        return self._step_loop(
-            optim=self.glob_opt,
-            max_iters=self.max_glob_iters,
-            loss=loss,
-            grad=grad,
-            closure=self.glob_closure if closure is None else closure,
-        )
+        loc_loss, loc_grad = self._step_loop(**step_loop_args)
+        loc_evals = torch.tensor(self.loc_grad_evals, device=self.device)
+        if self.nr_models > 1:
+            dist.all_reduce(loc_evals, op=dist.ReduceOp.SUM)
+            loc_evals /= self.nr_models
+        self.grad_evals += loc_evals.item()
+        return loc_loss, loc_grad
 
-    def control_step(self, step: torch.Tensor, pred: torch.Tensor | None = None, closure=None):
+    def glob_steps(self, loss, grad, closure=None, closure_d=None):
+        step_loop_args = {
+            "optim": self.glob_opt,
+            "max_iters": self.max_glob_iters,
+            "loss": loss,
+            "grad": grad,
+            "closure": self.glob_closure_main if closure is None else closure,
+            "closure_d": self.glob_closure_d if closure_d is None else closure_d,
+        }
+
+        return self._step_loop(**step_loop_args)
+
+    def control_step(
+        self, step: torch.Tensor, pred: torch.Tensor | None = None, closure=None
+    ):
         """
         Unified trust-region control:
-          - If `pred` is given, use it directly (pure TR).
-          - Otherwise compute a Dogleg prediction:
-              • First-order fallback (pred = -gᵀp) when no SR1 memory.
-              • Full (gᵀp + 0.5·pᵀBp) if `hess._S` is nonempty.
+          - If "pred" is given, use it directly (pure TR).
+          - Otherwise compute prediction:
+              + First-order fallback (pred = -gᵀp) when no SR1 memory.
+              + Second-order (pred = -(g^T * p + 0.5*p^T * B * p) if SR1 memory available.
         """
-
-        # Tentatively apply the step
+        # Determine restore function based on closure presence
         restore_fn = restore_params if closure is None else apts_ip_restore_params
-        
+        # Tentatively apply the step
         restore_fn(self.model, self.init_glob_flat + step)
 
         # Evaluate trial loss & gradient
-        trial_loss = self.glob_closure(compute_grad=True) if closure is None else closure(compute_grad=True, zero_grad=True)
-        trial_grad = self.glob_grad_to_vector() if closure is None else self.model.grad(clone=True)
+        trial_loss = (
+            self.glob_closure_main(compute_grad=True)
+            if closure is None
+            else closure(compute_grad=True, zero_grad=True)
+        )
+        trial_grad = (
+            self.glob_grad_to_vector()
+            if closure is None
+            else self.model.grad(clone=True)
+        )
 
-        # Compute or use supplied `pred`
+        # Compute or use supplied ``pred"
         if pred is None:
-            # Dogleg-style prediction
             g = self.init_glob_grad
             # linear part
-            pred_val = -g.dot(step)
+            pred_red = -g.dot(step)
             # add quadratic term if SR1 info exists
-            if self.glob_opt.hess._S is not None and len(self.glob_opt.hess._S) > 0:
+            # Check if hess is an attribute of glob_opt
+            if hasattr(self.glob_opt, "hess") and self.glob_opt.hess is not None and self.glob_opt.hess._S is not None and len(self.glob_opt.hess._S) > 0:
                 self.glob_opt.hess.precompute()
                 Bp = self.glob_opt.hess.B(step)
-                pred_val -= 0.5 * step.dot(Bp)
+                pred_red -= 0.5 * step.dot(Bp)
         else:
-            pred_val = pred
+            pred_red = pred
 
         # Compute rho = (f(init) − f(trial)) / pred
-        if abs(float(pred_val)) < self.tol:
+        if abs(float(pred_red)) < self.tol:
             rho = float("inf")
         else:
-            rho = (self.init_glob_loss - trial_loss) / pred_val
+            rho = (self.init_glob_loss - trial_loss) / pred_red
 
-        # Accept/reject + adjust trust region
-        if pred_val < self.tol or rho < self.nu_dec:
-            # Reject: shrink trust region and restore original params
+        # Accept/reject and adjust trust region radius
+        if pred_red < self.tol or rho < self.nu_dec:
+            # Reject: restore original params (and possibly shrink the trust region radius)
             self.delta = max(self.delta * self.dec_factor, self.min_delta)
             self.update_pytorch_lr()
             restore_fn(self.model, self.init_glob_flat)
             return self.init_glob_loss, self.init_glob_grad, self.delta
         else:
-            # Accept: possibly enlarge trust region
+            # Accept (and possibly enlarge the trust region radius)
             if rho > self.nu_inc:
                 self.delta = min(self.delta * self.inc_factor, self.max_delta)
                 self.update_pytorch_lr()

@@ -5,7 +5,8 @@ import torch.distributed as dist
 import torch.nn.functional as F
 
 from .base_pmw_model import BasePMWModel
-from .data_and_weight_parallelized_subdomain import DataAndWeightParallelizedSubdomain
+from .data_and_weight_parallelized_subdomain import \
+    DataAndWeightParallelizedSubdomain
 
 
 class ParallelizedModel(BasePMWModel):
