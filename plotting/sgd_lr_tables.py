@@ -26,8 +26,8 @@ def prepare_hyperparam_table(gdf, group_cols):
         {
             "summary_loss_mean": "loss_mean",
             "summary_loss_std": "loss_std",
-            # "summary_accuracy_mean": "acc_mean",
-            # "summary_accuracy_std": "acc_std",
+            "summary_accuracy_mean": "acc_mean",
+            "summary_accuracy_std": "acc_std",
             "summary_running_time_mean": "time_mean",
             "summary_running_time_std": "time_std",
             "summary_running_time_count": "sample_count",
@@ -39,8 +39,8 @@ def prepare_hyperparam_table(gdf, group_cols):
         "sample_count",
         "loss_mean",
         "loss_std",
-        # "acc_mean",
-        # "acc_std",
+        "acc_mean",
+        "acc_std",
         "time_mean",
         "time_std",
     ]
@@ -50,28 +50,31 @@ def prepare_hyperparam_table(gdf, group_cols):
 def collect_gdf_all(
     proj,
     dataset,
+    model_name,
+    overlap,
+    batch_inc_factor,
     lrs,
     bss,
     group_keys,
     group_abbrs,
     metrics=None,
     aggregate="mean",
-    mad_threshold=3.0,
+    mad_threshold=1e99,
 ):
     """
     Run analyze_wandb_runs_advanced for each hyperparameter combination,
     collect all grouped DataFrames and tag with dataset.
     """
-    # metrics = metrics or ["loss", "accuracy", "running_time"]
-    metrics = ["loss", "running_time"]
+    metrics = metrics or ["loss", "accuracy", "running_time"]
     all_gdfs = []
     for lr, bs in product(lrs, bss):
         filters = {
             "config.dataset_name": dataset,
+            "config.model_name": model_name,
             "config.learning_rate": lr,
             "config.batch_size": bs,
-            "config.overlap": 0.33,
-            "config.batch_inc_factor": 1.5,
+            "config.overlap": overlap,
+            "config.batch_inc_factor": batch_inc_factor,
         }
         _, gdf = analyze_wandb_runs_advanced(
             project_path=proj,
@@ -92,13 +95,16 @@ def collect_gdf_all(
 
 def main(
     entity="cruzas-universit-della-svizzera-italiana",
-    project="sgd_sweep_overlap",
+    project="gamm2025sgd",
 ):
     proj = f"{entity}/{project}"
-    datasets = ["poisson2d"]
-    learning_rates = [1e-3, 1e-2, 1e-1]
+    datasets = ["mnist"]
+    model_name = "medium_ffnn"
+    overlap = 0.0
+    batch_inc_factor = 1.0
+    learning_rates = [1e-3, 1e-2, 1e-1, 1, 2]
     # batch_sizes = [2048, 4096, 8192]
-    batch_sizes = [64, 128, 256, 512]
+    batch_sizes = [10000]
 
     out_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
     os.makedirs(out_dir, exist_ok=True)
@@ -107,6 +113,9 @@ def main(
         gdf = collect_gdf_all(
             proj,
             ds,
+            model_name,
+            overlap,
+            batch_inc_factor,
             learning_rates,
             batch_sizes,
             group_keys=["learning_rate", "batch_size"],
@@ -125,8 +134,8 @@ def main(
                 lambda df: {
                     "lr_min_loss": df.loc[df.loss_mean.idxmin(), "lr"],
                     "min_loss": df.loss_mean.min(),
-                    # "lr_max_acc": df.loc[df.acc_mean.idxmax(), "lr"],
-                    # "max_acc": df.acc_mean.max(),
+                    "lr_max_acc": df.loc[df.acc_mean.idxmax(), "lr"],
+                    "max_acc": df.acc_mean.max(),
                 }
             )
             .apply(pd.Series)
@@ -135,7 +144,7 @@ def main(
 
         print(best.to_string(index=False))
 
-        fname = f"{ds}_sgd_tuning_summary.txt"
+        fname = f"{ds}_{model_name}_{overlap}_{batch_inc_factor}_sgd_tuning_summary.txt"
         path = os.path.join(out_dir, fname)
         with open(path, "w") as f:
             f.write(table.to_string(index=False, float_format="%.4f"))
