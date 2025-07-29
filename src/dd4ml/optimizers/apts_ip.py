@@ -103,7 +103,11 @@ class APTS_IP(APTS_Base):
             raise ValueError(
                 'The APTS in data synchronization strategy must be either "average" or "sum".'
             )
-        if self.APTS_in_data_sync_strategy == "sum" and dist.is_initialized() and dist.get_rank() == 0:
+        if (
+            self.APTS_in_data_sync_strategy == "sum"
+            and dist.is_initialized()
+            and dist.get_rank() == 0
+        ):
             print(
                 '(WARNING) APTS in data "sum" synchronization strategy still has to be tested/verified.'
             )
@@ -120,6 +124,7 @@ class APTS_IP(APTS_Base):
         )
 
     def loc_steps(self, final_subdomain_closure=None):
+        self.loc_opt.lr = self.delta / self.max_loc_iters
         for i in range(self.max_loc_iters):
             self.loc_opt.zero_grad()
             self.loc_opt.step()
