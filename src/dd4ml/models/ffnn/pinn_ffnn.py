@@ -3,8 +3,9 @@ import torch.nn as nn
 
 from .base_ffnn import BaseFFNN
 
+
 class PINNFFNN(BaseFFNN):
-    """Fully‑connected network with at least eight hidden layers for PINN regression."""
+    """Fully-connected network with at least eight hidden layers for PINN regression."""
 
     @staticmethod
     def get_default_config():
@@ -28,4 +29,5 @@ class PINNFFNN(BaseFFNN):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
+        return self.net(x)
         return self.net(x)

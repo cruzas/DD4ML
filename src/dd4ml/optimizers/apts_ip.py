@@ -10,17 +10,21 @@ class APTS_IP(APTS_Base):
             "adam": torch.optim.Adam,
             "adamw": torch.optim.AdamW,
             "sgd": torch.optim.SGD,
+            "tradam": TRAdam,
         }
         try:
             config.loc_opt = loc_map[config.loc_opt.lower()]
         except KeyError:
             raise ValueError(f"Unknown subdomain optimizer: {config.loc_opt}")
 
-        config.loc_opt_hparams = {"lr": config.learning_rate}
-        if config.loc_opt in {torch.optim.Adam, torch.optim.AdamW}:
-            config.loc_opt_hparams["betas"] = config.betas
-        elif config.loc_opt == torch.optim.SGD:
-            config.loc_opt_hparams["momentum"] = 0.9
+        if config.loc_opt == "tradam":
+            config.loc_opt_hparams = get_loc_tradam_hparams(config)
+        else:
+            config.loc_opt_hparams = {"lr": config.learning_rate}
+            if config.loc_opt in {torch.optim.Adam, torch.optim.AdamW}:
+                config.loc_opt_hparams["betas"] = config.betas
+            elif config.loc_opt == torch.optim.SGD:
+                config.loc_opt_hparams["momentum"] = 0.9
 
         glob_map = {
             "tr": (TR, get_tr_hparams),
@@ -103,7 +107,11 @@ class APTS_IP(APTS_Base):
             raise ValueError(
                 'The APTS in data synchronization strategy must be either "average" or "sum".'
             )
-        if self.APTS_in_data_sync_strategy == "sum" and dist.is_initialized() and dist.get_rank() == 0:
+        if (
+            self.APTS_in_data_sync_strategy == "sum"
+            and dist.is_initialized()
+            and dist.get_rank() == 0
+        ):
             print(
                 '(WARNING) APTS in data "sum" synchronization strategy still has to be tested/verified.'
             )
@@ -120,6 +128,7 @@ class APTS_IP(APTS_Base):
         )
 
     def loc_steps(self, final_subdomain_closure=None):
+        self.loc_opt.lr = self.delta / self.max_loc_iters
         for i in range(self.max_loc_iters):
             self.loc_opt.zero_grad()
             self.loc_opt.step()

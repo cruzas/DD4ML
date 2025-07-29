@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=false # Set to true for debugging mode
+DEBUGGING=true # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py"
@@ -13,7 +13,7 @@ if $DEBUGGING; then
   partition="debug"
   time="00:30:00"
   SCALING_TYPE="strong"
-  BATCH_SIZES=(200)
+  BATCH_SIZES=(2000)
   NUM_SUBD=(1)
   NUM_STAGES=(1)
   NUM_REP=(1)
@@ -21,13 +21,13 @@ else
   PROJECT="gamm2025sgd"
   TRIALS=3
   partition="normal"
-  time="01:00:00"
+  time="00:30:00"
   SCALING_TYPE="strong"
   if [[ "$SCALING_TYPE" == "weak" ]]; then
     BATCH_SIZES=(512 1024) # For weak scaling, we use smaller batch sizes
   else
     # For strong scaling, we use larger batch sizes
-    BATCH_SIZES=(200)
+    BATCH_SIZES=(2000)
   fi
   NUM_SUBD=(1)
   NUM_STAGES=(1)
@@ -39,16 +39,16 @@ GRAD_ACC=false
 
 # --- Sweep settings: SGD only + three LRs --- #
 OPTIMIZERS=(sgd)
-LEARNING_RATES=(0.001 0.01 0.1)
+LEARNING_RATES=(1.0)
 overlap=0.0
 batch_inc_factor=1.0
 
 DATASETS=(cifar10)
-MODELS=(simple_resnet)
+MODELS=(big_resnet)
 
 # (Remove all APTS / TR / dogleg loops – they’re skipped since optimizer=sgd)
 
-EVAL_PARAMS=(epochs=50 max_iters=0 criterion=cross_entropy)
+EVAL_PARAMS=(epochs=25 max_iters=0 criterion=cross_entropy)
 
 set_optimizer_params() {
   local opt="$1"

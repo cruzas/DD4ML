@@ -7,6 +7,9 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import yaml
 
+from dd4ml.datasets.pinn_poisson import Poisson1DDataset
+from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
+from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
 from dd4ml.utility import (
     broadcast_dict,
     detect_environment,
@@ -17,10 +20,6 @@ from dd4ml.utility import (
     prepare_distributed_environment,
     set_seed,
 )
-
-from dd4ml.datasets.pinn_poisson import Poisson1DDataset
-from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
-from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
 
 try:
     import wandb
@@ -37,7 +36,9 @@ def parse_cmd_args() -> argparse.Namespace:
         description="Parse command line arguments.",
     )
 
-    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
+    parser.add_argument(
+        "--optimizer", type=str, default="apts_ip", help="Optimizer name"
+    )
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
     )
@@ -46,7 +47,7 @@ def parse_cmd_args() -> argparse.Namespace:
     default_use_pmw = temp_args.optimizer == "apts_ip"
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
-    default_project = "debugging"
+    default_project = "gamm2025debugging"
 
     parser.add_argument(
         "--use_pmw",
@@ -79,11 +80,11 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Directory to save models",
     )
     parser.add_argument(
-        "--dataset_name", type=str, default="mnist", help="Dataset name"
+        "--dataset_name", type=str, default="cifar10", help="Dataset name"
     )
     parser.add_argument("--overlap", type=float, default=0.0, help="Overlap factor")
     parser.add_argument(
-        "--model_name", type=str, default="simple_cnn", help="Model name"
+        "--model_name", type=str, default="big_resnet", help="Model name"
     )
     parser.add_argument(
         "--criterion",
@@ -92,9 +93,9 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Criterion name",
     )
     parser.add_argument(
-        "--learning_rate", type=float, default=0.01, help="Learning rate"
+        "--learning_rate", type=float, default=0.1, help="Learning rate"
     )
-    parser.add_argument("--delta", type=float, default=0.01, help="Trust-region radius")
+    parser.add_argument("--delta", type=float, default=0.1, help="Trust-region radius")
     parser.add_argument(
         "--metric",
         type=str,
@@ -121,7 +122,7 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--num_subdomains", type=int, default=1, help="Number of subdomains"
     )
-    parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
+    parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
     parser.add_argument(
         "--num_replicas_per_subdomain",
         type=int,
@@ -131,6 +132,7 @@ def parse_cmd_args() -> argparse.Namespace:
 
     # Development branch: finalise parsing here
     return parser.parse_args()
+
 
 def wait_and_exit(rank: int) -> None:
     """Wait at the barrier and exit gracefully."""
@@ -215,8 +217,11 @@ def main(
         else:
             delta = trainer.optimizer.delta
             thing_to_print = "delta"
-        
-        if isinstance(trainer.train_dataset, (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset)):
+
+        if isinstance(
+            trainer.train_dataset,
+            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset),
+        ):
             dprint(
                 f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4e}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
             )
@@ -281,7 +286,7 @@ def main(
             if save_model:
                 proj = wandb_config.get("project", trial_args["project"])
                 filename = f"{proj}_{apts_id}_iter_{{count}}.pt"
-                    
+
                 save_model_if_needed(
                     trainer,
                     count=trainer.iter_num,
@@ -304,7 +309,7 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 1
+    world_size = 2
     if args["use_pmw"]:
         world_size = (
             args["num_subdomains"]

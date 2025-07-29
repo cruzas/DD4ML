@@ -15,12 +15,8 @@ from dd4ml.utility import (
     optimizer_factory,
     print_params_norm,
 )
-from dd4ml.datasets.pinn_poisson import Poisson1DDataset
-from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
-from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
 
-from .config import get_config, make_std_config, GPT_MODEL_ALIASES
-
+from .config import GPT_MODEL_ALIASES, get_config, make_std_config
 
 # You can now add new components dynamically at runtime by calling, e.g.:
 # dataset_factory.register("new_dataset", "dd4ml.datasets.new_dataset", "NewDatasetClass")
@@ -42,6 +38,9 @@ def get_config_model_and_trainer(args, wandb_config):
     """
     Create and return the standardized configuration, model, and trainer.
     """
+    from dd4ml.datasets.pinn_poisson import Poisson1DDataset
+    from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
+    from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
     from dd4ml.pmw.model_handler import ModelHandler
     from dd4ml.pmw.parallelized_model import ParallelizedModel
     from dd4ml.trainer import Trainer
@@ -67,8 +66,8 @@ def get_config_model_and_trainer(args, wandb_config):
     else:
         args.pop("sweep_config", None)
     all_config.merge_from_dict(args)
-    
-    # Ensure the correct GPT model_type is set based on the provided   
+
+    # Ensure the correct GPT model_type is set based on the provided
     model_key = next((k for k in GPT_MODEL_ALIASES if k in model_name.lower()), None)
     if model_key is not None and getattr(all_config.model, "model_type", None) is None:
         all_config.model.model_type = GPT_MODEL_ALIASES[model_key]
@@ -139,7 +138,9 @@ def get_config_model_and_trainer(args, wandb_config):
         device = get_device()
         model.to(device)
 
-        if dist.is_initialized() and dist.get_world_size() > 1: # and all_config.trainer.data_parallel
+        if (
+            dist.is_initialized() and dist.get_world_size() > 1
+        ):  # and all_config.trainer.data_parallel
             loc_rank = int(os.environ.get("LOCAL_RANK", 0))
             print(
                 f"Rank {dist.get_rank()}, local rank {loc_rank}, cuda available: {torch.cuda.is_available()}"

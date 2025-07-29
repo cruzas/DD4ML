@@ -8,28 +8,19 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
-from dd4ml.utility import (
-    apts_ip_restore_params,
-    clone_model,
-    dprint,
-    ensure_tensor,
-    flatten_params,
-    get_apts_hparams,
-    get_device,
-    get_loc_tr_hparams,
-    get_lssr1_loc_tr_hparams,
-    get_lssr1_tr_hparams,
-    get_state_dict,
-    get_tr_hparams,
-    mark_trainable,
-    restore_params,
-    trainable_grads_to_vector,
-    trainable_params_to_vector,
-)
+from dd4ml.utility import (apts_ip_restore_params, clone_model, dprint,
+                           ensure_tensor, flatten_params, get_apts_hparams,
+                           get_device, get_loc_tr_hparams,
+                           get_loc_tradam_hparams, get_lssr1_loc_tr_hparams,
+                           get_lssr1_tr_hparams, get_state_dict,
+                           get_tr_hparams, mark_trainable, restore_params,
+                           trainable_grads_to_vector,
+                           trainable_params_to_vector)
 
 from .asntr import ASNTR
 from .lssr1_tr import LSSR1_TR
 from .tr import TR
+from .tradam import TRAdam
 
 
 class APTS_Base(Optimizer):
@@ -48,6 +39,7 @@ class APTS_Base(Optimizer):
         loc_map = {
             "tr": (TR, get_loc_tr_hparams),
             "lssr1_tr": (LSSR1_TR, get_lssr1_loc_tr_hparams),
+            "tradam": (TRadam, get_loc_tradam_hparams),
             "sgd": (torch.optim.SGD, lambda _: {"lr": 0.01}),
         }
 
@@ -400,7 +392,12 @@ class APTS_Base(Optimizer):
             pred_red = -g.dot(step)
             # add quadratic term if SR1 info exists
             # Check if hess is an attribute of glob_opt
-            if hasattr(self.glob_opt, "hess") and self.glob_opt.hess is not None and self.glob_opt.hess._S is not None and len(self.glob_opt.hess._S) > 0:
+            if (
+                hasattr(self.glob_opt, "hess")
+                and self.glob_opt.hess is not None
+                and self.glob_opt.hess._S is not None
+                and len(self.glob_opt.hess._S) > 0
+            ):
                 self.glob_opt.hess.precompute()
                 Bp = self.glob_opt.hess.B(step)
                 pred_red -= 0.5 * step.dot(Bp)

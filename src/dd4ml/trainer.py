@@ -819,7 +819,11 @@ class Trainer:
                 total_samples += bs
 
                 # weight by global sample count
-                epoch_loss += batch_loss * (bs * self.world_size / len(self.train_dataset))
+                if not self._apts_ip_present():
+                    epoch_loss += batch_loss * (bs * self.world_size / len(self.train_dataset))
+                else:
+                    # print(f"Rank {dist.get_rank()}: number of samples processed: {bs}")
+                    epoch_loss += batch_loss * (bs / len(self.train_dataset))
                 self.loss = epoch_loss
 
                 stay = self._stay_here()
