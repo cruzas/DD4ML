@@ -50,3 +50,5 @@ tests/config_files/config_files/*trial*
 /MNIST
 /tests/IndexedMNIST
 /tests/MNIST
+/tests/config_files/*trial*
+

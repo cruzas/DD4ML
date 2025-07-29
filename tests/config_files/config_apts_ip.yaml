@@ -28,7 +28,7 @@ parameters:
   loc_dogleg:
     value: False
   norm_type:
-    value: 2
+    value: inf
   max_loc_iters:
     value: 3
   max_glob_iters:
@@ -70,7 +70,7 @@ parameters:
   glob_opt:
     value: "TR"
   loc_opt:
-    value: "SGD"
+    value: "TRAdam"
   paper_tr_update:
     value: False
   drop_last:

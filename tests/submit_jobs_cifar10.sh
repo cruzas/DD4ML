@@ -17,10 +17,10 @@ if $DEBUGGING; then
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="gamm2025" # wandb project name
-  TRIALS=3                 # Repetitions per configuration
-  partition="normal"       # Slurm partition for normal runs
-  time="01:00:00"          # Time limit for debugging
+  PROJECT="gamm2025debug" # wandb project name
+  TRIALS=1                 # Repetitions per configuration
+  partition="gpu"       # Slurm partition for normal runs
+  time="00:30:00"          # Time limit for debugging
   SCALING_TYPE="strong"
   if [[ "$SCALING_TYPE" == "weak" ]]; then
     BATCH_SIZES=(256 512 1024) # For weak scaling, we use smaller batch sizes
@@ -51,11 +51,11 @@ LOC_DOGLEGS=(false)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(TR) # options: tr, lssr1_tr, sgd, adam*, etc.
-APTS_LOC_OPTS=(SGD)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and adam*
+APTS_LOC_OPTS=(TRAdam)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and adam*
 FOC_OPTS=(false)
 
 # Evaluation parameters: epochs, max iterations, loss
-EVAL_PARAMS=(epochs=50 max_iters=0 criterion=cross_entropy)
+EVAL_PARAMS=(epochs=25 max_iters=0 criterion=cross_entropy)
 
 # Adaptive solver parameters (base)
 APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.33 glob_second_order=false)
@@ -66,7 +66,7 @@ set_optimizer_params() {
   if [[ "$opt" == "apts_ip" ]]; then
     USE_PMW=true
     NUM_SUBD=(1)
-    NUM_STAGES=(2 4 8)
+    NUM_STAGES=(2)
     NUM_REP=(1)
   fi
 }

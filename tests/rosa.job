@@ -3,7 +3,7 @@
 #SBATCH --output=./log_files/${job_name}.out
 #SBATCH --error=./log_files/${job_name}.err
 #SBATCH --nodes=1
-#SBATCH --time=00:30:00
+#SBATCH --time=${time}
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-core=1
 
@@ -49,10 +49,9 @@ if [ "${use_wandb}" = "1" ]; then
     export WANDB_MODE=online
 fi
 
-# Set additional flag if optimizer is "apts"
 extra_flags=""
-if [[ "$optimizer" == "apts" ]]; then
-    extra_flags="--use_pmw"
+if [[ "$optimizer" == "apts_ip" ]]; then
+    extra_flags="--use_pmw" # only necessary for inexact gradient version of APTS
 fi
 
 # Execute the Python script

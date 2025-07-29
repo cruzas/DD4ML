@@ -133,7 +133,7 @@ def get_loc_tr_hparams(config):
         "delta": config.delta * delta_scale,
         "max_delta": config.max_delta * delta_scale,  # Lower maximum for local updates
         "min_delta": config.min_delta * delta_scale,
-        "nu": 0.45,  
+        "nu": 0.45,
         "inc_factor": 1.5,  # Reduced increase factor
         "dec_factor": 0.6,
         "nu_dec": 0.3,
@@ -143,6 +143,19 @@ def get_loc_tr_hparams(config):
         "second_order": config.loc_second_order,
         "dogleg": config.loc_dogleg,
         "tol": config.tol,
+    }
+
+
+def get_loc_tradam_hparams(config):
+    """
+    Returns default hyperparameters for the TRAdam optimizer,
+    when used as the local optimizer for APTS.
+    """
+    return {
+        "lr": config.learning_rate,
+        "betas": (0.9, 0.999),
+        "eps": 1e-8,
+        "norm_type": config.norm_type,
     }
 
 
@@ -263,11 +276,11 @@ def solve_tr_second_order(
             a = d.dot(d)
             b = 2 * p_c.dot(d)
             c = p_c.dot(p_c) - delta**2
-            disc = b ** 2 - 4 * a * c # discriminant
-            
+            disc = b**2 - 4 * a * c  # discriminant
+
             if disc < 0:
-                p = p_c # fallback to Cauchy point if no valid tau
-            else:    
+                p = p_c  # fallback to Cauchy point if no valid tau
+            else:
                 tau = (-b + torch.sqrt(disc)) / (2 * a)
                 p = p_c + tau * d
     else:
