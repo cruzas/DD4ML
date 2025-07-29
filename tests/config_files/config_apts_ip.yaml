@@ -30,7 +30,7 @@ parameters:
   norm_type:
     value: inf
   max_loc_iters:
-    value: 3
+    value: 5
   max_glob_iters:
     value: 1
   max_iters:
@@ -40,9 +40,9 @@ parameters:
   delta: 
     value: 0.1
   min_delta: 
-    value: 0.001
+    value: 0.01
   max_delta:
-    value: 2.0
+    value: 0.5
   dataset_name: 
     value: "cifar10" 
   model_name: 

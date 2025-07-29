@@ -1,25 +1,25 @@
 #!/bin/bash
 set -euo pipefail
 
-DEBUGGING=false # Set to true for debugging mode
+DEBUGGING=true # Set to true for debugging mode
 
 # --- Constants and Defaults --- #
 SCRIPT="run_config_file.py" # Python script to execute
 PAPER_TR_UPDATES=(true)     # For LSSR1-TR: use TR updates from paper
 if $DEBUGGING; then
-  PROJECT="debugging" # wandb project name
+  PROJECT="gamm2025debug2" # wandb project name
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
-  time="00:10:00"     # Time limit for debugging
+  time="00:30:00"     # Time limit for debugging
   SCALING_TYPE="strong"
   BATCH_SIZES=(200)
   NUM_SUBD=(1)
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="gamm2025debug" # wandb project name
+  PROJECT="gamm2025debug2" # wandb project name
   TRIALS=1                 # Repetitions per configuration
-  partition="gpu"       # Slurm partition for normal runs
+  partition="normal"       # Slurm partition for normal runs
   time="00:30:00"          # Time limit for debugging
   SCALING_TYPE="strong"
   if [[ "$SCALING_TYPE" == "weak" ]]; then
@@ -39,7 +39,7 @@ GRAD_ACC=false # Gradient accumulation flag
 # Configuration sweeps
 OPTIMIZERS=(apts_ip)
 DATASETS=(cifar10)
-MODELS=(simple_resnet)
+MODELS=(big_resnet)
 
 # Second-order toggles
 GLOB_SECOND_ORDERS=(false)
@@ -66,7 +66,7 @@ set_optimizer_params() {
   if [[ "$opt" == "apts_ip" ]]; then
     USE_PMW=true
     NUM_SUBD=(1)
-    NUM_STAGES=(2)
+    NUM_STAGES=(4)
     NUM_REP=(1)
   fi
 }
@@ -104,8 +104,8 @@ set_apts_lssr1_tr_params() {
       mem_length=5
     )
     if [[ "$opt" != "lssr1_tr" ]]; then
-      APTS_PARAMS+=(glob_opt=lssr1_tr max_glob_iters=1 glob_second_order=true
-                    loc_opt=lssr1_tr max_loc_iters=3 loc_second_order=true)
+      APTS_PARAMS+=(glob_opt=lssr1_tr max_glob_iters=1 glob_second_order=false
+                    loc_opt=lssr1_tr max_loc_iters=3 loc_second_order=false)
       case "$opt" in
         apts_d)
           APTS_PARAMS+=(glob_pass=true foc=true)
