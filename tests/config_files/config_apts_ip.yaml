@@ -6,11 +6,11 @@ parameters:
   optimizer: 
     value: "apts_ip" 
   batch_size:
-    value: 5000
+    value: 200
   effective_batch_size:
-    value: 5000
+    value: 200
   num_stages:
-    value: 1
+    value: 2
   num_subdomains:
     value: 1
   num_replicas_per_subdomain:
@@ -22,7 +22,7 @@ parameters:
   dogleg:
     value: False
   glob_second_order:
-    value: True
+    value: False
   loc_second_order:
     value: False
   loc_dogleg:
@@ -44,13 +44,13 @@ parameters:
   max_delta:
     value: 2.0
   dataset_name: 
-    value: "mnist" 
+    value: "cifar10" 
   model_name: 
-    value: "simple_cnn"
+    value: "big_resnet"
   criterion:
     value: "cross_entropy"
   gradient_accumulation:
-    value: True
+    value: False
   accumulation_steps:
     value: 1
   seed:
@@ -58,9 +58,9 @@ parameters:
   tol:
     value: 1e-6
   batch_inc_factor:
-    value: 1.5
+    value: 1.0
   overlap:
-    value: 0.33
+    value: 0.0
   mem_length:
     value: 5
   max_wolfe_iters:
