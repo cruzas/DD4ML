@@ -51,6 +51,7 @@ def plot_grid_time_series(
     filters_base: dict,
     extra_filters: dict | None = None,
     sgd_filters: dict[int, dict] | None = None,
+    apts_ip_filters: dict[int, dict] | None = None,
     figsize: tuple = (12, 8),
     x_limits: dict[str, tuple[float, float]] | None = None,
     y_limits: dict[str, tuple[float, float]] | None = None,
@@ -69,20 +70,37 @@ def plot_grid_time_series(
     """
     extra_filters = extra_filters or {}
     sgd_filters = sgd_filters or {}
+    apts_ip_filters = apts_ip_filters or {}
     api = wandb.Api()
 
     # Collect runs
     runs_all = []
     for size in batch_sizes:
         base_f = {**filters_base, f"config.{base_key}": size, **extra_filters}
-        runs_gen = api.runs(project_path, filters=base_f)
-        runs_gen = [
-            r
-            for r in runs_gen
-            if r.config.get(base_key) == size
-            and r.config.get("optimizer", "").lower() != "sgd"
-        ]
-        runs_all.extend(runs_gen)
+
+        # # non‑SGD runs
+        # runs_gen = api.runs(project_path, filters=base_f)
+        # runs_gen = [
+        #     r
+        #     for r in runs_gen
+        #     if r.config.get(base_key) == size
+        #     and r.config.get("optimizer", "").lower() != "sgd"
+        #     and r.config.get("loc_opt", "").lower() != "sgd"
+        # ]
+        # runs_all.extend(runs_gen)
+
+        # APTS_IP‑filtered runs
+        if size in apts_ip_filters:
+            aip_f = {
+                **base_f,
+                "config.optimizer": "apts_ip",
+                **{f"config.{k}": v for k, v in apts_ip_filters[size].items()},
+            }
+            runs_aip = api.runs(project_path, filters=aip_f)
+            runs_aip = [r for r in runs_aip if r.config.get(base_key) == size]
+            runs_all.extend(runs_aip)
+
+        # SGD runs with strong/weak regimes
         if size in sgd_filters:
             lr_f = sgd_filters[size]
             sgd_f = {
@@ -112,17 +130,14 @@ def plot_grid_time_series(
     labels_full = [rf"${latex_opt(opt.upper())}\;\mid\;N={N}$" for opt, N in combos]
     colour_map = {combo: f"C{i}" for i, combo in enumerate(combos)}
 
-    # Prepare storage for CSV rows per combo
     csv_rows_by_combo: dict[tuple, list[dict]] = {combo: [] for combo in combos}
 
-    # Organise runs by (size, combo)
     runs_by = {}
     for r in runs_all:
         bs = r.config.get(base_key)
         combo = (r.config.get("optimizer", "unk"), r.config.get("num_stages", "unk"))
         runs_by.setdefault((bs, combo), []).append(r)
 
-    # Create subplot grid
     fig, axes = plt.subplots(
         nrows=len(metrics),
         ncols=len(batch_sizes),
@@ -136,7 +151,6 @@ def plot_grid_time_series(
         for j, size in enumerate(batch_sizes):
             ax = axes[i, j]
             for combo in combos:
-                # collect raw series
                 series_list = []
                 for r in runs_by.get((size, combo), []):
                     hist = get_history(r.id)
@@ -146,15 +160,12 @@ def plot_grid_time_series(
                 if not series_list:
                     continue
 
-                # concatenate on x_axis index
                 df_concat = pd.concat(
                     [s.set_index(x_axis)[metric] for s in series_list], axis=1
                 )
-                # compute mean & std across runs for each x-axis value
                 mean_series = df_concat.mean(axis=1)
                 std_series = df_concat.std(axis=1)
 
-                # collect CSV rows
                 for x_val, m, s in zip(
                     mean_series.index, mean_series.values, std_series.values
                 ):
@@ -170,7 +181,6 @@ def plot_grid_time_series(
                         }
                     )
 
-                # plot
                 col = colour_map[combo]
                 ax.plot(mean_series.index, mean_series.values, color=col)
                 if len(series_list) > 1:
@@ -200,7 +210,6 @@ def plot_grid_time_series(
     fig.subplots_adjust(top=0.88)
     plt.tight_layout(rect=[0, 0, 1, 0.88])
 
-    # Save figure and legend
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
@@ -218,7 +227,6 @@ def plot_grid_time_series(
     else:
         plt.show()
 
-    # Write one pivoted CSV per combo
     if csv_path:
         os.makedirs(os.path.dirname(csv_path), exist_ok=True)
         for combo, rows in csv_rows_by_combo.items():
@@ -229,8 +237,7 @@ def plot_grid_time_series(
             pivoted = means.join(stds.add_suffix("_std")).reset_index()
             cols = [x_axis]
             for m in metrics:
-                cols.append(m)
-                cols.append(f"{m}_std")
+                cols.extend([m, f"{m}_std"])
             pivoted = pivoted[cols]
 
             base, _ = os.path.splitext(csv_path)
@@ -241,27 +248,32 @@ def plot_grid_time_series(
 
 def main():
     entity = "cruzas-universit-della-svizzera-italiana"
-    project = "gamm2025"
+    project = "thesis_results"
     proj = f"{entity}/{project}"
     base_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures")
 
     datasets = ["cifar10"]
-    model_names = {"mnist": "medium_ffnn", "cifar10": "big_resnet"}
+    model_names = {"mnist": "simple_cnn", "cifar10": "simple_resnet"}
     configs = {
         "mnist": {
             "filters": {"config.model_name": model_names["mnist"]},
             "sgd_filters_strong": {10000: {"learning_rate": 0.10}},
             "x_limits": {"epoch": (0, 100), "running_time": (0, 300)},
-            "y_limits": {"loss": (0, 2.0), "accuracy": (20, 100)},
+            "y_limits": {"loss": (0, 2.0), "accuracy": (0, 100)},
         },
         "cifar10": {
             "filters": {"config.model_name": model_names["cifar10"]},
             "sgd_filters_strong": {200: {"learning_rate": 0.1}},
             "x_limits": {"epoch": (0, 25), "running_time": (0, 800)},
-            "y_limits": {"loss": (0, 5.0), "accuracy": (20, 90)},
+            "y_limits": {"loss": (0, 5.0), "accuracy": (0, 90)},
         },
     }
     x_axes = ["epoch", "running_time"]
+
+    # Example APTS_IP filters
+    # apts_filters = {
+    #     200: {"loc_opt": "TRAdam", "max_delta": 0.1, "max_loc_iters": 5},
+    # }
 
     for dataset in datasets:
         cfg = configs[dataset]
@@ -288,6 +300,7 @@ def main():
                     filters_base=fb,
                     extra_filters=None,
                     sgd_filters=cfg[params["sgd_key"]],
+                    apts_ip_filters=None,  # apts_filters,
                     x_limits=cfg.get("x_limits"),
                     y_limits=cfg.get("y_limits"),
                     save_path=save_path,
