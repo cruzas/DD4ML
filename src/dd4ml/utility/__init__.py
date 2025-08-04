@@ -12,3 +12,4 @@ from .wandb_utils import *
 from .pinn_poisson_loss import PoissonPINNLoss
 from .pinn_poisson2d_loss import Poisson2DPINNLoss
 from .pinn_poisson3d_loss import Poisson3DPINNLoss
+from .pinn_allencahn_loss import AllenCahnPINNLoss

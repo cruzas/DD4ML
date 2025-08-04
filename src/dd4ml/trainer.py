@@ -20,6 +20,7 @@ from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
+from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
 from dd4ml.datasets.deeponet_sine import SineOperatorDataset
 from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure, dprint
@@ -394,6 +395,7 @@ class Trainer:
                 Poisson1DDataset,
                 Poisson2DDataset,
                 Poisson3DDataset,
+                AllenCahn1DDataset,
             ),
         ):
             self.run_by_epoch_PINN()
@@ -418,6 +420,7 @@ class Trainer:
                 Poisson1DDataset,
                 Poisson2DDataset,
                 Poisson3DDataset,
+                AllenCahn1DDataset,
             ),
         )
         context = torch.enable_grad if requires_grad_eval else torch.no_grad
@@ -496,7 +499,13 @@ class Trainer:
         """Compute test accuracy across all processes (and pipeline stages)."""
         if isinstance(
             self.test_dataset,
-            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, SineOperatorDataset),
+            (
+                Poisson1DDataset,
+                Poisson2DDataset,
+                Poisson3DDataset,
+                AllenCahn1DDataset,
+                SineOperatorDataset,
+            ),
         ):
             self.accuracy = float("nan")
             return
@@ -602,7 +611,10 @@ class Trainer:
         bs = y.size(0)
 
         # Special handling for PINN datasets
-        if isinstance(self.train_dataset, (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset)):
+        if isinstance(
+            self.train_dataset,
+            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, AllenCahn1DDataset),
+        ):
             return self._train_one_batch_PINN(x, y, first_grad)
 
         # optional control batch for ASNTR

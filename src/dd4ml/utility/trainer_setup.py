@@ -41,6 +41,7 @@ def get_config_model_and_trainer(args, wandb_config):
     from dd4ml.datasets.pinn_poisson import Poisson1DDataset
     from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
     from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
+    from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
     from dd4ml.pmw.model_handler import ModelHandler
     from dd4ml.pmw.parallelized_model import ParallelizedModel
     from dd4ml.trainer import Trainer
@@ -97,7 +98,10 @@ def get_config_model_and_trainer(args, wandb_config):
     if (
         hasattr(all_config.model, "input_features")
         and all_config.model.input_features is not None
-        and isinstance(dataset, (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset))
+        and isinstance(
+            dataset,
+            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, AllenCahn1DDataset),
+        )
     ):
         sample_x, _ = dataset[0]
         all_config.model.input_features = sample_x.numel()
