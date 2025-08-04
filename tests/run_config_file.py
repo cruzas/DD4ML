@@ -10,6 +10,7 @@ import yaml
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
+from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
 from dd4ml.utility import (
     broadcast_dict,
     detect_environment,
@@ -220,7 +221,7 @@ def main(
 
         if isinstance(
             trainer.train_dataset,
-            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset),
+            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, AllenCahn1DDataset),
         ):
             dprint(
                 f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4e}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"

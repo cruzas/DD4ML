@@ -69,6 +69,7 @@ DATASET_MAP = {
     "poisson1d": ("dd4ml.datasets.pinn_poisson", "Poisson1DDataset"),
     "poisson2d": ("dd4ml.datasets.pinn_poisson2d", "Poisson2DDataset"),
     "poisson3d": ("dd4ml.datasets.pinn_poisson3d", "Poisson3DDataset"),
+    "allencahn1d": ("dd4ml.datasets.pinn_allencahn", "AllenCahn1DDataset"),
     "deeponet_sine": ("dd4ml.datasets.deeponet_sine", "SineOperatorDataset"),
 }
 
@@ -112,6 +113,10 @@ CRITERION_MAP = {
     "pinn_poisson3d": (
         "dd4ml.utility.pinn_poisson3d_loss",
         "Poisson3DPINNLoss",
+    ),
+    "pinn_allencahn": (
+        "dd4ml.utility.pinn_allencahn_loss",
+        "AllenCahnPINNLoss",
     ),
     "deeponet_mse": (
         "",
