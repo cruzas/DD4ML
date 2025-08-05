@@ -3,6 +3,14 @@ set -euo pipefail
 
 SCRIPT=${SCRIPT:-run_config_file.py}
 PAPER_TR_UPDATES=(${PAPER_TR_UPDATES[@]:-true})
+GLOB_SECOND_ORDERS=(${GLOB_SECOND_ORDERS[@]:-false})
+LOC_SECOND_ORDERS=(${LOC_SECOND_ORDERS[@]:-false})
+GLOB_DOGLEGS=(${GLOB_DOGLEGS[@]:-false})
+LOC_DOGLEGS=(${LOC_DOGLEGS[@]:-false})
+APTS_GLOB_OPTS=(${APTS_GLOB_OPTS[@]:-})
+APTS_LOC_OPTS=(${APTS_LOC_OPTS[@]:-})
+FOC_OPTS=(${FOC_OPTS[@]:-})
+APTS_PARAMS=(${APTS_PARAMS[@]:-})
 
 set_optimizer_params() {
   local opt="$1"
@@ -83,15 +91,15 @@ extract_apts_details() {
 submit_job() {
   local template="$1" jobfile
   jobfile=$(mktemp)
-  sed -e "s|\\${job_name}|${job_name}|g" \
-    -e "s|\\${world_size}|${world_size}|g" \
-    -e "s|\\${script}|${SCRIPT}|g" \
-    -e "s|\\${num_stages}|${num_stages}|g" \
-    -e "s|\\${num_subd}|${num_subd}|g" \
-    -e "s|\\${num_rep}|${num_rep}|g" \
-    -e "s|\\${ntasks_per_node}|${ntasks_per_node}|g" \
-    -e "s|\\${partition}|${partition}|g" \
-    -e "s|\\${time}|${time}|g" \
+  sed -e "s|\\\${job_name}|${job_name}|g" \
+    -e "s|\\\${world_size}|${world_size}|g" \
+    -e "s|\\\${script}|${SCRIPT}|g" \
+    -e "s|\\\${num_stages}|${num_stages}|g" \
+    -e "s|\\\${num_subd}|${num_subd}|g" \
+    -e "s|\\\${num_rep}|${num_rep}|g" \
+    -e "s|\\\${ntasks_per_node}|${ntasks_per_node}|g" \
+    -e "s|\\\${partition}|${partition}|g" \
+    -e "s|\\\${time}|${time}|g" \
     "$template" >"$jobfile"
   if ! sbatch --nodes="${nodes}" "$jobfile"; then
     echo "ERROR: sbatch failed for $job_name" >&2
@@ -139,117 +147,126 @@ for optimizer in "${OPTIMIZERS[@]}"; do
                 set_model_params "$model"
                 set_grad_acc_params
                 set_hardware_params
-                set_apts_lssr1_tr_params "$optimizer"
-                extract_apts_details
-                if [[ "$optimizer" == "asntr" || "$APTS_GLOB_OPT" == "asntr" || "$APTS_LOC_OPT" == "asntr" ]]; then
-                  for i in "${!APTS_PARAMS[@]}"; do
-                    if [[ "${APTS_PARAMS[$i]}" == batch_inc_factor=* ]]; then
-                      APTS_PARAMS[$i]="batch_inc_factor=1.01"
+                  set_apts_lssr1_tr_params "$optimizer"
+                  if [[ "$optimizer" == apts_* || "$optimizer" == "lssr1_tr" ]]; then
+                    extract_apts_details
+                    if [[ "$optimizer" == "asntr" || "$APTS_GLOB_OPT" == "asntr" || "$APTS_LOC_OPT" == "asntr" ]]; then
+                      for i in "${!APTS_PARAMS[@]}"; do
+                        if [[ "${APTS_PARAMS[$i]}" == batch_inc_factor=* ]]; then
+                          APTS_PARAMS[$i]="batch_inc_factor=1.01"
+                        fi
+                      done
                     fi
-                  done
-                fi
-                tmp=()
-                for kv in "${APTS_PARAMS[@]}"; do
-                  key=${kv%%=*}
-                  if [[ $key != glob_opt && $key != loc_opt && $key != glob_second_order && $key != loc_second_order && $key != foc && $key != glob_pass ]]; then
-                    tmp+=("$kv")
-                  fi
-                done
-                for glob_opt in "${APTS_GLOB_OPTS[@]}"; do
-                  for loc_opt in "${APTS_LOC_OPTS[@]}"; do
-                    if [[ "$optimizer" == "apts_d" ]]; then
-                      foc_values=("${FOC_OPTS[@]}")
-                    else
-                      foc_values=(false)
-                    fi
-                    for foc in "${foc_values[@]}"; do
-                      APTS_PARAMS=("${tmp[@]}")
-                      if [[ "$optimizer" == "apts_d" ]]; then
-                        APTS_PARAMS+=(glob_pass=true foc="$foc")
+                    tmp=()
+                    for kv in "${APTS_PARAMS[@]}"; do
+                      key=${kv%%=*}
+                      if [[ $key != glob_opt && $key != loc_opt && $key != glob_second_order && $key != loc_second_order && $key != foc && $key != glob_pass ]]; then
+                        tmp+=("$kv")
                       fi
-                      APTS_PARAMS+=(glob_opt="$glob_opt" loc_opt="$loc_opt" glob_second_order="$gso" loc_second_order="$lso")
-                      extract_apts_details
-                      for num_stages in "${NUM_STAGES[@]}"; do
-                        for num_subd in "${NUM_SUBD[@]}"; do
-                          for num_rep in "${NUM_REP[@]}"; do
-                            for trial in $(seq 1 "$TRIALS"); do
-                              for batch_size in "${BATCH_SIZES[@]}"; do
-                                if [[ "$SCALING_TYPE" == "weak" ]]; then
-                                  actual_bs=$((batch_size * num_subd))
-                                  eff_bs=$batch_size
-                                else
-                                  actual_bs=$batch_size
-                                  eff_bs=$((batch_size / num_subd))
-                                fi
-                                lr_values=("${LEARNING_RATES[@]:-}")
-                                if [ ${#lr_values[@]} -eq 0 ]; then
-                                  lr_values=("")
-                                fi
-                                for lr in "${lr_values[@]}"; do
-                                  IFS="=" read -r _ EPOCH_COUNT <<<"${EVAL_PARAMS[0]}"
-                                  job_name="${optimizer}_${dataset}_${model}_${actual_bs}_epochs_${EPOCH_COUNT}_nsd_${num_subd}"
-                                  $USE_PMW && job_name+="_nst_${num_stages}_nrpsd_${num_rep}"
-                                  if [[ "$optimizer" == apts_* ]]; then
-                                    job_name+="_gopt_${APTS_GLOB_OPT}_lopt_${APTS_LOC_OPT}_gso_${APTS_GLOB_SO}_lso_${APTS_LOC_SO}"
-                                    [[ "$optimizer" == "apts_d" ]] && job_name+="_foc_${foc}"
-                                    if [[ "$APTS_GLOB_OPT" == "lssr1_tr" || "$APTS_LOC_OPT" == "lssr1_tr" ]]; then
-                                      job_name+="_ptru_${PAPER_TR_UPDATE}"
-                                    fi
-                                  elif [[ "$optimizer" == "lssr1_tr" ]]; then
-                                    job_name+="_gso_${APTS_GLOB_SO}_ptru_${PAPER_TR_UPDATE}"
+                    done
+                  else
+                    APTS_GLOB_SO="$gso"
+                    APTS_LOC_SO="$lso"
+                    tmp=()
+                  fi
+                  for glob_opt in "${APTS_GLOB_OPTS[@]:-none}"; do
+                    for loc_opt in "${APTS_LOC_OPTS[@]:-none}"; do
+                      if [[ "$optimizer" == "apts_d" ]]; then
+                        foc_values=("${FOC_OPTS[@]:-false}")
+                      else
+                        foc_values=(false)
+                      fi
+                      for foc in "${foc_values[@]}"; do
+                        APTS_PARAMS=("${tmp[@]}")
+                        if [[ "$optimizer" == "apts_d" ]]; then
+                          APTS_PARAMS+=(glob_pass=true foc="$foc")
+                        fi
+                        if [[ "$optimizer" == apts_* || "$optimizer" == "lssr1_tr" ]]; then
+                          APTS_PARAMS+=(glob_opt="$glob_opt" loc_opt="$loc_opt" glob_second_order="$gso" loc_second_order="$lso")
+                          extract_apts_details
+                        fi
+                        for num_stages in "${NUM_STAGES[@]}"; do
+                          for num_subd in "${NUM_SUBD[@]}"; do
+                            for num_rep in "${NUM_REP[@]}"; do
+                              for trial in $(seq 1 "$TRIALS"); do
+                                for batch_size in "${BATCH_SIZES[@]}"; do
+                                  if [[ "$SCALING_TYPE" == "weak" ]]; then
+                                    actual_bs=$((batch_size * num_subd))
+                                    eff_bs=$batch_size
                                   else
-                                    job_name+="_gso_${APTS_GLOB_SO}"
+                                    actual_bs=$batch_size
+                                    eff_bs=$((batch_size / num_subd))
                                   fi
-                                  job_name+="_gdg_${gdg}"
-                                  [[ "$optimizer" == apts_* ]] && job_name+="_ldg_${ldg}"
-                                  job_name+="_pmw_${USE_PMW}"
-                                  [[ -n "$lr" ]] && job_name+="_lr_${lr}"
-                                  job_name+="_trial_${trial}"
-                                  world_size=$((num_stages * num_subd * num_rep))
-                                  nodes=$(calc_nodes)
-                                  ntasks_per_node=$((world_size / nodes))
-                                  config_file="./config_files/config_${job_name}.yaml"
-                                  [[ -e "$config_file" ]] && {
-                                    echo "-> Skipping existing: $config_file"
-                                    continue
-                                  }
-                                  cp "./config_files/config_${optimizer}.yaml" "$config_file"
-                                  update_config optimizer "$optimizer"
-                                  update_config batch_size "$actual_bs"
-                                  update_config effective_batch_size "$eff_bs"
-                                  update_config dataset_name "$dataset"
-                                  update_config model_name "$model"
-                                  update_config criterion "${EVAL_PARAMS[2]#*=}"
-                                  update_config epochs "${EVAL_PARAMS[0]#*=}"
-                                  update_config max_iters "${EVAL_PARAMS[1]#*=}"
-                                  update_config num_subdomains "$num_subd"
-                                  if [[ "$optimizer" == "lssr1_tr" ]] || ([[ "$optimizer" == apts_* ]] && ([[ "$APTS_GLOB_OPT" == "lssr1_tr" ]] || [[ "$APTS_LOC_OPT" == "lssr1_tr" ]])); then
-                                    update_config paper_tr_update "$PAPER_TR_UPDATE"
+                                  lr_values=("${LEARNING_RATES[@]:-}")
+                                  if [ ${#lr_values[@]} -eq 0 ]; then
+                                    lr_values=("")
                                   fi
-                                  for kv in "${APTS_PARAMS[@]}"; do
-                                    IFS="=" read -r key val <<<"$kv"
-                                    update_config "$key" "$val"
+                                  for lr in "${lr_values[@]}"; do
+                                    IFS="=" read -r _ EPOCH_COUNT <<<"${EVAL_PARAMS[0]}"
+                                    job_name="${optimizer}_${dataset}_${model}_${actual_bs}_epochs_${EPOCH_COUNT}_nsd_${num_subd}"
+                                    $USE_PMW && job_name+="_nst_${num_stages}_nrpsd_${num_rep}"
+                                    if [[ "$optimizer" == apts_* ]]; then
+                                      job_name+="_gopt_${APTS_GLOB_OPT}_lopt_${APTS_LOC_OPT}_gso_${APTS_GLOB_SO}_lso_${APTS_LOC_SO}"
+                                      [[ "$optimizer" == "apts_d" ]] && job_name+="_foc_${foc}"
+                                      if [[ "$APTS_GLOB_OPT" == "lssr1_tr" || "$APTS_LOC_OPT" == "lssr1_tr" ]]; then
+                                        job_name+="_ptru_${PAPER_TR_UPDATE}"
+                                      fi
+                                    elif [[ "$optimizer" == "lssr1_tr" ]]; then
+                                      job_name+="_gso_${APTS_GLOB_SO}_ptru_${PAPER_TR_UPDATE}"
+                                    else
+                                      job_name+="_gso_${APTS_GLOB_SO}"
+                                    fi
+                                    job_name+="_gdg_${gdg}"
+                                    [[ "$optimizer" == apts_* ]] && job_name+="_ldg_${ldg}"
+                                    job_name+="_pmw_${USE_PMW}"
+                                    [[ -n "$lr" ]] && job_name+="_lr_${lr}"
+                                    job_name+="_trial_${trial}"
+                                    world_size=$((num_stages * num_subd * num_rep))
+                                    nodes=$(calc_nodes)
+                                    ntasks_per_node=$((world_size / nodes))
+                                    config_file="$SCRIPT_DIR/config_files/config_${job_name}.yaml"
+                                    [[ -e "$config_file" ]] && {
+                                      echo "-> Skipping existing: $config_file"
+                                      continue
+                                    }
+                                    cp "$SCRIPT_DIR/config_files/config_${optimizer}.yaml" "$config_file"
+                                    update_config optimizer "$optimizer"
+                                    update_config batch_size "$actual_bs"
+                                    update_config effective_batch_size "$eff_bs"
+                                    update_config dataset_name "$dataset"
+                                    update_config model_name "$model"
+                                    update_config criterion "${EVAL_PARAMS[2]#*=}"
+                                    update_config epochs "${EVAL_PARAMS[0]#*=}"
+                                    update_config max_iters "${EVAL_PARAMS[1]#*=}"
+                                    update_config num_subdomains "$num_subd"
+                                    if [[ "$optimizer" == "lssr1_tr" ]] || ([[ "$optimizer" == apts_* ]] && ([[ "$APTS_GLOB_OPT" == "lssr1_tr" ]] || [[ "$APTS_LOC_OPT" == "lssr1_tr" ]])); then
+                                      update_config paper_tr_update "$PAPER_TR_UPDATE"
+                                    fi
+                                    for kv in "${APTS_PARAMS[@]}"; do
+                                      IFS="=" read -r key val <<<"$kv"
+                                      update_config "$key" "$val"
+                                    done
+                                    update_config glob_dogleg "$gdg"
+                                    [[ "$optimizer" == apts_* ]] && update_config loc_dogleg "$ldg"
+                                    $USE_PMW && {
+                                      update_config num_stages "$num_stages"
+                                      update_config num_replicas_per_subdomain "$num_rep"
+                                    }
+                                    ${GRAD_ACC:-false} && {
+                                      update_config gradient_accumulation true
+                                      update_config accumulation_steps "$ACCUM_STEPS"
+                                    }
+                                    [[ -n "$lr" ]] && update_config learning_rate "$lr"
+                                    template=$([[ "$(pwd)" == *"/home/"* ]] && echo "$SCRIPT_DIR/rosa.job" || echo "$SCRIPT_DIR/daintalps.job")
+                                    [[ ! -f "$template" ]] && {
+                                      echo "ERROR: template '$template' not found" >&2
+                                      exit 1
+                                    }
+                                    export nccl_debug=WARN job_name SCRIPT use_wandb=1 \
+                                      num_stages num_subd num_rep world_size ntasks_per_node \
+                                      config_file optimizer trial PROJECT
+                                    submit_job "$template"
                                   done
-                                  update_config glob_dogleg "$gdg"
-                                  [[ "$optimizer" == apts_* ]] && update_config loc_dogleg "$ldg"
-                                  $USE_PMW && {
-                                    update_config num_stages "$num_stages"
-                                    update_config num_replicas_per_subdomain "$num_rep"
-                                  }
-                                  ${GRAD_ACC:-false} && {
-                                    update_config gradient_accumulation true
-                                    update_config accumulation_steps "$ACCUM_STEPS"
-                                  }
-                                  [[ -n "$lr" ]] && update_config learning_rate "$lr"
-                                  template=$([[ "$(pwd)" == *"/home/"* ]] && echo rosa.job || echo daintalps.job)
-                                  [[ ! -f "$template" ]] && {
-                                    echo "ERROR: template '$template' not found" >&2
-                                    exit 1
-                                  }
-                                  export nccl_debug=WARN job_name SCRIPT use_wandb=1 \
-                                    num_stages num_subd num_rep world_size ntasks_per_node \
-                                    config_file optimizer trial PROJECT
-                                  submit_job "$template"
                                 done
                               done
                             done
@@ -258,7 +275,6 @@ for optimizer in "${OPTIMIZERS[@]}"; do
                       done
                     done
                   done
-                done
               done
             done
           done
