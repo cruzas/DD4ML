@@ -65,7 +65,7 @@ FOC_OPTS=(false)
 EVAL_PARAMS=(epochs=10 max_iters=0 criterion=pinn_allencahn)
 
 # Adaptive solver parameters (base)
-APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.33 glob_second_order=false)
+APTS_PARAMS=(batch_inc_factor=0.0 overlap=0.0 glob_second_order=false)
 
 # --- Functions to Adjust Defaults --- #
 set_optimizer_params() {
@@ -104,8 +104,8 @@ set_apts_lssr1_tr_params() {
   local opt="$1"
   if [[ "$opt" =~ ^(apts_d|apts_p|apts_ip|lssr1_tr|tr)$ ]]; then
     APTS_PARAMS=(
-      batch_inc_factor=1.5
-      overlap=0.33
+      batch_inc_factor=1.0
+      overlap=0.0
       max_wolfe_iters=5
       max_zoom_iters=5
       mem_length=5
