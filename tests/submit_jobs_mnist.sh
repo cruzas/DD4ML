@@ -7,7 +7,7 @@ DEBUGGING=false # Set to true for debugging mode
 SCRIPT="run_config_file.py" # Python script to execute
 PAPER_TR_UPDATES=(true)     # For LSSR1-TR: use TR updates from paper
 if $DEBUGGING; then
-  PROJECT="gamm2025debug" # wandb project name
+  PROJECT="debugging" # wandb project name
   TRIALS=1            # Repetitions per configuration
   partition="debug"   # Slurm partition for debugging
   time="00:10:00"     # Time limit for debugging
@@ -17,21 +17,21 @@ if $DEBUGGING; then
   NUM_STAGES=(1)
   NUM_REP=(1)
 else
-  PROJECT="gamm2025" # wandb project name
-  TRIALS=3                 # Repetitions per configuration
+  PROJECT="thesis_results" # wandb project name
+  TRIALS=1                 # Repetitions per configuration
   partition="normal"       # Slurm partition for normal runs
-  time="01:00:00"          # Time limit for debugging
+  time="00:30:00"          # Time limit for debugging
 
   SCALING_TYPE="strong"
   if [[ "$SCALING_TYPE" == "weak" ]]; then
     BATCH_SIZES=(128 256 512)
   else
     # For strong scaling, we use larger batch sizes
-    BATCH_SIZES=(10000)
+    BATCH_SIZES=(1024)
   fi
 
   NUM_SUBD=(1)
-  NUM_STAGES=(2 4 8)
+  NUM_STAGES=(1)
   NUM_REP=(1)
 fi
 
@@ -41,7 +41,7 @@ GRAD_ACC=false # Gradient accumulation flag
 # Configuration sweeps
 OPTIMIZERS=(apts_ip)
 DATASETS=(mnist)
-MODELS=(medium_ffnn)
+MODELS=(big_cnn)
 
 # Second-order toggles
 GLOB_SECOND_ORDERS=(false)
@@ -52,11 +52,11 @@ LOC_DOGLEGS=(false)
 
 # APTS solver options to sweep
 APTS_GLOB_OPTS=(tr) # options: tr, lssr1_tr, sgd, adam*, etc.
-APTS_LOC_OPTS=(sgd)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and adam*
+APTS_LOC_OPTS=(tradam)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only sgd and *adam*
 FOC_OPTS=(false)
 
 # Evaluation parameters: epochs, max iterations, loss
-EVAL_PARAMS=(epochs=100 max_iters=0 criterion=cross_entropy)
+EVAL_PARAMS=(epochs=10 max_iters=0 criterion=cross_entropy)
 
 # Adaptive solver parameters (base)
 APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.33 glob_second_order=false)
@@ -67,7 +67,7 @@ set_optimizer_params() {
   if [[ "$opt" == "apts_ip" ]]; then
     USE_PMW=true
     NUM_SUBD=(1)
-    NUM_STAGES=(2 4 8)
+    NUM_STAGES=(2)
     NUM_REP=(1)
   fi
 }
