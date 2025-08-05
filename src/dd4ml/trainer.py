@@ -684,7 +684,7 @@ class Trainer:
                 }
             elif any(
                 k in self.optimizer.__class__.__name__.lower()
-                for k in ("apts_d", "apts_p")
+                for k in ("apts_d", "apts_p", "apts_pinn")
             ):
                 step_args = {
                     "inputs": x,
@@ -786,7 +786,8 @@ class Trainer:
                 "final_subdomain_closure": final_subdomain_closure,
             }
         elif any(
-            k in self.optimizer.__class__.__name__.lower() for k in ("apts_d", "apts_p")
+            k in self.optimizer.__class__.__name__.lower()
+            for k in ("apts_d", "apts_p", "apts_pinn")
         ):
             step_args = {
                 "inputs": x,

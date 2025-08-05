@@ -59,4 +59,45 @@ class AllenCahn1DDataset(BaseDataset):
     def __getitem__(self, idx):
         x = self.data[idx]
         flag = self.boundary_mask[idx]
+
         return x, flag
+
+    # ------------------------------------------------------------------
+    # Domain decomposition utilities
+    # ------------------------------------------------------------------
+    def split_domain(self, num_subdomains: int):
+        """Split the 1D domain into ``num_subdomains`` contiguous pieces.
+
+        Returns a list of ``AllenCahn1DDataset`` objects, each restricted to
+        a sub-interval of ``[low, high]``.  The number of interior points is
+        distributed roughly evenly across subdomains while boundary points are
+        kept at the global domain boundaries.
+        """
+
+        if num_subdomains < 1:
+            raise ValueError("num_subdomains must be a positive integer")
+
+        import copy
+
+        cfg = self.config
+        subdatasets = []
+        step = (cfg.high - cfg.low) / num_subdomains
+
+        for i in range(num_subdomains):
+            sub_cfg = copy.deepcopy(cfg)
+            sub_cfg.low = cfg.low + i * step
+            sub_cfg.high = cfg.low + (i + 1) * step
+
+            # Evenly distribute interior points; keep one boundary point at each
+            # end of the global domain. Only the first and last subdomain
+            # include the respective global boundary point.
+            sub_cfg.n_interior = int(round(cfg.n_interior / num_subdomains))
+            sub_cfg.n_boundary = 0
+            if i == 0:
+                sub_cfg.n_boundary += 1
+            if i == num_subdomains - 1:
+                sub_cfg.n_boundary += 1
+
+            subdatasets.append(AllenCahn1DDataset(sub_cfg))
+
+        return subdatasets
