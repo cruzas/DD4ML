@@ -906,19 +906,32 @@ class Trainer:
             self.epoch_num += 1
 
     def run_by_epoch_PINN(self):
-        """Simplified epoch loop for PINN datasets."""
-        self.num_training_samples_per_process = (
-            len(self.train_dataset) / self.world_size
-        )
+        """Simplified epoch loop for PINN datasets, with adaptive and callback logic."""
+        # determine how many samples each process should see
+        if not self._apts_ip_present():
+            self.num_training_samples_per_process = (
+                len(self.train_dataset) / self.world_size
+            )
+        else:
+            # APTS_IP processes full dataset per process
+            self.num_training_samples_per_process = len(self.train_dataset)
+
         self.total_start_time = time.time()
         self.epoch_time = time.time()
         self.epoch_num = 0
 
         while self.epoch_num <= self.config.epochs:
+            # per-epoch bookkeeping
             epoch_loss = 0.0
             total_samples = 0
             it = iter(self.train_loader)
+            first = self.epoch_num == 0
 
+            # reproducible shuffling for DistributedSampler
+            if hasattr(self.train_loader.sampler, "set_epoch"):
+                self.train_loader.sampler.set_epoch(self.epoch_num)
+
+            # loop until this rank has seen its shard (plus any overlap)
             while total_samples < self.num_training_samples_per_process:
                 try:
                     x, y = next(it)
@@ -926,14 +939,43 @@ class Trainer:
                     it = iter(self.train_loader)
                     x, y = next(it)
 
-                batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, False)
+                # training step (with first-batch warm-up)
+                batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, first)
                 total_samples += bs
-                epoch_loss += batch_loss * (
-                    bs * self.world_size / len(self.train_dataset)
-                )
+
+                # weight loss by global or local sample count
+                if not self._apts_ip_present():
+                    epoch_loss += batch_loss * (
+                        bs * self.world_size / len(self.train_dataset)
+                    )
+                else:
+                    epoch_loss += batch_loss * (bs / len(self.train_dataset))
                 self.loss = epoch_loss
 
-            self.accuracy = float("nan")  # PINN datasets do not have accuracy
+                # handle optimizer-driven batch repeats
+                stay = self._stay_here()
+                if stay:
+                    it = chain([(x, y)], it)
+
+                # adaptive batch-size adjustment for ASNTR/APTS
+                if self._asntr_present():
+                    self._adjust_batch_size(self.loss)
+
+                # trigger any per-batch callbacks
+                self.trigger_callbacks("on_batch_end")
+                first = False
+
+            # optional full-objective adjustment every 3 epochs
+            if (
+                self._lssr1_tr_present() or self._sgd_present()
+            ) and self.epoch_num % 3 == 0:
+                full = self._eval_full_objective()
+                self._adjust_batch_size(full)
+
+            # PINNs do not compute accuracy
+            self.accuracy = float("nan")
+
+            # timing and callbacks
             self.epoch_dt = time.time() - self.epoch_time
             self.running_time = time.time() - self.total_start_time
             self.epoch_time = time.time()
