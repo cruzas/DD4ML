@@ -61,7 +61,8 @@ APTS_LOC_OPTS=(tr)  # options: tr, lssr1_tr, sgd, adam, etc.; for APTS_IP, only 
 FOC_OPTS=(false)
 
 # Evaluation parameters: epochs, max iterations, loss
-EVAL_PARAMS=(epochs=10 max_iters=0 criterion=cross_entropy)
+# Use Allen-Cahn specific PINN loss instead of a classification loss.
+EVAL_PARAMS=(epochs=10 max_iters=0 criterion=pinn_allencahn)
 
 # Adaptive solver parameters (base)
 APTS_PARAMS=(batch_inc_factor=1.5 overlap=0.33 glob_second_order=false)
