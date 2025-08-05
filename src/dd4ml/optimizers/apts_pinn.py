@@ -1,12 +1,14 @@
-from .apts_d import APTS_D
 import torch
 from torch.nn.utils import vector_to_parameters
+
+from .apts_d import APTS_D
+
 
 class APTS_PINN(APTS_D):
     __name__ = "APTS_PINN"
 
     def __init__(self, *args, num_subdomains=1, criterion=None, **kwargs):
-        super().__init__(*args, criterion=criterion, **kwargs)
+        super().__init__(*args, nr_models=num_subdomains, criterion=criterion, **kwargs)
         self.num_subdomains = int(max(1, num_subdomains))
         low = getattr(self.criterion, "low", 0.0)
         high = getattr(self.criterion, "high", 1.0)

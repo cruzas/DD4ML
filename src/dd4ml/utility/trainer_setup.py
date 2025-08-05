@@ -38,10 +38,10 @@ def get_config_model_and_trainer(args, wandb_config):
     """
     Create and return the standardized configuration, model, and trainer.
     """
+    from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
     from dd4ml.datasets.pinn_poisson import Poisson1DDataset
     from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
     from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
-    from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
     from dd4ml.pmw.model_handler import ModelHandler
     from dd4ml.pmw.parallelized_model import ParallelizedModel
     from dd4ml.trainer import Trainer
@@ -284,7 +284,6 @@ def get_config_model_and_trainer(args, wandb_config):
             model=model,
             criterion=criterion,
             device=get_device(),
-            nr_models=all_config.model.num_subdomains,
             glob_opt=all_config.trainer.glob_opt,
             glob_opt_hparams=all_config.trainer.glob_opt_hparams,
             loc_opt=all_config.trainer.loc_opt,
