@@ -7,10 +7,10 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import yaml
 
+from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
-from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
 from dd4ml.utility import (
     broadcast_dict,
     detect_environment,
@@ -38,7 +38,7 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--optimizer", type=str, default="apts_ip", help="Optimizer name"
+        "--optimizer", type=str, default="apts_pinn", help="Optimizer name"
     )
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
@@ -48,7 +48,7 @@ def parse_cmd_args() -> argparse.Namespace:
     default_use_pmw = temp_args.optimizer == "apts_ip"
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
-    default_project = "gamm2025debugging"
+    default_project = "debugging"
 
     parser.add_argument(
         "--use_pmw",
@@ -123,7 +123,7 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--num_subdomains", type=int, default=1, help="Number of subdomains"
     )
-    parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
+    parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
     parser.add_argument(
         "--num_replicas_per_subdomain",
         type=int,

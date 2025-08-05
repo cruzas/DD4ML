@@ -69,6 +69,29 @@ def prepare_scaling_table(gdf, group_cols, include_acc=False):
     df["speedup"] = df["baseline_time"] / df["time_mean"]
     df["efficiency"] = df["speedup"] / (df[abbr_N] / df["baseline_N"])
 
+    # Loss: 3 decimals
+    for c in ("loss_mean", "loss_std"):
+        df[c] = df[c].map(lambda x: f"{x:.3f}")
+
+    # Accuracy: 2 decimals
+    if include_acc:
+        for c in ("acc_mean", "acc_std"):
+            df[c] = df[c].map(lambda x: f"{x:.2f}")
+
+    # Grad evaluations: 2 decimals
+    for c in ("evals_mean", "evals_std"):
+        df[c] = df[c].map(lambda x: f"{x:.2f}")
+
+    # Time: 2 decimals
+    for c in ("time_mean", "time_std"):
+        df[c] = df[c].map(lambda x: f"{x:.2f}")
+
+    # Speedup: 2 decimals
+    df["speedup"] = df["speedup"].map(lambda x: f"{x:.2f}")
+
+    # Efficiency: percentage with 2 decimals
+    df["efficiency"] = df["efficiency"].map(lambda x: f"{x*100:.2f}")
+
     cols = (
         abbr_group
         + [abbr_N, "sample_count", "loss_mean", "loss_std"]
@@ -161,7 +184,7 @@ def main(
     keep_track_of_acc = ["mnist", "cifar10"]
 
     # select dataset
-    choice = "poisson2d"  # "mnist", "cifar10", "tinyshakespeare", "poisson2d"
+    choice = "mnist"  # "mnist", "cifar10", "tinyshakespeare", "poisson2d"
     configs = {
         "mnist": {
             "datasets": ["mnist"],
@@ -280,7 +303,7 @@ def main(
         path = os.path.join(out_dir, fname)
 
         with open(path, "w") as f:
-            f.write(table.to_string(index=False, float_format="%.4f"))
+            f.write(table.to_string(index=False))
         print(f"Saved {name} scaling to {path}")
 
 
