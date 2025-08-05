@@ -1,4 +1,7 @@
+import math
+
 import torch
+import torch.distributed as dist
 
 from .base_dataset import BaseDataset
 
@@ -20,16 +23,40 @@ class AllenCahn1DDataset(BaseDataset):
 
     def _generate_points(self):
         cfg = self.config
-        interior = torch.linspace(cfg.low, cfg.high, cfg.n_interior, dtype=torch.float32).unsqueeze(1)
+        interior = torch.linspace(
+            cfg.low, cfg.high, cfg.n_interior, dtype=torch.float32
+        ).unsqueeze(1)
         boundary = torch.tensor([[cfg.low], [cfg.high]], dtype=torch.float32)
+
+        # Determine world size to replicate boundary points across ranks
+        world_size = dist.get_world_size() if dist.is_initialized() else 1
+        boundary_rep = boundary.repeat(world_size, 1)
+
+        shard_size = math.ceil(len(interior) / world_size)
+        data_parts = []
+        mask_parts = []
+        for r in range(world_size):
+            start = r * shard_size
+            end = min(start + shard_size, len(interior))
+            interior_chunk = interior[start:end]
+            b_chunk = boundary_rep[2 * r : 2 * (r + 1)]
+            data_parts.append(torch.cat([b_chunk, interior_chunk], dim=0))
+            mask_parts.append(
+                torch.cat(
+                    [torch.ones(len(b_chunk), 1), torch.zeros(len(interior_chunk), 1)],
+                    dim=0,
+                )
+            )
+
+        self.data = torch.cat(data_parts, dim=0)
+        self.boundary_mask = torch.cat(mask_parts, dim=0)
         self.x_interior = interior
-        self.x_boundary = boundary
-        self.data = torch.cat([interior, boundary], dim=0)
+        self.x_boundary = boundary_rep
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         x = self.data[idx]
-        is_boundary = 1.0 if idx >= len(self.x_interior) else 0.0
-        return x, torch.tensor([is_boundary], dtype=torch.float32)
+        flag = self.boundary_mask[idx]
+        return x, flag
