@@ -272,6 +272,32 @@ def get_config_model_and_trainer(args, wandb_config):
             tol=all_config.trainer.tol,
             **all_config.trainer.apts_params,
         )
+    elif optimizer_name == "apts_pinn":
+        from dd4ml.optimizers.apts_pinn import APTS_PINN
+
+        all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
+
+        all_config.trainer = APTS_PINN.setup_APTS_hparams(all_config.trainer)
+
+        optimizer_obj = APTS_PINN(
+            params=model.parameters(),
+            model=model,
+            criterion=criterion,
+            device=get_device(),
+            nr_models=all_config.model.num_subdomains,
+            glob_opt=all_config.trainer.glob_opt,
+            glob_opt_hparams=all_config.trainer.glob_opt_hparams,
+            loc_opt=all_config.trainer.loc_opt,
+            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
+            glob_pass=all_config.trainer.glob_pass,
+            foc=all_config.trainer.foc,
+            norm_type=all_config.trainer.norm_type,
+            max_loc_iters=all_config.trainer.max_loc_iters,
+            max_glob_iters=all_config.trainer.max_glob_iters,
+            tol=all_config.trainer.tol,
+            num_subdomains=all_config.trainer.num_subdomains,
+            **all_config.trainer.apts_params,
+        )
     elif optimizer_name == "lssr1_tr":
         from dd4ml.optimizers.lssr1_tr import LSSR1_TR
 
