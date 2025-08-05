@@ -1,5 +1,5 @@
 import torch
-from torch.nn.utils import vector_to_parameters
+import torch.distributed as dist
 
 from .apts_d import APTS_D
 
@@ -15,54 +15,26 @@ class APTS_PINN(APTS_D):
         self.subdomain_bounds = torch.linspace(low, high, self.num_subdomains + 1)
 
     def step(self, inputs, labels, inputs_d=None, labels_d=None, hNk=None):
-        self.inputs = inputs.clone().detach().requires_grad_(True)
-        self.labels = labels
-        self.inputs_d, self.labels_d = inputs_d, labels_d
-        self.hNk = hNk
-
-        # Global initial loss/grad for the entire domain
-        self.grad_evals, self.loc_grad_evals = 0.0, 0.0
-        self.init_glob_flat = self.glob_params_to_vector()
-        self.criterion.current_x = self.inputs
-        self.init_glob_loss = self.glob_closure_main(compute_grad=True)
-        init_glob_grad_full = self.glob_grad_to_vector()
-        full_inputs = self.inputs
-        full_labels = labels
-
-        total_step = torch.zeros_like(self.init_glob_flat)
-        total_red = torch.zeros(1, device=self.init_glob_flat.device)
+        if dist.is_initialized():
+            subdomain_idx = dist.get_rank() % self.num_subdomains
+        else:
+            subdomain_idx = 0
 
         x_vals = inputs.squeeze()
-        for i in range(self.num_subdomains):
-            low, high = self.subdomain_bounds[i], self.subdomain_bounds[i + 1]
-            mask = (x_vals >= low) & (x_vals <= high)
-            if mask.sum() == 0:
-                continue
-            self.inputs = full_inputs[mask].clone().detach().requires_grad_(True)
-            self.labels = labels[mask]
-            self.criterion.current_x = self.inputs
-            glob_loss = self.glob_closure_main(compute_grad=True)
-            glob_grad = self.glob_grad_to_vector()
-            init_loc_loss = self.loc_closure(compute_grad=True)
-            init_loc_grad = self.loc_grad_to_vector()
-            if self.foc:
-                self.resid = glob_grad - init_loc_grad
-            loc_loss, _ = self.loc_steps(init_loc_loss, init_loc_grad)
-            with torch.no_grad():
-                step = self.loc_params_to_vector() - self.init_glob_flat
-                loc_red = init_loc_loss - loc_loss
-            total_step += step
-            total_red += loc_red
-            vector_to_parameters(self.init_glob_flat, self.model.parameters())
-            vector_to_parameters(self.init_glob_flat, self.loc_model.parameters())
+        low = self.subdomain_bounds[subdomain_idx]
+        high = self.subdomain_bounds[subdomain_idx + 1]
+        mask = (x_vals >= low) & (x_vals <= high)
 
-        self.inputs, self.labels = full_inputs, full_labels
-        self.criterion.current_x = full_inputs
-        self.init_glob_grad = init_glob_grad_full
+        sub_inputs = inputs[mask].clone().detach().requires_grad_(True)
+        sub_labels = labels[mask] if labels is not None else None
+        sub_inputs_d = None
+        sub_labels_d = None
+        if inputs_d is not None:
+            sub_inputs_d = inputs_d[mask].clone().detach().requires_grad_(True)
+        if labels_d is not None:
+            sub_labels_d = labels_d[mask]
+        self.criterion.current_x = sub_inputs
+        return super().step(
+            sub_inputs, sub_labels, sub_inputs_d, sub_labels_d, hNk
+        )
 
-        step, pred = self.aggregate_loc_steps_and_losses(total_step, total_red)
-        loss, grad, self.glob_opt.delta = self.control_step(step, pred)
-        if self.glob_pass:
-            loss, grad = self.glob_steps(loss, grad)
-        self.sync_glob_to_loc()
-        return loss
