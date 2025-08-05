@@ -185,11 +185,12 @@ class Trainer:
                     f"Per-process batch size {pp_bs} < 1; increase global batch size."
                 )
 
+            shuffle_flag = not isinstance(ds_train, AllenCahn1DDataset)
             base_train = DistributedSampler(
                 ds_train,
                 num_replicas=world_size,
                 rank=rank,
-                shuffle=True,
+                shuffle=shuffle_flag,
                 drop_last=self._apts_ip_present(),
             )
             train_ov = OverlapBatchSampler(
