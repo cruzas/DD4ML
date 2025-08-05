@@ -489,10 +489,22 @@ class Trainer:
             for x, y in eval_loader:
                 x = self._move_to_device(x)
                 y = self._move_to_device(y)
+                if isinstance(x, torch.Tensor):
+                    x.requires_grad_(True)
+                elif isinstance(x, (list, tuple)):
+                    for t in x:
+                        if isinstance(t, torch.Tensor):
+                            t.requires_grad_(True)
                 out = self.model(x)
                 if not cond_std:  # pipeline -> extract the shard
                     out = out[0]
                 if cond_std or (cond_d_a and cond_d_b):
+                    if hasattr(crit, "current_xy"):
+                        crit.current_xy = x
+                    if hasattr(crit, "current_x"):
+                        crit.current_x = x
+                    if hasattr(crit, "current_xyz"):
+                        crit.current_xyz = x
                     loss = crit(out, y).item()
                     bs = y.size(0)
                     total += loss * bs
