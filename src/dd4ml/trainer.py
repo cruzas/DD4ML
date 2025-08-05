@@ -815,14 +815,25 @@ class Trainer:
             step_args = {"closure": general}
 
         result = self.optimizer.step(**step_args)
-        if hasattr(self.optimizer, "grad_evals"):
-            self.grad_evals += (
-                self.optimizer.grad_evals
-                * (bs * self.world_size)
-                / len(self.train_dataset)
-            )
+        # Track gradient evaluations accounting for possible APTS-IP setup
+        if not self._apts_ip_present():
+            if hasattr(self.optimizer, "grad_evals"):
+                self.grad_evals += (
+                    self.optimizer.grad_evals
+                    * (bs * self.world_size)
+                    / len(self.train_dataset)
+                )
+            else:
+                self.grad_evals += (
+                    1 * (bs * self.world_size) / len(self.train_dataset)
+                )
         else:
-            self.grad_evals += 1 * (bs * self.world_size) / len(self.train_dataset)
+            if hasattr(self.optimizer, "grad_evals"):
+                self.grad_evals += (
+                    self.optimizer.grad_evals * bs / len(self.train_dataset)
+                )
+            else:
+                self.grad_evals += 1 * bs / len(self.train_dataset)
 
         if isinstance(result, numbers.Number) or (
             torch.is_tensor(result) and result.ndim == 0
