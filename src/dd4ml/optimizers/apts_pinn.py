@@ -30,9 +30,7 @@ class APTS_PINN(APTS_D):
         full_in = inputs.detach().requires_grad_(True)
         full_lab = labels
         full_in_d = (
-            inputs_d.detach().requires_grad_(True)
-            if inputs_d is not None
-            else None
+            inputs_d.detach().requires_grad_(True) if inputs_d is not None else None
         )
         full_lab_d = labels_d
 
