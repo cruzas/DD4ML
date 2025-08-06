@@ -30,7 +30,7 @@ parameters:
   norm_type:
     value: inf
   max_loc_iters:
-    value: 3
+    value: 5
   max_glob_iters:
     value: 1
   max_iters:

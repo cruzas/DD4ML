@@ -38,7 +38,7 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--optimizer", type=str, default="apts_p", help="Optimizer name"
+        "--optimizer", type=str, default="apts_pinn", help="Optimizer name"
     )
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
@@ -224,11 +224,11 @@ def main(
             (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, AllenCahn1DDataset),
         ):
             dprint(
-                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4e}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
+                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4e}, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
             )
         else:
             dprint(
-                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
+                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
             )
 
         if rank == 0 and use_wandb:

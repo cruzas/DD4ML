@@ -6,13 +6,13 @@ parameters:
   optimizer: 
     value: "apts_d" 
   batch_size:
-    value: 5000
+    value: 128
   effective_batch_size:
-    value: 5000
+    value: 128
   num_stages:
     value: 1
   num_subdomains:
-    value: 1
+    value: 4
   num_replicas_per_subdomain:
     value: 1
   glob_pass:
@@ -20,7 +20,7 @@ parameters:
   foc:
     value: True
   glob_second_order:
-    value: True
+    value: False
   glob_dogleg:
     value: False
   loc_second_order:
@@ -30,7 +30,7 @@ parameters:
   norm_type:
     value: 2
   max_loc_iters:
-    value: 3
+    value: 1
   max_glob_iters:
     value: 1
   max_iters:
@@ -42,13 +42,13 @@ parameters:
   min_delta: 
     value: 0.001
   max_delta:
-    value: 2.0
+    value: 1.0
   dataset_name: 
-    value: "mnist" 
+    value: "allencahn1d" 
   model_name: 
-    value: "simple_cnn"
+    value: "pinn_ffnn"
   criterion:
-    value: "cross_entropy"
+    value: "pinn_allencahn"
   gradient_accumulation:
     value: True
   accumulation_steps:
@@ -58,9 +58,9 @@ parameters:
   tol:
     value: 1e-6
   batch_inc_factor:
-    value: 1.5
+    value: 1.0
   overlap:
-    value: 0.33
+    value: 0.0
   mem_length:
     value: 3
   max_wolfe_iters:
@@ -68,7 +68,7 @@ parameters:
   max_zoom_iters:
     value: 20
   glob_opt:
-    value: "lssr1_tr"
+    value: "tr"
   loc_opt:
     value: "tr"
   paper_tr_update:
