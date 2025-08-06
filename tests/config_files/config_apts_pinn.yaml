@@ -6,19 +6,19 @@ parameters:
   optimizer: 
     value: "apts_pinn" 
   batch_size:
-    value: 5000
+    value: 128
   effective_batch_size:
-    value: 5000
+    value: 128
   num_stages:
     value: 1
   num_subdomains:
-    value: 2
+    value: 4
   num_replicas_per_subdomain:
     value: 1
   glob_pass:
     value: True
   foc:
-    value: False
+    value: True
   glob_second_order:
     value: False
   glob_dogleg:
@@ -28,9 +28,9 @@ parameters:
   loc_dogleg:
     value: False
   norm_type:
-    value: inf
+    value: 2
   max_loc_iters:
-    value: 3
+    value: 10
   max_glob_iters:
     value: 1
   max_iters:
@@ -50,7 +50,7 @@ parameters:
   criterion:
     value: "pinn_allencahn"
   gradient_accumulation:
-    value: True
+    value: False
   accumulation_steps:
     value: 1
   seed:

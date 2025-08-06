@@ -5,13 +5,14 @@ import torch.distributed as dist
 
 from .base_dataset import BaseDataset
 
+
 class AllenCahn1DDataset(BaseDataset):
     """Dataset for 1D Allen-Cahn equation on [0,1] with u(0)=1 and u(1)=-1."""
 
     @staticmethod
     def get_default_config():
         C = BaseDataset.get_default_config()
-        C.n_interior = 100
+        C.n_interior = 10000
         C.n_boundary = 2
         C.low = 0.0
         C.high = 1.0

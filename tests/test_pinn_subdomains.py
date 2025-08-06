@@ -1,13 +1,13 @@
 import torch
-import torch.multiprocessing as mp
 import torch.distributed as dist
+import torch.multiprocessing as mp
 
 from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
 from dd4ml.models.ffnn.pinn_ffnn import PINNFFNN
 from dd4ml.optimizers.apts_pinn import APTS_PINN
 from dd4ml.optimizers.tr import TR
-from dd4ml.utility.pinn_allencahn_loss import AllenCahnPINNLoss
 from dd4ml.utility.dist_utils import prepare_distributed_environment
+from dd4ml.utility.pinn_allencahn_loss import AllenCahnPINNLoss
 
 
 def test_split_domain():
@@ -20,7 +20,7 @@ def test_split_domain():
     assert torch.isclose(subs[-1].x_boundary[-1], torch.tensor([cfg.high]))
 
 
-def _run_apts_pinn(rank: int, world_size: int):
+def _run_apts_pinn(rank: int, world_size: int, epochs: int):
     prepare_distributed_environment(
         rank=rank,
         master_addr="localhost",
@@ -58,7 +58,7 @@ def _run_apts_pinn(rank: int, world_size: int):
         glob_pass=False,
         foc=False,
         norm_type=2,
-        max_loc_iters=1,
+        max_loc_iters=10,
         max_glob_iters=1,
         num_subdomains=world_size,
         **tr_kwargs,
@@ -72,11 +72,26 @@ def _run_apts_pinn(rank: int, world_size: int):
         ]
     )
     criterion.current_x = x
-    loss = opt.step(inputs=x, labels=boundary_flag)
-    assert torch.isfinite(loss)
+
+    for epoch in range(epochs):
+        loss = opt.step(inputs=x, labels=boundary_flag)
+        if rank == 0:
+            print(f"Epoch {epoch}, Loss: {loss.item()}")
+        assert torch.isfinite(loss), f"Loss is not finite at epoch {epoch}"
+
     dist.destroy_process_group()
 
 
-def test_apts_pinn_step_runs():
+def main():
     world_size = 2
-    mp.spawn(_run_apts_pinn, args=(world_size,), nprocs=world_size, join=True)
+    epochs = 10
+    mp.spawn(
+        _run_apts_pinn,
+        args=(world_size, epochs),
+        nprocs=world_size,
+        join=True,
+    )
+
+
+if __name__ == "__main__":
+    main()

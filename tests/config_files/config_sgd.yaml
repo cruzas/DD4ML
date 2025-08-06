@@ -10,17 +10,17 @@ parameters:
   effective_batch_size:
     value: 128 
   epochs: 
-    value: 5
+    value: 10
   max_iters:
-    value: 2000
+    value: 1000
   learning_rate:
-    value: 0.01
+    value: 0.1
   dataset_name: 
-    value: "mnist"
+    value: "allencahn1d"
   model_name: 
-    value: "simple_cnn"
+    value: "pinn_ffnn"
   criterion:
-    value: "cross_entropy"
+    value: "pinn_allencahn"
   seed:
     value: 42
   # For parallel computation
