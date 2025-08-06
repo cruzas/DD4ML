@@ -278,6 +278,8 @@ def get_config_model_and_trainer(args, wandb_config):
         all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
 
         all_config.trainer = APTS_PINN.setup_APTS_hparams(all_config.trainer)
+        # Mark as APTS variant so downstream utilities handle it like APTS_D
+        all_config.trainer.apts_d = True
 
         optimizer_obj = APTS_PINN(
             params=model.parameters(),
