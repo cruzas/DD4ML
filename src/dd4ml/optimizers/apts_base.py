@@ -289,7 +289,13 @@ class APTS_Base(Optimizer):
         self.loc_opt.zero_grad()
         loss = self.criterion(self.loc_model(self.inputs_d), self.labels_d)
         if torch.is_grad_enabled() or compute_grad:
-            loss.backward()
+            # ``loss`` can be reused by the trust-region solver for multiple
+            # gradient evaluations.  Retaining the graph avoids the
+            # "backward through the graph a second time" runtime error when
+            # the closure is invoked repeatedly within a single optimisation
+            # step.
+            loss.backward(retain_graph=True)
+            self.loc_grad_evals += 1
         return loss
 
     def foc_loc_closure_d(self, compute_grad: bool = False):
