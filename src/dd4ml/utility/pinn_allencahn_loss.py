@@ -14,8 +14,13 @@ class AllenCahnPINNLoss(nn.Module):
     def forward(self, u_pred, boundary_flag):
         if self.current_x is None:
             raise ValueError("current_x must be set before calling AllenCahnPINNLoss")
+
+        # OPTION 1 (RuntimeError: Trying to backward through the graph a second time (or directly access saved tensors after they have already been freed). Saved intermediate values of the graph are freed when you call .backward() or autograd.grad(). Specify retain_graph=True if you need to backward through the graph a second time or if you need to access saved tensors after calling backward.)
         x = self.current_x
-        x.requires_grad_(True)
+        # x.requires_grad_(True)
+
+        # OPTION 2 (leads to RuntimeError: One of the differentiated Tensors appears to not have been used in the graph. Set allow_unused=True if this is the desired behavior.)
+        # x = self.current_x.detach().requires_grad_(True)
 
         grad_u = torch.autograd.grad(
             u_pred, x, torch.ones_like(u_pred), create_graph=True
