@@ -1,6 +1,6 @@
+from .deeponet_loss import DeepONetMSELoss
 from .ml_utils import cross_entropy_transformers
 from .utils import import_attr
-from .deeponet_loss import DeepONetMSELoss
 
 
 class Factory:

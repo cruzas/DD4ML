@@ -1,7 +1,8 @@
 import torch
 
-from .base_dataset import BaseDataset
 from dd4ml.utility import CfgNode
+
+from .base_dataset import BaseDataset
 
 
 class AllenCahn1DDataset(BaseDataset):

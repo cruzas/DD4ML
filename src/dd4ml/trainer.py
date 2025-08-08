@@ -765,6 +765,7 @@ class Trainer:
             y.requires_grad_(True)
 
         bs = y.size(0)
+        # update criterion’s current points
         if hasattr(self.criterion, "current_xy"):
             self.criterion.current_xy = x
         if hasattr(self.criterion, "current_x"):
@@ -772,10 +773,26 @@ class Trainer:
         if hasattr(self.criterion, "current_xyz"):
             self.criterion.current_xyz = x
 
+        # control batch for ASNTR
         x_d = y_d = None
         if self._asntr_present():
             x_d, y_d = self.sample_control_batch(1)
 
+        # warm-up pass: compute loss only
+        if first_grad:
+            warmup = closure(
+                x,
+                y,
+                criterion=self.criterion,
+                model=self.model,
+                data_chunks_amount=self.config.data_chunks_amount,
+                compute_grad=True,
+            )
+            batch_loss = warmup()
+            batch_grad = None
+            return batch_loss, batch_grad, bs
+
+        # full-gradient pass and optimizer step
         general = closure(
             x,
             y,
@@ -827,26 +844,24 @@ class Trainer:
             step_args = {"closure": general}
 
         result = self.optimizer.step(**step_args)
-        # Track gradient evaluations accounting for possible APTS-IP setup
-        if not self._apts_ip_present():
-            if hasattr(self.optimizer, "grad_evals"):
-                self.grad_evals += (
-                    self.optimizer.grad_evals
-                    * (bs * self.world_size)
-                    / len(self.train_dataset)
-                )
-            else:
-                self.grad_evals += (
-                    1 * (bs * self.world_size) / len(self.train_dataset)
-                )
-        else:
-            if hasattr(self.optimizer, "grad_evals"):
-                self.grad_evals += (
-                    self.optimizer.grad_evals * bs / len(self.train_dataset)
-                )
-            else:
-                self.grad_evals += 1 * bs / len(self.train_dataset)
 
+        # track grad_evals
+        if not self._apts_ip_present():
+            nevals = (
+                self.optimizer.grad_evals
+                if hasattr(self.optimizer, "grad_evals")
+                else 1
+            )
+            self.grad_evals += nevals * (bs * self.world_size) / len(self.train_dataset)
+        else:
+            nevals = (
+                self.optimizer.grad_evals
+                if hasattr(self.optimizer, "grad_evals")
+                else 1
+            )
+            self.grad_evals += nevals * bs / len(self.train_dataset)
+
+        # unpack result
         if isinstance(result, numbers.Number) or (
             torch.is_tensor(result) and result.ndim == 0
         ):
@@ -983,10 +998,6 @@ class Trainer:
                 # adaptive batch-size adjustment for ASNTR/APTS
                 if self._asntr_present():
                     self._adjust_batch_size(self.loss)
-
-                # trigger any per-batch callbacks
-                self.trigger_callbacks("on_batch_end")
-                first = False
 
             # optional full-objective adjustment every 3 epochs
             if (

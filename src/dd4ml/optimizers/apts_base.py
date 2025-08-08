@@ -273,21 +273,9 @@ class APTS_Base(Optimizer):
                     flat_grad = self.glob_grad_to_vector()
                     dist.all_reduce(flat_grad, op=dist.ReduceOp.SUM)
                     flat_grad.div_(self.nr_models)
-                    # unpack back into each parameter's grad without creating new tensors
-                    offset = 0
-                    for p in self.model.parameters():
-                        if p.grad is None:
-                            continue
-                        numel = p.grad.numel()
-                        segment = flat_grad.narrow(0, offset, numel)
-                        offset += numel
-                        segment_view = segment.view_as(p)
-                        # copy into existing gradient while preserving its stride
-                        if p.grad.is_contiguous():
-                            p.grad.copy_(segment_view)
-                        else:
-                            p.grad.as_strided(p.shape, p.grad.stride()).copy_(segment_view)
-
+                    vector_to_parameters(
+                        flat_grad, [p.grad for p in self.model.parameters()]
+                    )
             self.grad_evals += 1.0  # Count global gradient evaluation
         if self.nr_models > 1:
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)

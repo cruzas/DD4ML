@@ -12,7 +12,7 @@ parameters:
   num_stages:
     value: 1
   num_subdomains:
-    value: 4
+    value: 2
   num_replicas_per_subdomain:
     value: 1
   glob_pass:
@@ -30,13 +30,13 @@ parameters:
   norm_type:
     value: 2
   max_loc_iters:
-    value: 1
+    value: 3
   max_glob_iters:
     value: 1
   max_iters:
     value: 10 # for Transformers
   epochs: 
-    value: 10
+    value: 3
   delta: 
     value: 0.1
   min_delta: 

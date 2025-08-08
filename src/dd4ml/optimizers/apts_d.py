@@ -83,16 +83,20 @@ class APTS_D(APTS_Base):
         self.n_local = self.loc_params_to_vector().numel()
         self.sqrt_n_global = math.sqrt(self.n_global)
         self.sqrt_n_local = math.sqrt(self.n_local)
-        
-        if self.norm_type == math.inf:        
+
+        if self.norm_type == math.inf:
             # Modify delta for global and local optimizers
             self.glob_opt.min_delta = self.min_delta * self.sqrt_n_global
             self.glob_opt.max_delta = self.max_delta * self.sqrt_n_global
-            self.loc_opt.min_delta  = self.min_delta * self.sqrt_n_local
-            self.loc_opt.max_delta  = self.max_delta * self.sqrt_n_local
-            
-            self.glob_opt.delta = min(self.glob_opt.max_delta, self.delta * self.sqrt_n_global)
-            self.loc_opt.delta = min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local)
+            self.loc_opt.min_delta = self.min_delta * self.sqrt_n_local
+            self.loc_opt.max_delta = self.max_delta * self.sqrt_n_local
+
+            self.glob_opt.delta = min(
+                self.glob_opt.max_delta, self.delta * self.sqrt_n_global
+            )
+            self.loc_opt.delta = min(
+                self.loc_opt.max_delta, self.delta * self.sqrt_n_local
+            )
 
         # Print name of glob_opt and loc_opt
         dprint(
