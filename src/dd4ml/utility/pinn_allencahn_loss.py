@@ -14,19 +14,30 @@ class AllenCahnPINNLoss(nn.Module):
     def forward(self, u_pred, boundary_flag):
         if self.current_x is None:
             raise ValueError("current_x must be set before calling AllenCahnPINNLoss")
-
-        # OPTION 1 (RuntimeError: Trying to backward through the graph a second time (or directly access saved tensors after they have already been freed). Saved intermediate values of the graph are freed when you call .backward() or autograd.grad(). Specify retain_graph=True if you need to backward through the graph a second time or if you need to access saved tensors after calling backward.)
         x = self.current_x
-        # x.requires_grad_(True)
+        # ``current_x`` is expected to be the tensor that was used to produce
+        # ``u_pred``. It should already require gradients (the optimizer sets
+        # ``requires_grad`` and detaches it from any previous graph).  However,
+        # in case it was provided without gradient tracking, enable it so that
+        # autograd can compute derivatives of ``u_pred`` with respect to ``x``.
+        if not x.requires_grad:
+            x.requires_grad_(True)
 
-        # OPTION 2 (leads to RuntimeError: One of the differentiated Tensors appears to not have been used in the graph. Set allow_unused=True if this is the desired behavior.)
-        # x = self.current_x.detach().requires_grad_(True)
-
+        # Compute first and second derivatives of the prediction w.r.t. ``x``.
+        # ``retain_graph=True`` is required for the first derivative so that the
+        # computation graph remains available when taking the second derivative.
         grad_u = torch.autograd.grad(
-            u_pred, x, torch.ones_like(u_pred), create_graph=True
+            u_pred,
+            x,
+            torch.ones_like(u_pred),
+            create_graph=True,
+            retain_graph=True,
         )[0]
         grad2_u = torch.autograd.grad(
-            grad_u, x, torch.ones_like(grad_u), create_graph=True
+            grad_u,
+            x,
+            torch.ones_like(grad_u),
+            create_graph=True,
         )[0]
 
         residual = -grad2_u + u_pred**3 - u_pred

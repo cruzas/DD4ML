@@ -1,6 +1,7 @@
 import torch
 
 from .base_dataset import BaseDataset
+from dd4ml.utility import CfgNode
 
 
 class AllenCahn1DDataset(BaseDataset):
@@ -50,3 +51,39 @@ class AllenCahn1DDataset(BaseDataset):
         x = self.data[idx]
         flag = self.boundary_mask[idx]
         return x, flag
+
+    def split_domain(self, num_subdomains: int):
+        """Split the dataset into ``num_subdomains`` smaller datasets.
+
+        The domain ``[low, high]`` is divided into equal sub-intervals.  Each
+        subdomain receives its own copy of the configuration with updated
+        ``low``/``high`` bounds and an evenly distributed number of interior
+        points.  Boundary points are placed at the ends of each subdomain.
+        """
+
+        if num_subdomains < 1:
+            raise ValueError("num_subdomains must be at least 1")
+
+        cfg = self.config
+        total_interior = cfg.n_interior
+        base_interior = total_interior // num_subdomains
+        remainder = total_interior % num_subdomains
+        interval = (cfg.high - cfg.low) / num_subdomains
+
+        subdomains = []
+        start = cfg.low
+        for i in range(num_subdomains):
+            # Distribute any remainder one by one to the first subdomains
+            n_int = base_interior + (1 if i < remainder else 0)
+
+            sub_cfg = CfgNode(
+                n_interior=n_int,
+                n_boundary=2,
+                low=start,
+                high=start + interval,
+            )
+
+            subdomains.append(AllenCahn1DDataset(sub_cfg))
+            start += interval
+
+        return subdomains
