@@ -226,8 +226,13 @@ class APTS_Base(Optimizer):
         """
         self.loc_opt.zero_grad()
         loss = self.criterion(self.loc_model(self.inputs), self.labels)
-        if torch.is_grad_enabled() or compute_grad:
-            loss.backward()
+        if compute_grad:
+            # ``loss`` may be used for multiple backward passes within the
+            # trust-region optimisation loop.  Retaining the graph prevents
+            # PyTorch from freeing intermediate tensors too early, avoiding
+            # ``RuntimeError: Trying to backward through the graph a second
+            # time`` when the closure is re-evaluated.
+            loss.backward(retain_graph=True)
             self.loc_grad_evals += 1  # Count local gradient evaluation
         return loss
 
