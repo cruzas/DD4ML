@@ -91,6 +91,7 @@ def get_config_model_and_trainer(args, wandb_config):
         getattr(all_config.trainer, "contiguous_subdomains", False)
         and all_config.trainer.num_subdomains > 1
         and hasattr(dataset, "split_domain")
+        and optimizer_name != "apts_pinn"
     ):
         world_size = dist.get_world_size() if dist.is_initialized() else 1
         rank = dist.get_rank() if dist.is_initialized() else 0
