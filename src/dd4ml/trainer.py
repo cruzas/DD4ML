@@ -320,6 +320,10 @@ class Trainer:
         """Check if APTS_IP is the optimizer itself..."""
         return "apts_ip" in self.optimizer.__class__.__name__.lower()
 
+    def _apts_pinn_present(self):
+        """Check if APTS_PINN is the optimizer itself..."""
+        return "apts_pinn" in self.optimizer.__class__.__name__.lower()
+
     def _asntr_present(self):
         # Check if ASNTR is the optimizer itself...
         asntr_is_opt = "asntr" in self.optimizer.__class__.__name__.lower()
@@ -896,7 +900,14 @@ class Trainer:
                 if hasattr(self.optimizer, "grad_evals")
                 else 1
             )
-            self.grad_evals += nevals * (bs * self.world_size) / len(self.train_dataset)
+            if not self._apts_pinn_present():
+                # APTS_D or APTS_P
+                self.grad_evals += (
+                    nevals * (bs * self.world_size) / len(self.train_dataset)
+                )
+            else:
+                # APTS_PINN
+                self.grad_evals += nevals * bs / len(self.train_dataset)
         else:
             nevals = (
                 self.optimizer.grad_evals
@@ -1021,16 +1032,9 @@ class Trainer:
                     it = iter(self.train_loader)
                     x, y = next(it)
 
-                print(f"\nEpoch {self.epoch_num}, Rank {dist.get_rank()}: inputs: {x}")
-                exit(0)
-
                 # training step (with first-batch warm-up)
                 batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, first)
                 total_samples += bs
-
-                # print(f"Epoch {self.epoch_num}, Rank {dist.get_rank()}, inputs {x}")
-                # if self.epoch_num == 1:
-                #     exit(0)
 
                 # weight loss by global or local sample count
                 if not self._apts_ip_present():

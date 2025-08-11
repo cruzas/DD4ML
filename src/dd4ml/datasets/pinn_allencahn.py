@@ -11,7 +11,7 @@ class AllenCahn1DDataset(BaseDataset):
     @staticmethod
     def get_default_config():
         C = BaseDataset.get_default_config()
-        C.n_interior = 10
+        C.n_interior = 100000
         C.n_boundary = 2
         C.low = 0.0
         C.high = 1.0

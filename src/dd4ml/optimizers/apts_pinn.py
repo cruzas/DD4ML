@@ -37,9 +37,8 @@ class APTS_PINN(APTS_D):
         sub_in_d = full_in_d[mask] if full_in_d is not None else None
         sub_lab_d = full_lab_d[mask] if full_lab_d is not None else None
 
-        # ------------------------------------------------------------------
-        # Global: evaluate loss/grad on full domain
-        # ------------------------------------------------------------------
+        # print(f"Subdomain {idx}. Inputs {sub_in}")
+
         self.inputs, self.labels = full_in, full_lab
         self.inputs_d, self.labels_d = full_in_d, full_lab_d
         self.hNk = hNk
@@ -47,16 +46,12 @@ class APTS_PINN(APTS_D):
         # Save initial global parameters (flattened, cloned to avoid in-place)
         self.init_glob_flat = self.glob_params_to_vector()
 
-        # Set the current inputs for the PINN criterion
-        self.criterion.current_x = full_in
-
         # Compute the initial global loss and gradient
+        self.criterion.current_x = full_in
         self.init_glob_loss = self.glob_closure_main(compute_grad=True)
         self.init_glob_grad = self.glob_grad_to_vector()
 
-        # ------------------------------------------------------------------
-        # Local: evaluate loss/grad on subdomain
-        # ------------------------------------------------------------------
+        # Compute the initial local loss and gradient
         self.inputs, self.labels = sub_in, sub_lab
         self.inputs_d, self.labels_d = sub_in_d, sub_lab_d
         self.criterion.current_x = sub_in
@@ -79,6 +74,9 @@ class APTS_PINN(APTS_D):
         step, pred = self.aggregate_loc_steps_and_losses(step, loc_red)
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
+        self.inputs, self.labels = full_in, full_lab
+        self.inputs_d, self.labels_d = full_in_d, full_lab_d
+        self.criterion.current_x = full_in
         loss, grad, self.glob_opt.delta = self.control_step(step, pred)
         if self.glob_pass:
             loss, grad = self.glob_steps(loss, grad)
