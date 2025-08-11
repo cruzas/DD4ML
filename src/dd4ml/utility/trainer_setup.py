@@ -94,8 +94,9 @@ def get_config_model_and_trainer(args, wandb_config):
     ):
         world_size = dist.get_world_size() if dist.is_initialized() else 1
         rank = dist.get_rank() if dist.is_initialized() else 0
-        train_splits = dataset.split_domain(world_size, exclusive=True)
-        test_splits = test_dataset.split_domain(world_size, exclusive=True)
+        exclusive = getattr(all_config.trainer, "exclusive", True)
+        train_splits = dataset.split_domain(world_size, exclusive=exclusive)
+        test_splits = test_dataset.split_domain(world_size, exclusive=exclusive)
         dataset = train_splits[rank]
         test_dataset = test_splits[rank]
 

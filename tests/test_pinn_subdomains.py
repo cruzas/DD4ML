@@ -32,6 +32,15 @@ def test_split_domain_exclusive():
     assert torch.unique(all_points).numel() == all_points.numel()
 
 
+def test_split_domain_order():
+    cfg = AllenCahn1DDataset.get_default_config()
+    ds = AllenCahn1DDataset(cfg)
+    subs = ds.split_domain(2, exclusive=True)
+    for sub in subs:
+        xs = sub.data[:, 0]
+        assert torch.all(torch.diff(xs) >= 0), "Subdomain points are not ordered"
+
+
 def _run_apts_pinn(rank: int, world_size: int, epochs: int):
     from dd4ml.models.ffnn.pinn_ffnn import PINNFFNN
     from dd4ml.optimizers.apts_pinn import APTS_PINN
