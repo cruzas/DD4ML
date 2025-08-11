@@ -3,9 +3,6 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 
 from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
-from dd4ml.models.ffnn.pinn_ffnn import PINNFFNN
-from dd4ml.optimizers.apts_pinn import APTS_PINN
-from dd4ml.optimizers.tr import TR
 from dd4ml.utility.dist_utils import prepare_distributed_environment
 from dd4ml.utility.pinn_allencahn_loss import AllenCahnPINNLoss
 
@@ -26,7 +23,20 @@ def test_split_domain():
         assert torch.unique(all_points).numel() == all_points.numel()
 
 
+def test_split_domain_exclusive():
+    cfg = AllenCahn1DDataset.get_default_config()
+    ds = AllenCahn1DDataset(cfg)
+    subs = ds.split_domain(2, exclusive=True)
+    # Ensure the combined subdomains cover the domain without overlap
+    all_points = torch.cat([sub.data for sub in subs])
+    assert torch.unique(all_points).numel() == all_points.numel()
+
+
 def _run_apts_pinn(rank: int, world_size: int, epochs: int):
+    from dd4ml.models.ffnn.pinn_ffnn import PINNFFNN
+    from dd4ml.optimizers.apts_pinn import APTS_PINN
+    from dd4ml.optimizers.tr import TR
+
     prepare_distributed_environment(
         rank=rank,
         master_addr="localhost",
