@@ -41,6 +41,48 @@ def test_split_domain_order():
         assert torch.all(torch.diff(xs) >= 0), "Subdomain points are not ordered"
 
 
+def test_apts_pinn_dataset_not_split():
+    """Ensure dataset is not split when using the APTS_PINN optimizer."""
+    from unittest.mock import patch
+
+    from dd4ml.utility.trainer_setup import get_config_model_and_trainer
+    from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
+
+    args = {
+        "dataset_name": "allencahn1d",
+        "model_name": "pinn_ffnn",
+        "optimizer": "apts_pinn",
+        "criterion": "pinn_allencahn",
+        "batch_size": 12,
+        "effective_batch_size": 12,
+        "epochs": 1,
+        "max_iters": 1,
+        "learning_rate": 0.1,
+        "seed": 42,
+        "num_subdomains": 2,
+        "num_stages": 1,
+        "num_replicas_per_subdomain": 1,
+        "gradient_accumulation": False,
+        "accumulation_steps": 1,
+        "batch_inc_factor": 1.0,
+        "overlap": 0.0,
+        "contiguous_subdomains": True,
+        "exclusive": True,
+        "glob_opt": "lssr1_tr",
+        "loc_opt": "lssr1_tr",
+    }
+
+    with patch("torch.distributed.is_initialized", return_value=False), patch(
+        "dd4ml.utility.trainer_setup.get_device", return_value="cpu"
+    ), patch("dd4ml.trainer.dist.get_backend", return_value="gloo"), patch(
+        "dd4ml.datasets.pinn_allencahn.AllenCahn1DDataset.split_domain",
+        wraps=AllenCahn1DDataset.split_domain,
+    ) as mock_split:
+        _, _, trainer = get_config_model_and_trainer(args, None)
+        mock_split.assert_not_called()
+        assert len(trainer.train_dataset) == 12
+
+
 def _run_apts_pinn(rank: int, world_size: int, epochs: int):
     from dd4ml.models.ffnn.pinn_ffnn import PINNFFNN
     from dd4ml.optimizers.apts_pinn import APTS_PINN
