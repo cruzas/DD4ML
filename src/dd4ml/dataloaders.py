@@ -15,6 +15,35 @@ from torch.utils.data import (
 from torch.utils.data.distributed import DistributedSampler
 
 
+class ContiguousDistributedSampler(Sampler[int]):
+    """Distribute dataset indices contiguously among replicas without padding.
+
+    Each rank receives a contiguous chunk of the dataset. The final rank may
+    receive fewer samples if the dataset size is not divisible by the number of
+    replicas. This avoids duplicate samples that can appear when using
+    ``DistributedSampler`` with ``drop_last=False``.
+    """
+
+    def __init__(self, dataset: Dataset, num_replicas: int, rank: int) -> None:
+        self.dataset = dataset
+        self.num_replicas = num_replicas
+        self.rank = rank
+
+        n = len(self.dataset)
+        per_rank = n // num_replicas
+        remainder = n % num_replicas
+
+        start = rank * per_rank + min(rank, remainder)
+        end = start + per_rank + (1 if rank < remainder else 0)
+        self.indices = list(range(start, end))
+
+    def __iter__(self):
+        return iter(self.indices)
+
+    def __len__(self):
+        return len(self.indices)
+
+
 class OverlapBatchSampler(BatchSampler):
     """
     Successive batches share `overlap` examples **without** changing the number of batches,
@@ -227,6 +256,7 @@ class MicroBatchFlattenSampler(BatchSampler):
 
 from torch.utils.data import RandomSampler, SequentialSampler
 
+
 class GeneralizedDistributedDataLoader(DataLoader):
     def __init__(
         self,
@@ -242,22 +272,26 @@ class GeneralizedDistributedDataLoader(DataLoader):
         **kwargs,
     ):
         if "drop_last" in kwargs:
-            print("(WARNING) drop_last will always be True in GeneralizedDistributedDataLoader.")
+            print(
+                "(WARNING) drop_last will always be True in GeneralizedDistributedDataLoader."
+            )
             kwargs.pop("drop_last")
         if batch_size > len(dataset):
-            print(f"(WARNING) Batch size {batch_size} > dataset size {len(dataset)}; reducing.")
+            print(
+                f"(WARNING) Batch size {batch_size} > dataset size {len(dataset)}; reducing."
+            )
             batch_size = len(dataset)
 
         tot_replicas = model_handler.tot_replicas
-        distributed = (tot_replicas > 1)
+        distributed = tot_replicas > 1
         per_replica_bs = batch_size // max(tot_replicas, 1)
 
         world_size = dist.get_world_size()
-        rank       = dist.get_rank()
+        rank = dist.get_rank()
 
         first_ranks = model_handler.get_stage_ranks("first", mode="global")
-        last_ranks  = model_handler.get_stage_ranks("last",  mode="global")
-        all_ranks   = list(range(world_size))
+        last_ranks = model_handler.get_stage_ranks("last", mode="global")
+        all_ranks = list(range(world_size))
         middle_ranks = [r for r in all_ranks if r not in first_ranks + last_ranks]
 
         def make_sampler(layer_ranks, ds, do_shuffle):

@@ -29,6 +29,7 @@ from .dataloaders import (
     MicroBatchFlattenSampler,
     MicroBatchOverlapSampler,
     OverlapBatchSampler,
+    ContiguousDistributedSampler,
 )
 
 
@@ -146,8 +147,10 @@ class Trainer:
         cfg, ds_train, ds_test = self.config, self.train_dataset, self.test_dataset
         # Ensure batch size does not exceed dataset
         if self.current_batch_size >= len(ds_train):
-            print(f"Batch size {self.current_batch_size} >= dataset size {len(ds_train)}; "
-                "using full dataset as single batch, overlap=0.")
+            print(
+                f"Batch size {self.current_batch_size} >= dataset size {len(ds_train)}; "
+                "using full dataset as single batch, overlap=0."
+            )
             self.current_batch_size = len(ds_train)
             cfg.overlap = 0
         bs = self.current_batch_size
@@ -171,16 +174,29 @@ class Trainer:
             pp_bs = bs // world_size
 
             if pp_bs >= shard_size:
-                print(f"Per-process batch size {pp_bs} >= shard size {shard_size}; "
-                    "shard as single batch, overlap=0.")
+                print(
+                    f"Per-process batch size {pp_bs} >= shard size {shard_size}; "
+                    "shard as single batch, overlap=0."
+                )
                 cfg.overlap = 0
 
             if pp_bs < 1:
-                raise ValueError(f"Per-process batch size {pp_bs} < 1; increase global batch size.")
+                raise ValueError(
+                    f"Per-process batch size {pp_bs} < 1; increase global batch size."
+                )
 
-            base_train = DistributedSampler(
-                ds_train, num_replicas=world_size, rank=rank, shuffle=True, drop_last=self._apts_ip_present()
-            )
+            if getattr(cfg, "contiguous_subdomains", False):
+                base_train = ContiguousDistributedSampler(
+                    ds_train, num_replicas=world_size, rank=rank
+                )
+            else:
+                base_train = DistributedSampler(
+                    ds_train,
+                    num_replicas=world_size,
+                    rank=rank,
+                    shuffle=True,
+                    drop_last=self._apts_ip_present(),
+                )
             train_ov = OverlapBatchSampler(
                 base_sampler=base_train,
                 batch_size=pp_bs,
@@ -197,15 +213,24 @@ class Trainer:
                         allow_empty_microbatches=False,
                     )
                     train_sampler = MicroBatchFlattenSampler(train_micro)
-                    print(f"Using micro-batching with {num_sub} subdomains and overlap={cfg.overlap}")
+                    print(
+                        f"Using micro-batching with {num_sub} subdomains and overlap={cfg.overlap}"
+                    )
                 else:
-                    print(f"Warning: num_subdomains={num_sub} requested but overlap=0. "
-                        "Using regular batching.")
+                    if getattr(cfg, "contiguous_subdomains", False):
+                        print("Using regular batching with contiguous subdomains")
+                    else:
+                        print(
+                            f"Warning: num_subdomains={num_sub} requested but overlap=0. "
+                            "Using regular batching."
+                        )
                     train_sampler = train_ov
             else:
                 train_sampler = train_ov
                 if cfg.overlap > 0:
-                    print(f"Using overlap={cfg.overlap} between mini-batches (num_subdomains=1)")
+                    print(
+                        f"Using overlap={cfg.overlap} between mini-batches (num_subdomains=1)"
+                    )
                 else:
                     print("Using regular batching (no overlap, num_subdomains=1)")
 
@@ -231,17 +256,32 @@ class Trainer:
             pp_bs_test = bs // world_size
 
             if pp_bs_test >= shard_size_test:
-                print(f"Per-process test batch size {pp_bs_test} >= shard size {shard_size_test}; "
-                    "using full shard as single batch.")
+                print(
+                    f"Per-process test batch size {pp_bs_test} >= shard size {shard_size_test}; "
+                    "using full shard as single batch."
+                )
             if pp_bs_test < 1:
-                raise ValueError(f"Per-process test batch size {pp_bs_test} < 1; increase global batch size.")
+                raise ValueError(
+                    f"Per-process test batch size {pp_bs_test} < 1; increase global batch size."
+                )
+
+            if getattr(cfg, "contiguous_subdomains", False):
+                test_sampler = ContiguousDistributedSampler(
+                    ds_test, num_replicas=world_size, rank=rank
+                )
+            else:
+                test_sampler = DistributedSampler(
+                    ds_test,
+                    num_replicas=world_size,
+                    rank=rank,
+                    shuffle=False,
+                    drop_last=self._apts_ip_present(),
+                )
 
             self.test_loader = DataLoader(
                 ds_test,
                 batch_size=pp_bs_test,
-                sampler=DistributedSampler(
-                    ds_test, num_replicas=world_size, rank=rank, shuffle=False, drop_last=self._apts_ip_present()
-                ),
+                sampler=test_sampler,
                 num_workers=cfg.num_workers,
                 pin_memory=True,
             )
@@ -249,7 +289,6 @@ class Trainer:
     def _apts_ip_present(self):
         """Check if APTS_IP is the optimizer itself..."""
         return "apts_ip" in self.optimizer.__class__.__name__.lower()
-
 
     def _asntr_present(self):
         # Check if ASNTR is the optimizer itself...
@@ -535,11 +574,10 @@ class Trainer:
         # aggregate across all GPUs/ranks
         if dist.is_initialized():
             dist.all_reduce(correct, op=dist.ReduceOp.SUM)
-            dist.all_reduce(total,   op=dist.ReduceOp.SUM)
+            dist.all_reduce(total, op=dist.ReduceOp.SUM)
 
         self.accuracy = 100.0 * correct.item() / total.item()
         model.train()
-
 
     @torch.no_grad()
     def compute_current_train_perplexity(self):
@@ -602,7 +640,9 @@ class Trainer:
         bs = y.size(0)
 
         # Special handling for PINN datasets
-        if isinstance(self.train_dataset, (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset)):
+        if isinstance(
+            self.train_dataset, (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset)
+        ):
             return self._train_one_batch_PINN(x, y, first_grad)
 
         # optional control batch for ASNTR
@@ -634,7 +674,7 @@ class Trainer:
                 compute_grad=True,
                 grad_norm_clip=self.config.grad_norm_clip,
             )
-            
+
             sig = inspect.signature(self.optimizer.step).parameters
             step_args = {}
             if "final_subdomain_closure" in sig:
@@ -682,12 +722,20 @@ class Trainer:
             # )
             if not self._apts_ip_present():
                 if hasattr(self.optimizer, "grad_evals"):
-                    self.grad_evals += self.optimizer.grad_evals * (bs * self.world_size) / len(self.train_dataset)
+                    self.grad_evals += (
+                        self.optimizer.grad_evals
+                        * (bs * self.world_size)
+                        / len(self.train_dataset)
+                    )
                 else:
-                    self.grad_evals += 1 * (bs * self.world_size) / len(self.train_dataset)
+                    self.grad_evals += (
+                        1 * (bs * self.world_size) / len(self.train_dataset)
+                    )
             else:
                 if hasattr(self.optimizer, "grad_evals"):
-                    self.grad_evals += self.optimizer.grad_evals * bs / len(self.train_dataset)
+                    self.grad_evals += (
+                        self.optimizer.grad_evals * bs / len(self.train_dataset)
+                    )
                 else:
                     self.grad_evals += 1 * bs / len(self.train_dataset)
 
@@ -708,7 +756,7 @@ class Trainer:
         x.requires_grad_(True)
         if isinstance(self.criterion, Poisson3DDataset):
             y.requires_grad_(True)
-        
+
         bs = y.size(0)
         if hasattr(self.criterion, "current_xy"):
             self.criterion.current_xy = x
@@ -772,11 +820,17 @@ class Trainer:
 
         result = self.optimizer.step(**step_args)
         if hasattr(self.optimizer, "grad_evals"):
-            self.grad_evals += self.optimizer.grad_evals * (bs * self.world_size) / len(self.train_dataset)
+            self.grad_evals += (
+                self.optimizer.grad_evals
+                * (bs * self.world_size)
+                / len(self.train_dataset)
+            )
         else:
             self.grad_evals += 1 * (bs * self.world_size) / len(self.train_dataset)
 
-        if isinstance(result, numbers.Number) or (torch.is_tensor(result) and result.ndim == 0):
+        if isinstance(result, numbers.Number) or (
+            torch.is_tensor(result) and result.ndim == 0
+        ):
             batch_loss = float(result)
             batch_grad = None
         else:
@@ -792,21 +846,25 @@ class Trainer:
         self.epoch_num = 0
 
         if not self._apts_ip_present():
-            self.num_training_samples_per_process = len(self.train_dataset) / self.world_size
+            self.num_training_samples_per_process = (
+                len(self.train_dataset) / self.world_size
+            )
         else:
             self.num_training_samples_per_process = len(self.train_dataset)
-        dprint(f"Total number of training samples per process: {self.num_training_samples_per_process}")
+        dprint(
+            f"Total number of training samples per process: {self.num_training_samples_per_process}"
+        )
 
         while self.epoch_num <= self.config.epochs:
             epoch_loss = 0.0
             total_samples = 0
             it = iter(self.train_loader)
-            first = (self.epoch_num == 0)
-            
+            first = self.epoch_num == 0
+
             if hasattr(self.train_loader.sampler, "set_epoch"):
                 # Set the epoch for the sampler to shuffle data correctly
                 self.train_loader.sampler.set_epoch(self.epoch_num)
-            
+
             # loop until this rank has seen its shard (plus any overlap)
             while total_samples < self.num_training_samples_per_process:
                 try:
@@ -820,7 +878,9 @@ class Trainer:
 
                 # weight by global sample count
                 if not self._apts_ip_present():
-                    epoch_loss += batch_loss * (bs * self.world_size / len(self.train_dataset))
+                    epoch_loss += batch_loss * (
+                        bs * self.world_size / len(self.train_dataset)
+                    )
                 else:
                     # print(f"Rank {dist.get_rank()}: number of samples processed: {bs}")
                     epoch_loss += batch_loss * (bs / len(self.train_dataset))
@@ -836,7 +896,9 @@ class Trainer:
                         it = iter(self.train_loader)
 
             # optional full‐objective adjustment
-            if (self._lssr1_tr_present() or self._sgd_present()) and self.epoch_num % 3 == 0:
+            if (
+                self._lssr1_tr_present() or self._sgd_present()
+            ) and self.epoch_num % 3 == 0:
                 full = self._eval_full_objective()
                 self._adjust_batch_size(full)
 
@@ -846,11 +908,12 @@ class Trainer:
             self.epoch_time = time.time()
             self.trigger_callbacks("on_epoch_end")
             self.epoch_num += 1
-        
 
     def run_by_epoch_PINN(self):
-        """Simplified epoch loop for PINN datasets."""    
-        self.num_training_samples_per_process = len(self.train_dataset) / self.world_size
+        """Simplified epoch loop for PINN datasets."""
+        self.num_training_samples_per_process = (
+            len(self.train_dataset) / self.world_size
+        )
         self.total_start_time = time.time()
         self.epoch_time = time.time()
         self.epoch_num = 0
@@ -869,8 +932,12 @@ class Trainer:
 
                 batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, False)
                 total_samples += bs
-                print(f"Rank {dist.get_rank()}: number of samples processed: {total_samples}")
-                epoch_loss += batch_loss * (bs * self.world_size / len(self.train_dataset))
+                print(
+                    f"Rank {dist.get_rank()}: number of samples processed: {total_samples}"
+                )
+                epoch_loss += batch_loss * (
+                    bs * self.world_size / len(self.train_dataset)
+                )
                 self.loss = epoch_loss
 
             self.accuracy = float("nan")  # PINN datasets do not have accuracy
@@ -879,7 +946,6 @@ class Trainer:
             self.epoch_time = time.time()
             self.trigger_callbacks("on_epoch_end")
             self.epoch_num += 1
-
 
     def run_by_iter(self):
         cfg = self.config
