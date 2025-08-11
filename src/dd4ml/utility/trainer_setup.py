@@ -87,6 +87,28 @@ def get_config_model_and_trainer(args, wandb_config):
     test_dataset_config.train = False
     test_dataset = dataset.__class__(test_dataset_config)
 
+    if (
+        getattr(all_config.trainer, "contiguous_subdomains", False)
+        and all_config.trainer.num_subdomains > 1
+        and hasattr(dataset, "split_domain")
+    ):
+        world_size = dist.get_world_size() if dist.is_initialized() else 1
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        train_splits = dataset.split_domain(world_size)
+        test_splits = test_dataset.split_domain(world_size)
+        dataset = train_splits[rank]
+        test_dataset = test_splits[rank]
+
+        if rank > 0:
+            def _remove_left_boundary(ds):
+                eps = (ds.config.high - ds.config.low) / ds.config.n_interior
+                mask = ds.data[:, 0] > ds.config.low + eps / 2
+                ds.data = ds.data[mask]
+                ds.boundary_mask = ds.boundary_mask[mask]
+
+            _remove_left_boundary(dataset)
+            _remove_left_boundary(test_dataset)
+
     # Automatically infer branch input dimension for models like DeepONet
     if getattr(all_config.model, "branch_input_dim", None) is None:
         if hasattr(dataset, "branch_data") and hasattr(dataset.branch_data, "shape"):
