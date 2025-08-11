@@ -107,8 +107,7 @@ class AllenCahn1DDataset(BaseDataset):
 
             # Bypass __init__ to avoid regenerating points.
             sub_ds = AllenCahn1DDataset.__new__(AllenCahn1DDataset)
-            BaseDataset.__init__(sub_ds, sub_cfg)
-            sub_ds.data = sub_data
+            BaseDataset.__init__(sub_ds, sub_cfg, sub_data)
             sub_ds.boundary_mask = sub_mask
             sub_ds.x_interior = sub_data[sub_mask.squeeze() == 0]
             sub_ds.x_boundary = sub_data[sub_mask.squeeze() == 1]
