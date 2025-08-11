@@ -182,9 +182,7 @@ class Trainer:
                     )
                     cfg.overlap = 0
                 if pp_bs < 1:
-                    raise ValueError(
-                        f"Batch size {pp_bs} < 1; increase batch size."
-                    )
+                    raise ValueError(f"Batch size {pp_bs} < 1; increase batch size.")
                 shuffle_flag = not isinstance(ds_train, AllenCahn1DDataset)
                 if shuffle_flag:
                     base_train = RandomSampler(ds_train)
@@ -1026,6 +1024,10 @@ class Trainer:
                 # training step (with first-batch warm-up)
                 batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, first)
                 total_samples += bs
+
+                # print(f"Epoch {self.epoch_num}, Rank {dist.get_rank()}, inputs {x}")
+                # if self.epoch_num == 1:
+                #     exit(0)
 
                 # weight loss by global or local sample count
                 if not self._apts_ip_present():

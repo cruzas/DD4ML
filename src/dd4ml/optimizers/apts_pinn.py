@@ -36,6 +36,10 @@ class APTS_PINN(APTS_D):
 
         sub_in = full_in[mask]
         sub_lab = full_lab[mask] if full_lab is not None else None
+
+        # print(
+        #     f"\nRank {dist.get_rank()} processing subdomain {idx} with bounds ({low}, {high}). Input data: {sub_in}"
+        # )
         sub_in_d = full_in_d[mask] if full_in_d is not None else None
         sub_lab_d = full_lab_d[mask] if full_lab_d is not None else None
 
