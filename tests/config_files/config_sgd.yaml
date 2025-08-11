@@ -40,3 +40,5 @@ parameters:
     value: 0.0
   contiguous_subdomains:
     value: True
+  exclusive:
+    value: True
