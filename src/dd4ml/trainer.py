@@ -85,6 +85,7 @@ class Trainer:
         C.glob_opt = None
         C.overlap = 0.0
         C.contiguous_subdomains = False
+        C.exclusive = True
         C.adjust_batch_size_every_iters = 10000  # for use with LLMs and LSSR1_TR
         return C
 

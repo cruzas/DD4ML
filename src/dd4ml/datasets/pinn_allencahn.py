@@ -32,7 +32,9 @@ class AllenCahn1DDataset(BaseDataset):
         # Boundary points
         boundary = torch.tensor([[cfg.low], [cfg.high]], dtype=torch.float32)
 
-        # Combine data and masks
+        # Combine data and masks and sort by the coordinate value so that
+        # downstream consumers (e.g. different ranks in a distributed run)
+        # see points in increasing order.
         data = torch.cat([boundary, interior], dim=0)
         mask = torch.cat(
             [
@@ -41,9 +43,9 @@ class AllenCahn1DDataset(BaseDataset):
             ],
             dim=0,
         )
-
-        self.data = data
-        self.boundary_mask = mask
+        sort_idx = torch.argsort(data[:, 0])
+        self.data = data[sort_idx]
+        self.boundary_mask = mask[sort_idx]
         self.x_interior = interior
         self.x_boundary = boundary
 
