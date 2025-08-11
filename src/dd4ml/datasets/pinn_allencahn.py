@@ -55,13 +55,19 @@ class AllenCahn1DDataset(BaseDataset):
         flag = self.boundary_mask[idx]
         return x, flag
 
-    def split_domain(self, num_subdomains: int):
+    def split_domain(self, num_subdomains: int, exclusive: bool = False):
         """Split the dataset into ``num_subdomains`` smaller datasets.
 
-        The domain ``[low, high]`` is divided into equal sub-intervals.  Each
+        The domain ``[low, high]`` is divided into equal sub-intervals. Each
         subdomain receives its own copy of the configuration with updated
         ``low``/``high`` bounds and an evenly distributed number of interior
-        points.  Boundary points are placed at the ends of each subdomain.
+        points. Boundary points are placed at the ends of each subdomain.
+
+        Args:
+            num_subdomains: Number of contiguous subdomains to create.
+            exclusive: If ``True``, the left boundary of every subdomain except
+                the first is removed so that adjacent subdomains do not share
+                boundary points.
         """
 
         if num_subdomains < 1:
@@ -88,5 +94,13 @@ class AllenCahn1DDataset(BaseDataset):
 
             subdomains.append(AllenCahn1DDataset(sub_cfg))
             start += interval
+
+        if exclusive:
+            for ds in subdomains[1:]:
+                mask = ds.data[:, 0] > ds.config.low
+                ds.data = ds.data[mask]
+                ds.boundary_mask = ds.boundary_mask[mask]
+                if hasattr(ds, "x_boundary"):
+                    ds.x_boundary = ds.x_boundary[1:]
 
         return subdomains
