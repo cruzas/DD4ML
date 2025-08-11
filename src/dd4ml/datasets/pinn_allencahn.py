@@ -23,19 +23,23 @@ class AllenCahn1DDataset(BaseDataset):
 
     def _generate_points(self):
         cfg = self.config
-        # Interior points
-        interior = torch.linspace(
-            cfg.low, cfg.high, cfg.n_interior, dtype=torch.float32
-        ).unsqueeze(1)
+        # Interior points (exclude boundary endpoints)
+        interior = (
+            torch.linspace(
+                cfg.low, cfg.high, cfg.n_interior + 2, dtype=torch.float32
+            )[1:-1]
+            .unsqueeze(1)
+        )
+
         # Boundary points
         boundary = torch.tensor([[cfg.low], [cfg.high]], dtype=torch.float32)
 
-        # Combine data and masks
-        data = torch.cat([boundary, interior], dim=0)
+        # Combine data and masks (interior first, boundary last)
+        data = torch.cat([interior, boundary], dim=0)
         mask = torch.cat(
             [
-                torch.ones(len(boundary), 1),  # boundary flags
                 torch.zeros(len(interior), 1),  # interior flags
+                torch.ones(len(boundary), 1),  # boundary flags
             ],
             dim=0,
         )

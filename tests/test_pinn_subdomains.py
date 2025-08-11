@@ -18,6 +18,12 @@ def test_split_domain():
     # first subdomain should start at global low, last at global high
     assert torch.isclose(subs[0].x_boundary[0], torch.tensor([cfg.low]))
     assert torch.isclose(subs[-1].x_boundary[-1], torch.tensor([cfg.high]))
+    for sub in subs:
+        # Each subdomain should contain n_interior + 2 total points
+        assert len(sub) == sub.config.n_interior + sub.config.n_boundary
+        all_points = torch.cat([sub.x_interior, sub.x_boundary])
+        # Interior points should exclude boundaries (no duplicates)
+        assert torch.unique(all_points).numel() == all_points.numel()
 
 
 def _run_apts_pinn(rank: int, world_size: int, epochs: int):
