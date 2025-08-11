@@ -1021,6 +1021,9 @@ class Trainer:
                     it = iter(self.train_loader)
                     x, y = next(it)
 
+                print(f"\nEpoch {self.epoch_num}, Rank {dist.get_rank()}: inputs: {x}")
+                exit(0)
+
                 # training step (with first-batch warm-up)
                 batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, first)
                 total_samples += bs

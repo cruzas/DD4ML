@@ -10,7 +10,7 @@ parameters:
   effective_batch_size:
     value: 128 
   epochs: 
-    value: 10
+    value: 5
   max_iters:
     value: 1000
   learning_rate:
@@ -23,6 +23,8 @@ parameters:
     value: "pinn_allencahn"
   seed:
     value: 42
+  tol:
+    value: 1e-9
   # For parallel computation
   num_subdomains:
     value: 1
