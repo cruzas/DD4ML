@@ -172,17 +172,17 @@ class Trainer:
             )
         else:
             if cfg.contiguous_subdomains:
-                shard_size = len(ds_train)
-                pp_bs = bs // world_size
-                if pp_bs >= shard_size:
+                dataset_len = len(ds_train)
+                pp_bs = bs
+                if pp_bs >= dataset_len:
                     print(
-                        f"Per-process batch size {pp_bs} >= shard size {shard_size}; "
+                        f"Batch size {pp_bs} >= dataset size {dataset_len}; "
                         "using full dataset as single batch, overlap=0."
                     )
                     cfg.overlap = 0
                 if pp_bs < 1:
                     raise ValueError(
-                        f"Per-process batch size {pp_bs} < 1; increase global batch size."
+                        f"Batch size {pp_bs} < 1; increase batch size."
                     )
                 shuffle_flag = not isinstance(ds_train, AllenCahn1DDataset)
                 if shuffle_flag:
