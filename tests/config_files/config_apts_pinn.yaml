@@ -3,12 +3,12 @@ metric:
   name: train_loss
   goal: minimize
 parameters:
-  optimizer: 
-    value: "apts_pinn" 
+  optimizer:
+    value: "apts_pinn"
   batch_size:
-    value: 10002
+    value: 12
   effective_batch_size:
-    value: 10002
+    value: 12
   num_stages:
     value: 1
   num_subdomains:
@@ -35,17 +35,17 @@ parameters:
     value: 1
   max_iters:
     value: 10 # for Transformers
-  epochs: 
+  epochs:
     value: 5
-  delta: 
+  delta:
     value: 0.1
-  min_delta: 
+  min_delta:
     value: 0.001
   max_delta:
     value: 1.0
-  dataset_name: 
-    value: "allencahn1d" 
-  model_name: 
+  dataset_name:
+    value: "allencahn1d"
+  model_name:
     value: "pinn_ffnn"
   criterion:
     value: "pinn_allencahn"
@@ -72,4 +72,8 @@ parameters:
   loc_opt:
     value: "tr"
   paper_tr_update:
+    value: True
+  contiguous_subdomains:
+    value: True
+  exclusive:
     value: True

@@ -13,7 +13,7 @@ from itertools import chain, count
 
 import torch
 import torch.distributed as dist
-from torch.utils.data.dataloader import DataLoader
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 
 from dd4ml.datasets.deeponet_sine import SineOperatorDataset
@@ -84,6 +84,8 @@ class Trainer:
         C.loc_opt = None
         C.glob_opt = None
         C.overlap = 0.0
+        C.contiguous_subdomains = False
+        C.exclusive = True
         C.adjust_batch_size_every_iters = 10000  # for use with LLMs and LSSR1_TR
         return C
 
@@ -170,62 +172,92 @@ class Trainer:
                 pin_memory=True,
             )
         else:
-            shard_size = math.ceil(len(ds_train) / world_size)
-            pp_bs = bs // world_size
-
-            if pp_bs >= shard_size:
-                print(
-                    f"Per-process batch size {pp_bs} >= shard size {shard_size}; "
-                    "shard as single batch, overlap=0."
-                )
-                cfg.overlap = 0
-
-            if pp_bs < 1:
-                raise ValueError(
-                    f"Per-process batch size {pp_bs} < 1; increase global batch size."
-                )
-
-            shuffle_flag = not isinstance(ds_train, AllenCahn1DDataset)
-            base_train = DistributedSampler(
-                ds_train,
-                num_replicas=world_size,
-                rank=rank,
-                shuffle=shuffle_flag,
-                drop_last=self._apts_ip_present(),
-            )
-            train_ov = OverlapBatchSampler(
-                base_sampler=base_train,
-                batch_size=pp_bs,
-                overlap=cfg.overlap,
-                drop_last=self._apts_ip_present(),
-            )
-
-            num_sub = getattr(cfg, "num_subdomains", 1)
-            if num_sub > 1:
-                if cfg.overlap > 0:
-                    train_micro = MicroBatchOverlapSampler(
-                        overlap_sampler=train_ov,
-                        num_subdomains=num_sub,
-                        allow_empty_microbatches=False,
-                    )
-                    train_sampler = MicroBatchFlattenSampler(train_micro)
+            if cfg.contiguous_subdomains:
+                dataset_len = len(ds_train)
+                pp_bs = bs
+                if pp_bs >= dataset_len:
                     print(
-                        f"Using micro-batching with {num_sub} subdomains and overlap={cfg.overlap}"
+                        f"Batch size {pp_bs} >= dataset size {dataset_len}; "
+                        "using full dataset as single batch, overlap=0."
                     )
+                    cfg.overlap = 0
+                if pp_bs < 1:
+                    raise ValueError(f"Batch size {pp_bs} < 1; increase batch size.")
+                shuffle_flag = not isinstance(ds_train, AllenCahn1DDataset)
+                if shuffle_flag:
+                    base_train = RandomSampler(ds_train)
                 else:
-                    print(
-                        f"Warning: num_subdomains={num_sub} requested but overlap=0. "
-                        "Using regular batching."
-                    )
-                    train_sampler = train_ov
-            else:
+                    base_train = SequentialSampler(ds_train)
+                train_ov = OverlapBatchSampler(
+                    base_sampler=base_train,
+                    batch_size=pp_bs,
+                    overlap=cfg.overlap,
+                    drop_last=self._apts_ip_present(),
+                )
                 train_sampler = train_ov
                 if cfg.overlap > 0:
                     print(
-                        f"Using overlap={cfg.overlap} between mini-batches (num_subdomains=1)"
+                        f"Using overlap={cfg.overlap} between mini-batches (contiguous subdomains)"
                     )
                 else:
-                    print("Using regular batching (no overlap, num_subdomains=1)")
+                    print("Using regular batching with contiguous subdomains")
+            else:
+                shard_size = math.ceil(len(ds_train) / world_size)
+                pp_bs = bs // world_size
+
+                if pp_bs >= shard_size:
+                    print(
+                        f"Per-process batch size {pp_bs} >= shard size {shard_size}; "
+                        "shard as single batch, overlap=0."
+                    )
+                    cfg.overlap = 0
+
+                if pp_bs < 1:
+                    raise ValueError(
+                        f"Per-process batch size {pp_bs} < 1; increase global batch size."
+                    )
+
+                shuffle_flag = not isinstance(ds_train, AllenCahn1DDataset)
+                base_train = DistributedSampler(
+                    ds_train,
+                    num_replicas=world_size,
+                    rank=rank,
+                    shuffle=shuffle_flag,
+                    drop_last=self._apts_ip_present(),
+                )
+                train_ov = OverlapBatchSampler(
+                    base_sampler=base_train,
+                    batch_size=pp_bs,
+                    overlap=cfg.overlap,
+                    drop_last=self._apts_ip_present(),
+                )
+
+                num_sub = getattr(cfg, "num_subdomains", 1)
+                if num_sub > 1:
+                    if cfg.overlap > 0:
+                        train_micro = MicroBatchOverlapSampler(
+                            overlap_sampler=train_ov,
+                            num_subdomains=num_sub,
+                            allow_empty_microbatches=False,
+                        )
+                        train_sampler = MicroBatchFlattenSampler(train_micro)
+                        print(
+                            f"Using micro-batching with {num_sub} subdomains and overlap={cfg.overlap}"
+                        )
+                    else:
+                        print(
+                            f"Warning: num_subdomains={num_sub} requested but overlap=0. "
+                            "Using regular batching."
+                        )
+                        train_sampler = train_ov
+                else:
+                    train_sampler = train_ov
+                    if cfg.overlap > 0:
+                        print(
+                            f"Using overlap={cfg.overlap} between mini-batches (num_subdomains=1)"
+                        )
+                    else:
+                        print("Using regular batching (no overlap, num_subdomains=1)")
 
             self.train_loader = DataLoader(
                 ds_train,
@@ -245,7 +277,10 @@ class Trainer:
                 pin_memory=True,
             )
         else:
-            shard_size_test = math.ceil(len(ds_test) / world_size)
+            if cfg.contiguous_subdomains:
+                shard_size_test = len(ds_test)
+            else:
+                shard_size_test = math.ceil(len(ds_test) / world_size)
             pp_bs_test = bs // world_size
 
             if pp_bs_test >= shard_size_test:
@@ -258,19 +293,28 @@ class Trainer:
                     f"Per-process test batch size {pp_bs_test} < 1; increase global batch size."
                 )
 
-            self.test_loader = DataLoader(
-                ds_test,
-                batch_size=pp_bs_test,
-                sampler=DistributedSampler(
+            if cfg.contiguous_subdomains:
+                self.test_loader = DataLoader(
                     ds_test,
-                    num_replicas=world_size,
-                    rank=rank,
+                    batch_size=pp_bs_test,
                     shuffle=False,
-                    drop_last=self._apts_ip_present(),
-                ),
-                num_workers=cfg.num_workers,
-                pin_memory=True,
-            )
+                    num_workers=cfg.num_workers,
+                    pin_memory=True,
+                )
+            else:
+                self.test_loader = DataLoader(
+                    ds_test,
+                    batch_size=pp_bs_test,
+                    sampler=DistributedSampler(
+                        ds_test,
+                        num_replicas=world_size,
+                        rank=rank,
+                        shuffle=False,
+                        drop_last=self._apts_ip_present(),
+                    ),
+                    num_workers=cfg.num_workers,
+                    pin_memory=True,
+                )
 
     def _apts_ip_present(self):
         """Check if APTS_IP is the optimizer itself..."""
@@ -983,6 +1027,10 @@ class Trainer:
                 # training step (with first-batch warm-up)
                 batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, first)
                 total_samples += bs
+
+                # print(f"Epoch {self.epoch_num}, Rank {dist.get_rank()}, inputs {x}")
+                # if self.epoch_num == 1:
+                #     exit(0)
 
                 # weight loss by global or local sample count
                 if not self._apts_ip_present():

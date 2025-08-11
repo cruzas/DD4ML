@@ -11,7 +11,7 @@ class AllenCahn1DDataset(BaseDataset):
     @staticmethod
     def get_default_config():
         C = BaseDataset.get_default_config()
-        C.n_interior = 10000
+        C.n_interior = 10
         C.n_boundary = 2
         C.low = 0.0
         C.high = 1.0
@@ -23,14 +23,18 @@ class AllenCahn1DDataset(BaseDataset):
 
     def _generate_points(self):
         cfg = self.config
-        # Interior points
+        # Interior points exclude boundaries
+        step = (cfg.high - cfg.low) / (cfg.n_interior + 1)
         interior = torch.linspace(
-            cfg.low, cfg.high, cfg.n_interior, dtype=torch.float32
+            cfg.low + step, cfg.high - step, cfg.n_interior, dtype=torch.float32
         ).unsqueeze(1)
+
         # Boundary points
         boundary = torch.tensor([[cfg.low], [cfg.high]], dtype=torch.float32)
 
-        # Combine data and masks
+        # Combine data and masks and sort by the coordinate value so that
+        # downstream consumers (e.g. different ranks in a distributed run)
+        # see points in increasing order.
         data = torch.cat([boundary, interior], dim=0)
         mask = torch.cat(
             [
@@ -39,9 +43,9 @@ class AllenCahn1DDataset(BaseDataset):
             ],
             dim=0,
         )
-
-        self.data = data
-        self.boundary_mask = mask
+        sort_idx = torch.argsort(data[:, 0])
+        self.data = data[sort_idx]
+        self.boundary_mask = mask[sort_idx]
         self.x_interior = interior
         self.x_boundary = boundary
 
@@ -53,38 +57,60 @@ class AllenCahn1DDataset(BaseDataset):
         flag = self.boundary_mask[idx]
         return x, flag
 
-    def split_domain(self, num_subdomains: int):
+    def split_domain(self, num_subdomains: int, exclusive: bool = False):
         """Split the dataset into ``num_subdomains`` smaller datasets.
 
-        The domain ``[low, high]`` is divided into equal sub-intervals.  Each
+        Unlike the previous implementation which re-sampled interior points for
+        every subdomain, this version partitions the *existing* dataset so that
+        the union of subdomains contains exactly the same points as the original
+        dataset. This is useful when different optimizers are expected to operate
+        on identical training points.
+
+        The domain ``[low, high]`` is divided into equal sub-intervals. Each
         subdomain receives its own copy of the configuration with updated
-        ``low``/``high`` bounds and an evenly distributed number of interior
-        points.  Boundary points are placed at the ends of each subdomain.
+        ``low``/``high`` bounds but inherits the data points that fall within the
+        interval. If ``exclusive`` is ``True`` the boundary at the beginning of a
+        subdomain (except the first) is excluded so that adjacent subdomains do
+        not share points.
+
+        Args:
+            num_subdomains: Number of contiguous subdomains to create.
+            exclusive: If ``True``, adjacent subdomains will not share boundary
+                points.
         """
 
         if num_subdomains < 1:
             raise ValueError("num_subdomains must be at least 1")
 
         cfg = self.config
-        total_interior = cfg.n_interior
-        base_interior = total_interior // num_subdomains
-        remainder = total_interior % num_subdomains
         interval = (cfg.high - cfg.low) / num_subdomains
 
         subdomains = []
-        start = cfg.low
         for i in range(num_subdomains):
-            # Distribute any remainder one by one to the first subdomains
-            n_int = base_interior + (1 if i < remainder else 0)
+            sub_low = cfg.low + i * interval
+            sub_high = sub_low + interval
+
+            if exclusive and i < num_subdomains - 1:
+                mask = (self.data[:, 0] >= sub_low) & (self.data[:, 0] < sub_high)
+            else:
+                mask = (self.data[:, 0] >= sub_low) & (self.data[:, 0] <= sub_high)
+
+            sub_data = self.data[mask]
+            sub_mask = self.boundary_mask[mask]
 
             sub_cfg = CfgNode(
-                n_interior=n_int,
-                n_boundary=2,
-                low=start,
-                high=start + interval,
+                n_interior=int((sub_mask == 0).sum().item()),
+                n_boundary=int((sub_mask == 1).sum().item()),
+                low=sub_low,
+                high=sub_high,
             )
 
-            subdomains.append(AllenCahn1DDataset(sub_cfg))
-            start += interval
+            # Bypass __init__ to avoid regenerating points.
+            sub_ds = AllenCahn1DDataset.__new__(AllenCahn1DDataset)
+            BaseDataset.__init__(sub_ds, sub_cfg, sub_data)
+            sub_ds.boundary_mask = sub_mask
+            sub_ds.x_interior = sub_data[sub_mask.squeeze() == 0]
+            sub_ds.x_boundary = sub_data[sub_mask.squeeze() == 1]
+            subdomains.append(sub_ds)
 
         return subdomains
