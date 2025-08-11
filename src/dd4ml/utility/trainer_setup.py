@@ -101,10 +101,11 @@ def get_config_model_and_trainer(args, wandb_config):
 
         if rank > 0:
             def _remove_left_boundary(ds):
-                eps = (ds.config.high - ds.config.low) / ds.config.n_interior
-                mask = ds.data[:, 0] > ds.config.low + eps / 2
+                mask = ds.data[:, 0] > ds.config.low
                 ds.data = ds.data[mask]
                 ds.boundary_mask = ds.boundary_mask[mask]
+                if hasattr(ds, "x_boundary"):
+                    ds.x_boundary = ds.x_boundary[1:]
 
             _remove_left_boundary(dataset)
             _remove_left_boundary(test_dataset)
