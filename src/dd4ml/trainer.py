@@ -1025,6 +1025,8 @@ class Trainer:
                 # training step (with first-batch warm-up)
                 batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, first)
                 total_samples += bs
+                print(f"\nEpoch {self.epoch_num}, inputs {x}")
+                exit(0)
 
                 # weight loss by global or local sample count
                 if not self._apts_ip_present():

@@ -6,9 +6,9 @@ parameters:
   optimizer:
     value: "apts_pinn"
   batch_size:
-    value: 128
+    value: 12
   effective_batch_size:
-    value: 128
+    value: 12
   num_stages:
     value: 1
   num_subdomains:
@@ -60,7 +60,7 @@ parameters:
   batch_inc_factor:
     value: 1.0
   overlap:
-    value: 0.33
+    value: 0.0
   mem_length:
     value: 5
   max_wolfe_iters:
@@ -74,4 +74,4 @@ parameters:
   paper_tr_update:
     value: True
   contiguous_subdomains:
-    value: False
+    value: True
