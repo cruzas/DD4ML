@@ -1002,6 +1002,15 @@ class Trainer:
         """Simplified epoch loop for PINN datasets, with adaptive and callback logic."""
         # ensure model and loss operate in double precision for PINN training
         self.model = self.model.double()
+        if hasattr(self.optimizer, "loc_model"):
+            # APTS-based optimizers keep a separate local model that
+            # is cloned during initialisation.  When switching the main
+            # model to ``float64`` we must also convert this local copy,
+            # otherwise forward passes inside the optimizer will mix
+            # ``float32`` weights with ``float64`` inputs, triggering
+            # dtype mismatch errors.
+            self.optimizer.loc_model = self.optimizer.loc_model.double()
+
         if hasattr(self.criterion, "to"):
             self.criterion = self.criterion.to(torch.float64)
 
