@@ -13,11 +13,25 @@ class AllenCahn1DDataset(BaseDataset):
         C = BaseDataset.get_default_config()
         C.n_interior = 1000
         C.n_boundary = 2
+        # include batch size so that global config values propagate here
+        C.batch_size = C.n_interior + C.n_boundary
         C.low = 0.0
         C.high = 1.0
         return C
 
     def __init__(self, config, data=None, transform=None):
+        # Adjust interior/boundary counts based on desired batch size
+        if hasattr(config, "batch_size"):
+            if not hasattr(config, "n_boundary"):
+                config.n_boundary = 2
+            if config.batch_size < config.n_boundary:
+                raise ValueError(
+                    "batch_size must be >= number of boundary points"
+                )
+            config.n_interior = int(config.batch_size - config.n_boundary)
+        # keep batch_size consistent with n_interior and n_boundary
+        config.batch_size = int(config.n_interior + config.n_boundary)
+
         super().__init__(config, data, transform)
         self._generate_points()
 
@@ -103,6 +117,7 @@ class AllenCahn1DDataset(BaseDataset):
                 n_boundary=int((sub_mask == 1).sum().item()),
                 low=sub_low,
                 high=sub_high,
+                batch_size=int(sub_data.size(0)),
             )
 
             # Bypass __init__ to avoid regenerating points.
