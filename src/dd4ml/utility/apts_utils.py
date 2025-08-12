@@ -9,14 +9,46 @@ from .optimizer_utils import get_state_dict
 
 
 def flatten_params(model, out=None):
+    # Infer param dtype/device from the first parameter
+    first = next(model.parameters(), None)
+    if first is None:
+        # Empty model: honour out if provided, else default dtype/device
+        if out is None:
+            return torch.empty(0, dtype=torch.get_default_dtype())
+        return out.narrow(0, 0, 0).clone()
+
+    param_dtype = first.dtype
+    param_device = first.device
+
+    # Decide target dtype/device dynamically
+    # Promote to float64 iff either params or out are float64
+    if out is not None and out.dtype == torch.float64 or param_dtype == torch.float64:
+        target_dtype = torch.float64
+    else:
+        target_dtype = param_dtype
+    target_device = param_device
+
     if out is None:
-        return parameters_to_vector(model.parameters())
-    # Write flattened parameters into a preallocated tensor.
+        # Create flattened vector and upcast only if necessary.
+        return parameters_to_vector(model.parameters()).to(
+            dtype=target_dtype, device=target_device
+        )
+
+    # Conform out to target dtype/device (no pre-scan).
+    if out.dtype != target_dtype or out.device != target_device:
+        out = out.to(device=target_device, dtype=target_dtype)
+
+    # Write flattened parameters into the preallocated tensor.
     offset = 0
-    for param in model.parameters():
-        numel = param.numel()
-        out[offset : offset + numel].copy_(param.data.view(-1))
+    for p in model.parameters():
+        numel = p.numel()
+        # Convert on the fly only if needed (avoids an upfront pass).
+        src = p.data.view(-1)
+        if src.dtype != target_dtype:
+            src = src.to(target_dtype)
+        out[offset : offset + numel].copy_(src)
         offset += numel
+
     return out.clone()
 
 

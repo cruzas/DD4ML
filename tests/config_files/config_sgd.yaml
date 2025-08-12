@@ -6,11 +6,11 @@ parameters:
   optimizer: 
     value: "sgd"
   batch_size:
-    value: 100002
+    value: 1000002
   effective_batch_size:
-    value: 100002 
+    value: 1000002 
   epochs: 
-    value: 5
+    value: 25
   max_iters:
     value: 1000
   learning_rate:
