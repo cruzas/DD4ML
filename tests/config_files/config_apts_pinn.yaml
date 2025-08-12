@@ -6,9 +6,9 @@ parameters:
   optimizer:
     value: "apts_pinn"
   batch_size:
-    value: 1000
+    value: 10000
   effective_batch_size:
-    value: 1000
+    value: 10000
   num_stages:
     value: 1
   num_subdomains:
