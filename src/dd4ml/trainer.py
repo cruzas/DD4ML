@@ -806,8 +806,8 @@ class Trainer:
 
     def _train_one_batch_PINN(self, x, y, first_grad: bool):
         """Specialized training step for the Poisson PINN dataset."""
-        x = self._move_to_device(x)
-        y = self._move_to_device(y)
+        x = self._move_to_device(x).double()
+        y = self._move_to_device(y).double()
         x.requires_grad_(True)
         if isinstance(self.criterion, Poisson3DDataset):
             y.requires_grad_(True)
@@ -1000,6 +1000,11 @@ class Trainer:
 
     def run_by_epoch_PINN(self):
         """Simplified epoch loop for PINN datasets, with adaptive and callback logic."""
+        # ensure model and loss operate in double precision for PINN training
+        self.model = self.model.double()
+        if hasattr(self.criterion, "to"):
+            self.criterion = self.criterion.to(torch.float64)
+
         # determine how many samples each process should see
         if not self._apts_ip_present():
             self.num_training_samples_per_process = (
