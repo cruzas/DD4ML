@@ -79,7 +79,9 @@ def get_config_model_and_trainer(args, wandb_config):
     ):
         all_config.trainer.loc_opt = all_config.trainer.subdomain_opt
         delattr(all_config.trainer, "subdomain_opt")
-    all_config.merge_and_cleanup(keys_to_look=["system", "model", "trainer"])
+    all_config.merge_and_cleanup(
+        keys_to_look=["system", "data", "model", "trainer"]
+    )
 
     # Instantiate dataset.
     dataset = dataset_factory.create(all_config.dataset_name, all_config.data)
