@@ -149,6 +149,60 @@ def _run_apts_pinn(rank: int, world_size: int, epochs: int):
     dist.destroy_process_group()
 
 
+def test_run_by_epoch_pinn_full_dataset_overlap():
+    """run_by_epoch_PINN should process the full local dataset when the
+    sampler does not shard data (e.g. domain decomposition with overlap)."""
+    from unittest.mock import patch
+    from torch.utils.data.distributed import DistributedSampler
+    from dd4ml.utility.trainer_setup import get_config_model_and_trainer
+
+    args = {
+        "dataset_name": "allencahn1d",
+        "model_name": "pinn_ffnn",
+        "optimizer": "tr",
+        "criterion": "pinn_allencahn",
+        "batch_size": 12,
+        "effective_batch_size": 12,
+        "epochs": 0,
+        "max_iters": 1,
+        "learning_rate": 0.1,
+        "seed": 42,
+        "num_subdomains": 2,
+        "num_stages": 1,
+        "num_replicas_per_subdomain": 1,
+        "gradient_accumulation": False,
+        "accumulation_steps": 1,
+        "batch_inc_factor": 1.0,
+        "overlap": 0.0,
+        "contiguous_subdomains": True,
+        "exclusive": False,
+        "delta": 0.1,
+        "max_delta": 2.0,
+        "min_delta": 1e-3,
+        "tol": 1e-6,
+    }
+
+    with patch("torch.distributed.is_initialized", return_value=True), patch(
+        "torch.distributed.get_world_size", return_value=2
+    ), patch("torch.distributed.get_rank", return_value=0), patch(
+        "dd4ml.utility.trainer_setup.get_device", return_value="cpu"
+    ), patch("dd4ml.trainer.dist.get_backend", return_value="gloo"), patch(
+        "dd4ml.utility.trainer_setup.DDP", lambda m, *a, **k: m
+    ):
+        _, _, trainer = get_config_model_and_trainer(args, None)
+        trainer.setup_data_loaders()
+        assert not isinstance(trainer.train_loader.sampler, DistributedSampler)
+        with patch.object(
+            trainer,
+            "_train_one_batch_PINN",
+            return_value=(0.0, None, len(trainer.train_dataset)),
+        ):
+            trainer.run_by_epoch_PINN()
+        assert (
+            trainer.num_training_samples_per_process
+            == len(trainer.train_dataset)
+        )
+
 def main():
     world_size = 2
     epochs = 10
