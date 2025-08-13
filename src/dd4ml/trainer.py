@@ -537,6 +537,28 @@ class Trainer:
             for x, y in eval_loader:
                 x = self._move_to_device(x)
                 y = self._move_to_device(y)
+
+                # PINN datasets operate in double precision. During training we
+                # explicitly cast inputs and targets to ``float64`` in
+                # ``_train_one_batch_PINN`` and convert the model and loss in
+                # ``run_by_epoch_PINN``.  However, the evaluation path used by
+                # ``_eval_full_objective`` did not perform this cast, leading to
+                # dtype mismatches between ``float32`` inputs and ``float64``
+                # model weights when optimizers such as SGD were used.  Align
+                # the evaluation dtype with the training dtype by promoting
+                # PINN tensors to double here as well.
+                if isinstance(
+                    self.train_dataset,
+                    (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, AllenCahn1DDataset),
+                ):
+                    if isinstance(x, torch.Tensor):
+                        x = x.double()
+                    elif isinstance(x, (list, tuple)):
+                        x = type(x)(
+                            t.double() if isinstance(t, torch.Tensor) else t for t in x
+                        )
+                    y = y.double()
+
                 if isinstance(x, torch.Tensor):
                     x.requires_grad_(True)
                 elif isinstance(x, (list, tuple)):
