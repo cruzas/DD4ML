@@ -1038,9 +1038,14 @@ class Trainer:
 
         # determine how many samples each process should see
         if not self._apts_ip_present():
-            self.num_training_samples_per_process = (
-                len(self.train_dataset) / self.world_size
-            )
+            if isinstance(self.train_loader.sampler, DistributedSampler):
+                # DistributedSampler already shards the dataset
+                self.num_training_samples_per_process = (
+                    len(self.train_dataset) / self.world_size
+                )
+            else:
+                # full dataset per process (e.g. domain decomposition overlap)
+                self.num_training_samples_per_process = len(self.train_dataset)
         else:
             # APTS_IP processes full dataset per process
             self.num_training_samples_per_process = len(self.train_dataset)
