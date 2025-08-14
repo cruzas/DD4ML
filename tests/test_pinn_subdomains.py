@@ -83,6 +83,61 @@ def test_apts_pinn_dataset_not_split():
         assert len(trainer.train_dataset) == 12
 
 
+def test_apts_pinn_subdomain_overlap():
+    """Subdomain masks should include the configured overlap."""
+    from dd4ml.models.ffnn.pinn_ffnn import PINNFFNN
+    from dd4ml.optimizers.apts_pinn import APTS_PINN
+    from dd4ml.optimizers.tr import TR
+
+    cfg = AllenCahn1DDataset.get_default_config()
+    cfg.n_interior = 10
+    cfg.n_boundary = 2
+    cfg.batch_size = 12
+    ds = AllenCahn1DDataset(cfg)
+
+    model_cfg = PINNFFNN.get_default_config()
+    model = PINNFFNN(model_cfg)
+    criterion = AllenCahnPINNLoss()
+
+    tr_kwargs = dict(
+        delta=0.1,
+        nu_dec=0.25,
+        nu_inc=0.75,
+        inc_factor=1.2,
+        dec_factor=0.9,
+        max_delta=2.0,
+        min_delta=1e-3,
+        tol=1e-6,
+    )
+
+    opt = APTS_PINN(
+        model.parameters(),
+        model=model,
+        criterion=criterion,
+        device="cpu",
+        glob_opt=TR,
+        glob_opt_hparams=tr_kwargs,
+        loc_opt=TR,
+        loc_opt_hparams=tr_kwargs,
+        glob_pass=False,
+        foc=False,
+        norm_type=2,
+        max_loc_iters=1,
+        max_glob_iters=1,
+        num_subdomains=2,
+        overlap=0.2,
+        **tr_kwargs,
+    )
+
+    x = ds.data.squeeze()
+    mask0 = opt.get_subdomain_mask(x, 0)
+    mask1 = opt.get_subdomain_mask(x, 1)
+    sub0 = set(x[mask0].tolist())
+    sub1 = set(x[mask1].tolist())
+    assert len(sub0 & sub1) > 0
+    assert len(sub0 | sub1) == len(x)
+
+
 def _run_apts_pinn(rank: int, world_size: int, epochs: int):
     from dd4ml.models.ffnn.pinn_ffnn import PINNFFNN
     from dd4ml.optimizers.apts_pinn import APTS_PINN

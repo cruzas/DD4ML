@@ -7,12 +7,37 @@ from .apts_d import APTS_D
 class APTS_PINN(APTS_D):
     __name__ = "APTS_PINN"
 
-    def __init__(self, *args, num_subdomains=1, criterion=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        num_subdomains: int = 1,
+        overlap: float = 0.0,
+        criterion=None,
+        **kwargs,
+    ):
         super().__init__(*args, nr_models=num_subdomains, criterion=criterion, **kwargs)
         self.num_subdomains = max(1, int(num_subdomains))
         low = getattr(self.criterion, "low", 0.0)
         high = getattr(self.criterion, "high", 1.0)
+        self.domain_low, self.domain_high = float(low), float(high)
         self.subdomain_bounds = torch.linspace(low, high, self.num_subdomains + 1)
+        self.overlap = max(float(overlap), 0.0)
+
+    def get_subdomain_bounds(self, idx: int):
+        """Return (low, high) bounds for a subdomain with optional overlap."""
+        base_low = self.subdomain_bounds[idx].item()
+        base_high = self.subdomain_bounds[idx + 1].item()
+        if self.overlap > 0.0:
+            half = self.overlap / 2.0
+            low = max(base_low - half, self.domain_low)
+            high = min(base_high + half, self.domain_high)
+            return low, high
+        return base_low, base_high
+
+    def get_subdomain_mask(self, x: torch.Tensor, idx: int):
+        """Build a boolean mask selecting points for subdomain ``idx``."""
+        low, high = self.get_subdomain_bounds(idx)
+        return (x >= low) & (x <= high)
 
     def step(self, inputs, labels, inputs_d=None, labels_d=None, hNk=None):
         # Initialize the global and local gradient evaluations counters
@@ -21,8 +46,7 @@ class APTS_PINN(APTS_D):
         # Build mask for the subdomain
         idx = dist.get_rank() if dist.is_initialized() else 0
         x = inputs.squeeze()
-        low, high = self.subdomain_bounds[idx], self.subdomain_bounds[idx + 1]
-        mask = (x >= low) & (x <= high)
+        mask = self.get_subdomain_mask(x, idx)
 
         # Create tensors for full domain (for global pass) and subdomain (for local pass)
         full_in = inputs.detach().requires_grad_(True)
