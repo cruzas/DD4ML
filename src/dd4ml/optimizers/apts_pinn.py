@@ -83,14 +83,18 @@ class APTS_PINN(APTS_D):
         self.init_glob_flat = self.glob_params_to_vector()
 
         # Compute the initial global loss and gradient
-        self.criterion.current_x = full_in
+        for attr in ("current_xt", "current_x"):
+            if hasattr(self.criterion, attr):
+                setattr(self.criterion, attr, full_in)
         self.init_glob_loss = self.glob_closure_main(compute_grad=True)
         self.init_glob_grad = self.glob_grad_to_vector()
 
         # Compute the initial local loss and gradient
         self.inputs, self.labels = sub_in, sub_lab
         self.inputs_d, self.labels_d = sub_in_d, sub_lab_d
-        self.criterion.current_x = sub_in
+        for attr in ("current_xt", "current_x"):
+            if hasattr(self.criterion, attr):
+                setattr(self.criterion, attr, sub_in)
 
         self.init_loc_loss = self.loc_closure(compute_grad=True)
         self.init_loc_grad = self.loc_grad_to_vector()
@@ -112,7 +116,9 @@ class APTS_PINN(APTS_D):
         # APTS trust-region control: possibly modifies self.delta and global model parameters
         self.inputs, self.labels = full_in, full_lab
         self.inputs_d, self.labels_d = full_in_d, full_lab_d
-        self.criterion.current_x = full_in
+        for attr in ("current_xt", "current_x"):
+            if hasattr(self.criterion, attr):
+                setattr(self.criterion, attr, full_in)
         loss, grad, self.glob_opt.delta = self.control_step(step, pred)
         if self.glob_pass:
             loss, grad = self.glob_steps(loss, grad)
