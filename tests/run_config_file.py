@@ -310,7 +310,7 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 1
+    world_size = 2
     if args["use_pmw"]:
         world_size = (
             args["num_subdomains"]

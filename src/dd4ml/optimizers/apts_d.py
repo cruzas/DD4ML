@@ -104,12 +104,13 @@ class APTS_D(APTS_Base):
         )
 
     @torch.no_grad()
-    def aggregate_loc_steps_and_losses(self, step, loc_red):
+    def aggregate_loc_steps_and_losses(self, step, loc_red, *, weight: float = 1.0):
+        w = torch.as_tensor(float(weight), device=step.device, dtype=step.dtype)
         # If more than one model, global step is sum of local steps
         # and loc_red is the sum of all local reductions
         if self.nr_models > 1:
             # Coalesce step and loc_red into one tensor
-            coalesced = torch.cat([step.view(-1), loc_red.view(1)])
+            coalesced = torch.cat([step.view(-1), (loc_red * w).view(1)])
             # Single all_reduce on that combined tensor
             dist.all_reduce(coalesced, op=dist.ReduceOp.SUM)
             # Split back into step and loc_red

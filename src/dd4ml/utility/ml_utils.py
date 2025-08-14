@@ -101,10 +101,16 @@ def closure(
         losses = [0] * data_chunks_amount if has_model_handler else []
         if hasattr(inputs, "device"):
             inp_device = inputs.device
-        elif isinstance(inputs, (list, tuple)) and len(inputs) > 0 and hasattr(inputs[0], "device"):
+        elif (
+            isinstance(inputs, (list, tuple))
+            and len(inputs) > 0
+            and hasattr(inputs[0], "device")
+        ):
             inp_device = inputs[0].device
         else:
-            inp_device = model.tensor_device if hasattr(model, "tensor_device") else get_device()
+            inp_device = (
+                model.tensor_device if hasattr(model, "tensor_device") else get_device()
+            )
         loss = torch.tensor(0.0, device=inp_device)
 
         if has_model_handler and model.model_handler.is_last_stage():
@@ -119,7 +125,7 @@ def closure(
             # Determine original data type
             orig_dtype = loss.dtype
             # Cast to float64 for all_reduce
-            loss_64 = loss.to(torch.float64)
+            loss = loss.to(torch.float64)
 
             if sync_loss == "global":
                 if model.model_handler.is_last_stage():
@@ -162,6 +168,7 @@ def closure(
             and dist.is_initialized()
             and dist.get_world_size() > 1
         ):
+            loss = loss.to(torch.float64)
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
             loss /= (
                 dist.get_world_size()

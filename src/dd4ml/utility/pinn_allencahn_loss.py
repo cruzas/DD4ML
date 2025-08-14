@@ -43,10 +43,6 @@ class AllenCahnPINNLoss(nn.Module):
         residual = -grad2_u + u_pred**3 - u_pred
         interior = (residual.squeeze() ** 2) * (1 - boundary_flag.squeeze())
 
-        # Only compute bc_val for actual boundary points.  ``torch.tensor`` defaults
-        # to ``float32`` which causes dtype mismatches when ``x`` is ``float64``.
-        # Explicitly match the dtype of ``x`` so ``torch.isclose`` works for both
-        # single- and double-precision tensors.
         bc_left = torch.isclose(
             x.squeeze(),
             torch.tensor(self.low, device=x.device, dtype=x.dtype),

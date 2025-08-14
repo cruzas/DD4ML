@@ -62,6 +62,9 @@ class APTS_PINN(APTS_D):
         sub_lab_d = full_lab_d[mask] if full_lab_d is not None else None
 
         # print(f"Subdomain {idx}. Inputs {sub_in}")
+        n_local = int(sub_in.shape[0]) if sub_in is not None else 0
+        N_total = int(full_in.shape[0])
+        weight = n_local / max(N_total, 1)
 
         self.inputs, self.labels = full_in, full_lab
         self.inputs_d, self.labels_d = full_in_d, full_lab_d
@@ -95,7 +98,7 @@ class APTS_PINN(APTS_D):
             step = self.loc_params_to_vector() - self.init_glob_flat
             loc_red = self.init_loc_loss - loc_loss
 
-        step, pred = self.aggregate_loc_steps_and_losses(step, loc_red)
+        step, pred = self.aggregate_loc_steps_and_losses(step, loc_red, weight=weight)
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
         self.inputs, self.labels = full_in, full_lab
