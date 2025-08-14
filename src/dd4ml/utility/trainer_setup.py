@@ -311,6 +311,7 @@ def get_config_model_and_trainer(args, wandb_config):
             max_glob_iters=all_config.trainer.max_glob_iters,
             tol=all_config.trainer.tol,
             num_subdomains=all_config.trainer.num_subdomains,
+            overlap=all_config.trainer.overlap,
             **all_config.trainer.apts_params,
         )
     elif optimizer_name == "lssr1_tr":
