@@ -39,6 +39,7 @@ def get_config_model_and_trainer(args, wandb_config):
     Create and return the standardized configuration, model, and trainer.
     """
     from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
+    from dd4ml.datasets.pinn_allencahn_time import AllenCahn1DTimeDataset
     from dd4ml.datasets.pinn_poisson import Poisson1DDataset
     from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
     from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
@@ -116,10 +117,20 @@ def get_config_model_and_trainer(args, wandb_config):
         and all_config.model.input_features is not None
         and isinstance(
             dataset,
-            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, AllenCahn1DDataset),
+            (
+                Poisson1DDataset,
+                Poisson2DDataset,
+                Poisson3DDataset,
+                AllenCahn1DDataset,
+                AllenCahn1DTimeDataset,
+            ),
         )
     ):
-        sample_x, _ = dataset[0]
+        sample = dataset[0]
+        if isinstance(dataset, AllenCahn1DTimeDataset):
+            sample_x = torch.cat(sample[:2], dim=0)
+        else:
+            sample_x = sample[0]
         all_config.model.input_features = sample_x.numel()
 
     # Adjust config for text models (e.g., GPT).
