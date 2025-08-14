@@ -45,7 +45,16 @@ class APTS_PINN(APTS_D):
 
         # Build mask for the subdomain
         idx = dist.get_rank() if dist.is_initialized() else 0
-        x = inputs.squeeze()
+        # ``inputs`` may have more than one feature (e.g., space and time).
+        # The partitioning into subdomains is done only along the spatial
+        # dimension, which is assumed to be stored in the first column.
+        # Using ``squeeze()`` on the full tensor previously produced a mask with
+        # shape ``[N, F]`` (where ``F`` is the number of features). When this
+        # mask was applied to ``labels`` with shape ``[N, 1]`` it triggered an
+        # ``IndexError`` because the mask's second dimension did not match.
+        # Extract the first feature so that the mask is one-dimensional and can
+        # be safely used to index all tensors along the batch dimension.
+        x = inputs[..., 0].squeeze()
         mask = self.get_subdomain_mask(x, idx)
 
         # Create tensors for full domain (for global pass) and subdomain (for local pass)
