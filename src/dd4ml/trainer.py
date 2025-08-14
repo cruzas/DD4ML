@@ -18,6 +18,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from dd4ml.datasets.deeponet_sine import SineOperatorDataset
 from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
+from dd4ml.datasets.pinn_allencahn_time import AllenCahn1DTimeDataset
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
@@ -448,15 +449,30 @@ class Trainer:
     def sample_control_batch(self, batch_size: int = 1):
         """Randomly sample a small control batch from the training dataset."""
         idx = torch.randint(0, len(self.train_dataset), (batch_size,))
-        xs, ys = zip(*(self.train_dataset[int(i)] for i in idx))
-        if isinstance(xs[0], (tuple, list)):
-            branch, trunk = zip(*xs)
-            branch = torch.stack([torch.as_tensor(b) for b in branch])
-            trunk = torch.stack([torch.as_tensor(t) for t in trunk])
-            xs = (branch, trunk)
+        samples = [self.train_dataset[int(i)] for i in idx]
+        first = samples[0]
+        if isinstance(first, (tuple, list)):
+            if len(first) == 2:
+                xs, ys = zip(*samples)
+                if isinstance(xs[0], (tuple, list)):
+                    branch, trunk = zip(*xs)
+                    branch = torch.stack([torch.as_tensor(b) for b in branch])
+                    trunk = torch.stack([torch.as_tensor(t) for t in trunk])
+                    xs = (branch, trunk)
+                else:
+                    xs = torch.stack([torch.as_tensor(x) for x in xs])
+                ys = torch.stack([torch.as_tensor(y) for y in ys])
+            elif len(first) == 3:
+                xs, ts, ys = zip(*samples)
+                xs = torch.stack([torch.as_tensor(x) for x in xs])
+                ts = torch.stack([torch.as_tensor(t) for t in ts])
+                xs = torch.cat([xs, ts], dim=1)
+                ys = torch.stack([torch.as_tensor(y) for y in ys])
+            else:
+                raise ValueError("Unsupported sample format for control batch")
         else:
-            xs = torch.stack([torch.as_tensor(x) for x in xs])
-        ys = torch.stack([torch.as_tensor(y) for y in ys])
+            xs = torch.stack([torch.as_tensor(s) for s in samples])
+            ys = None
         return self._move_to_device(xs), self._move_to_device(ys)
 
     def run(self):
@@ -468,6 +484,7 @@ class Trainer:
                 Poisson2DDataset,
                 Poisson3DDataset,
                 AllenCahn1DDataset,
+                AllenCahn1DTimeDataset,
             ),
         ):
             self.run_by_epoch_PINN()
@@ -493,6 +510,7 @@ class Trainer:
                 Poisson2DDataset,
                 Poisson3DDataset,
                 AllenCahn1DDataset,
+                AllenCahn1DTimeDataset,
             ),
         )
         context = torch.enable_grad if requires_grad_eval else torch.no_grad
@@ -534,7 +552,12 @@ class Trainer:
                 )[0]
                 cond_d_b = dist.get_rank() == last_stage_rank
 
-            for x, y in eval_loader:
+            for batch in eval_loader:
+                if isinstance(batch, (list, tuple)) and len(batch) == 3:
+                    x, t, y = batch
+                    x = torch.cat([x, t], dim=1)
+                else:
+                    x, y = batch
                 x = self._move_to_device(x)
                 y = self._move_to_device(y)
 
@@ -549,7 +572,13 @@ class Trainer:
                 # PINN tensors to double here as well.
                 if isinstance(
                     self.train_dataset,
-                    (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, AllenCahn1DDataset),
+                    (
+                        Poisson1DDataset,
+                        Poisson2DDataset,
+                        Poisson3DDataset,
+                        AllenCahn1DDataset,
+                        AllenCahn1DTimeDataset,
+                    ),
                 ):
                     if isinstance(x, torch.Tensor):
                         x = x.double()
@@ -575,6 +604,8 @@ class Trainer:
                         crit.current_x = x
                     if hasattr(crit, "current_xyz"):
                         crit.current_xyz = x
+                    if hasattr(crit, "current_xt"):
+                        crit.current_xt = x
                     loss = crit(out, y).item()
                     bs = y.size(0)
                     total += loss * bs
@@ -718,7 +749,13 @@ class Trainer:
         # Special handling for PINN datasets
         if isinstance(
             self.train_dataset,
-            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, AllenCahn1DDataset),
+            (
+                Poisson1DDataset,
+                Poisson2DDataset,
+                Poisson3DDataset,
+                AllenCahn1DDataset,
+                AllenCahn1DTimeDataset,
+            ),
         ):
             return self._train_one_batch_PINN(x, y, first_grad)
 
@@ -842,6 +879,8 @@ class Trainer:
             self.criterion.current_x = x
         if hasattr(self.criterion, "current_xyz"):
             self.criterion.current_xyz = x
+        if hasattr(self.criterion, "current_xt"):
+            self.criterion.current_xt = x
 
         # control batch for ASNTR
         x_d = y_d = None
@@ -979,10 +1018,16 @@ class Trainer:
             # loop until this rank has seen its shard (plus any overlap)
             while total_samples < self.num_training_samples_per_process:
                 try:
-                    x, y = next(it)
+                    batch = next(it)
                 except StopIteration:
                     it = iter(self.train_loader)
-                    x, y = next(it)
+                    batch = next(it)
+
+                if isinstance(batch, (list, tuple)) and len(batch) == 3:
+                    x, t, y = batch
+                    x = torch.cat([x, t], dim=1)
+                else:
+                    x, y = batch
 
                 batch_loss, batch_grad, bs = self._train_one_batch(x, y, first)
                 total_samples += bs
@@ -1068,10 +1113,16 @@ class Trainer:
             # loop until this rank has seen its shard (plus any overlap)
             while total_samples < self.num_training_samples_per_process:
                 try:
-                    x, y = next(it)
+                    batch = next(it)
                 except StopIteration:
                     it = iter(self.train_loader)
-                    x, y = next(it)
+                    batch = next(it)
+
+                if isinstance(batch, (list, tuple)) and len(batch) == 3:
+                    x, t, y = batch
+                    x = torch.cat([x, t], dim=1)
+                else:
+                    x, y = batch
 
                 # training step (with first-batch warm-up)
                 batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, first)
