@@ -121,7 +121,7 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--num_subdomains", type=int, default=1, help="Number of subdomains"
     )
-    parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
+    parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
     parser.add_argument(
         "--num_replicas_per_subdomain",
         type=int,
@@ -265,7 +265,7 @@ def main(
             delta = trainer.optimizer.delta
             thing_to_print = "delta"
 
-        if trainer.iter_num % 50 == 0:
+        if trainer.iter_num % 5 == 0:
             if rank == 0 and use_wandb:
                 log_fn(
                     {
@@ -308,7 +308,7 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 2
+    world_size = 1
     if args["use_pmw"]:
         world_size = (
             args["num_subdomains"]

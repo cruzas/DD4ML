@@ -30,11 +30,11 @@ parameters:
   norm_type:
     value: inf
   max_loc_iters:
-    value: 5
+    value: 3
   max_glob_iters:
     value: 1
   max_iters:
-    value: 10 # for Transformers
+    value: 1000 # for Transformers
   epochs: 
     value: 10
   delta: 

@@ -6,9 +6,9 @@ parameters:
   optimizer: 
     value: "sgd"
   batch_size:
-    value: 1000
+    value: 128
   effective_batch_size:
-    value: 1000 
+    value: 128 
   epochs: 
     value: 25
   max_iters:
@@ -16,11 +16,11 @@ parameters:
   learning_rate:
     value: 0.1
   dataset_name: 
-    value: "allencahn1d_time"
+    value: "tinyshakespeare"
   model_name: 
-    value: "pinn_ffnn"
+    value: "nanogpt"
   criterion:
-    value: "pinn_allencahn_time"
+    value: "cross_entropy_transformers"
   seed:
     value: 42
   tol:
