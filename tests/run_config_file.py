@@ -38,7 +38,7 @@ def parse_cmd_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--optimizer", type=str, default="apts_pinn", help="Optimizer name"
+        "--optimizer", type=str, default="apts_ip", help="Optimizer name"
     )
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
@@ -81,12 +81,10 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Directory to save models",
     )
     parser.add_argument(
-        "--dataset_name", type=str, default="cifar10", help="Dataset name"
+        "--dataset_name", type=str, default="tinyshakespeare", help="Dataset name"
     )
     parser.add_argument("--overlap", type=float, default=0.0, help="Overlap factor")
-    parser.add_argument(
-        "--model_name", type=str, default="big_resnet", help="Model name"
-    )
+    parser.add_argument("--model_name", type=str, default="nanogpt", help="Model name")
     parser.add_argument(
         "--criterion",
         type=str,
@@ -123,7 +121,7 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--num_subdomains", type=int, default=1, help="Number of subdomains"
     )
-    parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
+    parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
     parser.add_argument(
         "--num_replicas_per_subdomain",
         type=int,

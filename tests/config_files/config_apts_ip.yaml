@@ -44,11 +44,11 @@ parameters:
   max_delta:
     value: 0.5
   dataset_name: 
-    value: "cifar10" 
+    value: "tinyshakespeare" 
   model_name: 
-    value: "big_resnet"
+    value: "nanogpt"
   criterion:
-    value: "cross_entropy"
+    value: "cross_entropy_transformers"
   gradient_accumulation:
     value: False
   accumulation_steps:

@@ -6,9 +6,9 @@ parameters:
   optimizer: 
     value: "sgd"
   batch_size:
-    value: 1002
+    value: 1000
   effective_batch_size:
-    value: 1002 
+    value: 1000 
   epochs: 
     value: 25
   max_iters:
@@ -16,11 +16,11 @@ parameters:
   learning_rate:
     value: 0.1
   dataset_name: 
-    value: "allencahn1d"
+    value: "allencahn1d_time"
   model_name: 
     value: "pinn_ffnn"
   criterion:
-    value: "pinn_allencahn"
+    value: "pinn_allencahn_time"
   seed:
     value: 42
   tol:

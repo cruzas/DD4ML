@@ -18,10 +18,10 @@ class AllenCahn1DTimeDataset(BaseDataset):
     @staticmethod
     def get_default_config():
         C = BaseDataset.get_default_config()
-        C.nx_interior = 32
-        C.nt_interior = 32
-        C.n_boundary_t = 32
-        C.n_initial_x = 32
+        C.nx_interior = 1000
+        C.nt_interior = 1000
+        C.n_boundary_t = 1000
+        C.n_initial_x = 1000
         C.low_x = 0.0
         C.high_x = 1.0
         C.low_t = 0.0
@@ -61,8 +61,8 @@ class AllenCahn1DTimeDataset(BaseDataset):
         mask = torch.cat(
             [
                 torch.zeros(len(interior), 1),  # interior flag
-                torch.ones(len(boundary), 1),   # spatial boundary flag
-                torch.ones(len(initial), 1),    # initial condition flag
+                torch.ones(len(boundary), 1),  # spatial boundary flag
+                torch.ones(len(initial), 1),  # initial condition flag
             ],
             dim=0,
         )
