@@ -6,21 +6,21 @@ parameters:
   optimizer: 
     value: "sgd"
   batch_size:
-    value: 128
+    value: 10000
   effective_batch_size:
-    value: 128 
+    value: 10000 
   epochs: 
-    value: 25
+    value: 80
   max_iters:
-    value: 1000
+    value: 4000
   learning_rate:
     value: 0.1
   dataset_name: 
-    value: "tinyshakespeare"
+    value: "mnist"
   model_name: 
-    value: "nanogpt"
+    value: "ffnn"
   criterion:
-    value: "cross_entropy_transformers"
+    value: "cross_entropy"
   seed:
     value: 42
   tol:

@@ -37,9 +37,7 @@ def parse_cmd_args() -> argparse.Namespace:
         description="Parse command line arguments.",
     )
 
-    parser.add_argument(
-        "--optimizer", type=str, default="apts_ip", help="Optimizer name"
-    )
+    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
     )
@@ -81,14 +79,16 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Directory to save models",
     )
     parser.add_argument(
-        "--dataset_name", type=str, default="tinyshakespeare", help="Dataset name"
+        "--dataset_name", type=str, default="mnist", help="Dataset name"
     )
     parser.add_argument("--overlap", type=float, default=0.0, help="Overlap factor")
-    parser.add_argument("--model_name", type=str, default="nanogpt", help="Model name")
+    parser.add_argument(
+        "--model_name", type=str, default="simple_ffnn", help="Model name"
+    )
     parser.add_argument(
         "--criterion",
         type=str,
-        default="cross_entropy_transformers",
+        default="cross_entropy",
         help="Criterion name",
     )
     parser.add_argument(
@@ -308,7 +308,7 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 1
+    world_size = 2
     if args["use_pmw"]:
         world_size = (
             args["num_subdomains"]

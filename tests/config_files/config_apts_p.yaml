@@ -6,9 +6,9 @@ parameters:
   optimizer: 
     value: "apts_p" 
   batch_size:
-    value: 5000
+    value: 128
   effective_batch_size:
-    value: 5000
+    value: 128
   num_stages:
     value: 1
   num_subdomains:
@@ -30,25 +30,25 @@ parameters:
   norm_type:
     value: inf
   max_loc_iters:
-    value: 5
+    value: 3
   max_glob_iters:
     value: 1
   max_iters:
-    value: 10 # for Transformers
+    value: 4000 # for Transformers
   epochs: 
     value: 10
   delta: 
     value: 0.1
   min_delta: 
-    value: 0.001
+    value: 0.01
   max_delta:
-    value: 1.0
+    value: 0.5
   dataset_name: 
-    value: "allencahn1d" 
+    value: "tinyshakespeare" 
   model_name: 
-    value: "pinn_ffnn"
+    value: "minigpt"
   criterion:
-    value: "pinn_allencahn"
+    value: "cross_entropy_transformers"
   gradient_accumulation:
     value: True
   accumulation_steps:
@@ -70,6 +70,6 @@ parameters:
   glob_opt:
     value: "TR"
   loc_opt:
-    value: "TR"
+    value: "TRAdam"
   paper_tr_update:
     value: True

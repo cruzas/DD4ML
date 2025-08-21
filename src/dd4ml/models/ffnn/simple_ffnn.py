@@ -14,8 +14,8 @@ class SimpleFFNN(BaseFFNN):
         C = BaseFFNN.get_default_config()
         C.input_features = 1 * 28 * 28
         C.output_classes = 10
-        C.fc_layers = [128, 64]
-        C.dropout_p = 0.2
+        C.fc_layers = [8, 8]
+        C.dropout_p = 0.0
         return C
 
     def __init__(self, config):

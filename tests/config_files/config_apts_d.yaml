@@ -6,9 +6,9 @@ parameters:
   optimizer: 
     value: "apts_d" 
   batch_size:
-    value: 128
+    value: 10000
   effective_batch_size:
-    value: 128
+    value: 10000
   num_stages:
     value: 1
   num_subdomains:
@@ -20,13 +20,13 @@ parameters:
   foc:
     value: True
   glob_second_order:
-    value: False
+    value: True
   glob_dogleg:
-    value: False
+    value: True
   loc_second_order:
-    value: False
+    value: True
   loc_dogleg:
-    value: False
+    value: True
   norm_type:
     value: 2
   max_loc_iters:
@@ -36,19 +36,19 @@ parameters:
   max_iters:
     value: 10 # for Transformers
   epochs: 
-    value: 3
+    value: 10
   delta: 
     value: 0.1
   min_delta: 
-    value: 0.001
+    value: 0.01
   max_delta:
     value: 1.0
   dataset_name: 
-    value: "allencahn1d" 
+    value: "mnist" 
   model_name: 
-    value: "pinn_ffnn"
+    value: "ffnn"
   criterion:
-    value: "pinn_allencahn"
+    value: "cross_entropy"
   gradient_accumulation:
     value: True
   accumulation_steps:
@@ -68,8 +68,8 @@ parameters:
   max_zoom_iters:
     value: 20
   glob_opt:
-    value: "tr"
+    value: "lssr1_tr"
   loc_opt:
-    value: "tr"
+    value: "lssr1_tr"
   paper_tr_update:
     value: False
