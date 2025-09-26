@@ -137,6 +137,17 @@ class Trainer:
         self.grad_evals = 0.0
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
 
+        # Pre-computed efficiency constants
+        self._dataset_size_inv = 1.0 / len(self.train_dataset)
+        if not self._apts_ip_present():
+            self._loss_scaling_factor = self.world_size * self._dataset_size_inv
+        else:
+            self._loss_scaling_factor = self._dataset_size_inv
+
+        # Pre-allocated buffers for metric computation (guaranteed safe in @torch.no_grad())
+        self._metric_buffer = torch.zeros(2, device=self.device, dtype=torch.float32)
+        self._perplexity_buffer = torch.zeros(2, device=self.device, dtype=torch.float32)
+
         # Cache optimizer type checks for performance
         optimizer_name = self.optimizer.__class__.__name__.lower()
         self._is_tr_or_apts = "tr" in optimizer_name or "apts" in optimizer_name
@@ -170,8 +181,19 @@ class Trainer:
         """Return the number of batches in the current train_loader."""
         return len(self.train_loader)
 
+    def _update_loss_scaling_factor(self):
+        """Update loss scaling factor when dataset or batch configuration changes."""
+        self._dataset_size_inv = 1.0 / len(self.train_dataset)
+        if not self._apts_ip_present():
+            self._loss_scaling_factor = self.world_size * self._dataset_size_inv
+        else:
+            self._loss_scaling_factor = self._dataset_size_inv
+
     def setup_data_loaders(self):
         """(Re)create train and test loaders; test loader always has zero overlap."""
+        # Update loss scaling factor in case dataset or configuration changed
+        self._update_loss_scaling_factor()
+
         cfg, ds_train, ds_test = self.config, self.train_dataset, self.test_dataset
         # Ensure batch size does not exceed dataset
         if self.current_batch_size >= len(ds_train):
@@ -628,9 +650,11 @@ class Trainer:
                     n += bs
 
         if dist.is_initialized():
-            buf = torch.tensor([total, n], device=self.device, dtype=torch.float32)
-            dist.all_reduce(buf, op=dist.ReduceOp.SUM)
-            total, n = buf.tolist()
+            # Reuse pre-allocated buffer for efficiency
+            self._metric_buffer[0] = total
+            self._metric_buffer[1] = n
+            dist.all_reduce(self._metric_buffer, op=dist.ReduceOp.SUM)
+            total, n = self._metric_buffer.tolist()
 
         if was_training:
             self.model.train()
@@ -733,13 +757,12 @@ class Trainer:
                 total_loss += loss.item() * targets.numel()
                 total_tokens += targets.numel()
 
-        # Aggregate across all ranks
+        # Aggregate across all ranks using pre-allocated buffer
         if dist.is_initialized():
-            buf = torch.tensor(
-                [total_loss, total_tokens], device=self.device, dtype=torch.float32
-            )
-            dist.all_reduce(buf, op=dist.ReduceOp.SUM)
-            total_loss, total_tokens = buf.tolist()
+            self._perplexity_buffer[0] = total_loss
+            self._perplexity_buffer[1] = total_tokens
+            dist.all_reduce(self._perplexity_buffer, op=dist.ReduceOp.SUM)
+            total_loss, total_tokens = self._perplexity_buffer.tolist()
 
         model.train()
         return math.exp(total_loss / total_tokens) if total_tokens > 0 else float("inf")
@@ -1036,14 +1059,8 @@ class Trainer:
                 batch_loss, batch_grad, bs = self._train_one_batch(x, y, first)
                 total_samples += bs
 
-                # weight by global sample count
-                if not self._apts_ip_present():
-                    epoch_loss += batch_loss * (
-                        bs * self.world_size / len(self.train_dataset)
-                    )
-                else:
-                    # print(f"Rank {dist.get_rank()}: number of samples processed: {bs}")
-                    epoch_loss += batch_loss * (bs / len(self.train_dataset))
+                # weight by global sample count (optimized with pre-computed scaling factor)
+                epoch_loss += batch_loss * bs * self._loss_scaling_factor
                 self.loss = epoch_loss
 
                 stay = self._stay_here()
@@ -1132,13 +1149,8 @@ class Trainer:
                 batch_loss, batch_grad, bs = self._train_one_batch_PINN(x, y, first)
                 total_samples += bs
 
-                # weight loss by global or local sample count
-                if not self._apts_ip_present():
-                    epoch_loss += batch_loss * (
-                        bs * self.world_size / len(self.train_dataset)
-                    )
-                else:
-                    epoch_loss += batch_loss * (bs / len(self.train_dataset))
+                # weight loss by global or local sample count (optimized with pre-computed scaling factor)
+                epoch_loss += batch_loss * bs * self._loss_scaling_factor
                 self.loss = epoch_loss
 
                 # handle optimizer-driven batch repeats

@@ -132,7 +132,7 @@ def closure(
                         op=dist.ReduceOp.SUM,
                         group=model.model_handler.get_layers_copy_group(mode="global"),
                     )
-                    loss = loss / model.model_handler.tot_replicas
+                    loss.div_(model.model_handler.tot_replicas)  # In-place division (safe in distributed context)
                 last_ranks = model.model_handler.get_stage_ranks(
                     stage_name="last", mode="global"
                 )
@@ -149,7 +149,7 @@ def closure(
                         op=dist.ReduceOp.SUM,
                         group=model.model_handler.get_layers_copy_group(mode="local"),
                     )
-                    loss = loss / model.num_replicas_per_subdomain
+                    loss.div_(model.num_replicas_per_subdomain)  # In-place division (safe in distributed context)
                 last_stage_ranks = model.model_handler.get_stage_ranks(
                     stage_name="last", mode="local"
                 )
@@ -168,9 +168,7 @@ def closure(
         ):
             loss = loss.to(torch.float64)
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
-            loss /= (
-                dist.get_world_size()
-            )  # gradient averaging taken care of by DDP, assuming model is wrapped by DDP
+            loss.div_(dist.get_world_size())  # In-place division (safe after all_reduce)
 
         # Compute gradients
         if compute_grad and torch.is_grad_enabled():

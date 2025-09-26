@@ -286,7 +286,7 @@ class APTS_Base(Optimizer):
             self.grad_evals += 1.0  # Count global gradient evaluation
         if self.nr_models > 1:
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
-            loss /= self.nr_models
+            loss.div_(self.nr_models)  # In-place division (safe after all_reduce)
         return loss
 
     # For ASNTR
@@ -328,7 +328,7 @@ class APTS_Base(Optimizer):
             loss.backward()  # DDP will handle gradient averaging
         if self.nr_models > 1:
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
-            loss /= self.nr_models
+            loss.div_(self.nr_models)  # In-place division (safe after all_reduce)
         return loss
 
     def _step_loop(self, optim, max_iters, loss, grad, closure=None, closure_d=None):
