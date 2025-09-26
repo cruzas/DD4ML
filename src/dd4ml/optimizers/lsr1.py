@@ -41,6 +41,11 @@ class LSR1:
         self._S: List[torch.Tensor] = []  # each tensor is shape (n,)
         self._Y: List[torch.Tensor] = []
 
+        # Pre-allocated workspace matrices for efficiency
+        self._S_matrix: torch.Tensor | None = None  # (n, memory_length)
+        self._Y_matrix: torch.Tensor | None = None  # (n, memory_length)
+        self._current_pairs = 0
+
         # Workspaces filled by ``precompute"
         self.Psi: torch.Tensor | None = None  # (n, k)
         self.Minv: torch.Tensor | None = None  # (k, k)
@@ -55,34 +60,40 @@ class LSR1:
         def _prepare(vec: torch.Tensor) -> torch.Tensor:
             if isinstance(vec, WeightParallelizedTensor):
                 vec = vec.detach()
-            return vec.to(self.device, self.dtype).flatten()
+            # Single operation instead of chained calls
+            return vec.flatten().to(device=self.device, dtype=self.dtype)
 
         s = _prepare(s)
         y = _prepare(y)
-        if s.norm() <= self.tol or y.norm() <= self.tol:
+
+        # Cache norm computations
+        s_norm = s.norm()
+        y_norm = y.norm()
+
+        if s_norm <= self.tol or y_norm <= self.tol:
             # Reject pair - insufficient information
             return
 
         # SR1 curvature check
         curvature = y.dot(s)
-        if abs(curvature) <= self.tol * (torch.norm(s) * torch.norm(y)):
+        if abs(curvature) <= self.tol * (s_norm * y_norm):
             # Reject pair - insufficient curvature information
             return
-        
+
         Bs = self.B(s)
         u = y - Bs
         denom = u.dot(s)
-        if abs(denom) <= self.tol * s.norm() * u.norm(): 
+        if abs(denom) <= self.tol * s.norm() * u.norm():
             return
 
         # Candidate gamma and psi
         gamma_cand = (y.dot(y) / curvature).clamp_min(self.tol)
-            
+
         psi_cand = y - gamma_cand * s
         if psi_cand.norm() <= self.tol * y.norm():
             # Reject pair -# trivial or degenerate Psi
             return
-        
+
         # If we have an existing Psi, check if the new one is linearly dependent
         # if len(self._S) > 0:
         #     S_mat = torch.stack(self._S, dim=1)  # (n, k)
@@ -97,14 +108,35 @@ class LSR1:
         #         # Reject pair - new Psi is linearly dependent on existing Psi
         #         print("Rejecting pair: new Psi is linearly dependent on existing Psi.")
         #         return
-            
-        # Maintain limited memory
+
+        # Initialize workspace matrices on first use
+        if self._S_matrix is None:
+            n = s.shape[0]
+            self._S_matrix = torch.zeros(
+                n, self.memory_length, device=self.device, dtype=self.dtype
+            )
+            self._Y_matrix = torch.zeros(
+                n, self.memory_length, device=self.device, dtype=self.dtype
+            )
+
+        # Maintain limited memory - shift columns if at capacity
+        if self._current_pairs >= self.memory_length:
+            # Shift columns left to remove oldest
+            self._S_matrix[:, :-1] = self._S_matrix[:, 1:]
+            self._Y_matrix[:, :-1] = self._Y_matrix[:, 1:]
+            insert_idx = self.memory_length - 1
+        else:
+            insert_idx = self._current_pairs
+            self._current_pairs += 1
+
+        # Store new pair in workspace matrices
+        self._S_matrix[:, insert_idx] = s
+        self._Y_matrix[:, insert_idx] = y
+
+        # Keep lists for backward compatibility (if needed elsewhere)
         if len(self._S) >= self.memory_length:
-            # Remove oldest pair
             self._S.pop(0)
             self._Y.pop(0)
-
-        # Store new pair
         self._S.append(s)
         self._Y.append(y)
 
@@ -116,28 +148,30 @@ class LSR1:
         Build Psi and M^{-1} from the stored pairs.
         Must be called after every memory update before OBS is invoked.
         """
-        if not self._S:
+        if self._current_pairs == 0:
             # No pairs yet: use multiple of identity (in this case 0)
             self.Psi = torch.zeros((0, 0), device=self.device, dtype=self.dtype)
             self.Minv = torch.zeros((0, 0), device=self.device, dtype=self.dtype)
             return
 
-        # Stack all pairs into matrices
-        S = torch.stack(self._S, dim=1)  # (n, k)
-        Y = torch.stack(self._Y, dim=1)  # (n, k)
-        k = S.shape[1]
+        k = self._current_pairs
+        # Use pre-allocated matrices - no expensive stacking
+        S = self._S_matrix[:, :k]  # (n, k)
+        Y = self._Y_matrix[:, :k]  # (n, k)
 
         # Psi = Y − gamma*S
         self.Psi = Y - self.gamma * S  # (n, k)
 
         # Compact SR1   M^{-1} = D + L + L^T − gamma * S^T * S
-        SY = S.transpose(0, 1) @ Y  # (k, k)
+        # Compute transpose once and reuse
+        ST = S.transpose(0, 1)  # (k, n)
+        SY = ST @ Y  # (k, k) - reuse ST
         D = torch.diag(torch.diag(SY))  # (k, k)
         L = torch.tril(SY, diagonal=-1)  # (k, k)
 
         self.Minv = (
-            D + L + L.transpose(0, 1) - self.gamma * (S.transpose(0, 1) @ S)
-        )  # (k, k)
+            D + L + L.transpose(0, 1) - self.gamma * (ST @ S)
+        )  # (k, k) - reuse ST
 
         # Small diagonal regularization if badly conditioned
         eye_k = torch.eye(k, device=self.device, dtype=self.dtype)
@@ -165,6 +199,8 @@ class LSR1:
 
     @property
     def S(self) -> torch.Tensor:
+        if self._S_matrix is not None and self._current_pairs > 0:
+            return self._S_matrix[:, : self._current_pairs]
         return (
             torch.stack(self._S, dim=1)
             if self._S
@@ -173,6 +209,8 @@ class LSR1:
 
     @property
     def Y(self) -> torch.Tensor:
+        if self._Y_matrix is not None and self._current_pairs > 0:
+            return self._Y_matrix[:, : self._current_pairs]
         return (
             torch.stack(self._Y, dim=1)
             if self._Y

@@ -53,8 +53,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
         return d[key]
 
     def load_state_dict(self, state_dict):
-        for layer_name in self.stage_data["layers"]:
-            idx = self.stage_data["layers"].index(layer_name)
+        for idx, layer_name in enumerate(self.stage_data["layers"]):
             self.sharded_layers[idx].load_state_dict(state_dict[layer_name])
 
     def state_dict(self):
@@ -146,17 +145,22 @@ class WeightParallelizedSubdomain(BasePMWModel):
         # self.DEBUG = False
         empty_at_the_end = []
 
+        # Cache device references to avoid repeated calls
         backend_dev = self.backend_device()
         tensor_dev = self.tensor_device
-        for i, layer_name in enumerate(self.stage_data["layers"]):
-            net_dict = self.model_handler.net_dict[layer_name]
+        # Cache net_dict to reduce repeated dictionary lookups
+        stage_layers = self.stage_data["layers"]
+        net_dict_cache = self.model_handler.net_dict
+
+        for i, layer_name in enumerate(stage_layers):
+            net_dict = net_dict_cache[layer_name]
             if layer_name == "start":
                 self._ensure_list(self.inputs, self._key("start", "start"), num_chunks)
                 self.inputs[self._key("start", "start")][chunk_id] = x
             for src_name in net_dict["fwd_rcv"]["src"]:
                 key = self._key(layer_name, src_name)
                 current_layer_stage = net_dict["stage"]
-                src_layer_stage = self.model_handler.net_dict[src_name]["stage"]
+                src_layer_stage = net_dict_cache[src_name]["stage"]
                 if current_layer_stage != src_layer_stage:
                     src_ranks = self.model_handler.layer_name_to_ranks(src_name)
                     src_rank = src_ranks[0]
@@ -224,7 +228,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
                 dst_rank = dst_ranks[0]
                 key = self._key(layer_name, dst_name)
                 current_layer_stage = net_dict["stage"]
-                dst_layer_stage = self.model_handler.net_dict[dst_name]["stage"]
+                dst_layer_stage = net_dict_cache[dst_name]["stage"]
                 temp = out if not isinstance(out, list) else out[dst_idx]
                 if current_layer_stage != dst_layer_stage:
                     temp = temp.to(backend_dev)
@@ -296,6 +300,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
                         )
 
     def _backward_pipeline(self, loss, chunk_id):
+        # Cache device references to avoid repeated calls
         backend_dev = self.backend_device()
         tensor_dev = self.tensor_device
         for i, consecutive_block in enumerate(reversed(self.consec_layers)):
@@ -402,16 +407,13 @@ class WeightParallelizedSubdomain(BasePMWModel):
                                     outputs[chunk_id].backward(
                                         grad_output, retain_graph=True
                                     )
-                all_outputs = [
-                    outputs[chunk_id]
-                    for key, outputs in self.outputs.items()
+                # Optimize backward pass list building - avoid repeated key lookups
+                relevant_keys = [
+                    key for key in self.outputs.keys()
                     if any([element in key for element in consecutive_block])
                 ]
-                all_grads = [
-                    self.grad_outputs[key][chunk_id]
-                    for key in self.outputs.keys()
-                    if any([element in key for element in consecutive_block])
-                ]
+                all_outputs = [self.outputs[key][chunk_id] for key in relevant_keys]
+                all_grads = [self.grad_outputs[key][chunk_id] for key in relevant_keys]
                 for current_layer in reversed(consecutive_block):
                     dst_names = self.model_handler.net_dict[current_layer]["bwd_dst"][
                         "to"
@@ -452,13 +454,10 @@ class WeightParallelizedSubdomain(BasePMWModel):
                             send_handle.wait()
 
     def grad(self):
-        return [p.grad.clone() for p in self.sharded_layers.parameters()]
+        return [p.grad.clone() for layer in self.sharded_layers for p in layer.parameters() if p.grad is not None]
 
     def grad_norm(self):
-        return torch.norm(
-            torch.cat(
-                [p.grad.flatten() for p in self.sharded_layers.parameters()],
-                dim=0,
-            ),
-            p=2,
-        )
+        grad_tensors = [p.grad.flatten() for layer in self.sharded_layers for p in layer.parameters() if p.grad is not None]
+        if not grad_tensors:
+            return torch.tensor(0.0, device=self.tensor_device)
+        return torch.cat(grad_tensors, dim=0).norm(p=2)

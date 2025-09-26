@@ -1,6 +1,7 @@
 from typing import Callable, Iterable, Union
 
 import torch
+from torch.nn.utils import vector_to_parameters
 from torch.optim import Optimizer
 
 
@@ -48,22 +49,30 @@ class TRAdam(Optimizer):
         self._v_buf = torch.zeros_like(self._grad_buf)
         self.t = 0
 
+        # Pre-allocate buffers for efficiency
+        self._m_hat_buf = torch.zeros_like(self._grad_buf)
+        self._v_hat_buf = torch.zeros_like(self._grad_buf)
+        self._sqrt_buf = torch.zeros_like(self._grad_buf)
+
     def reset_momentum(self):
         """Resets first and second moment buffers."""
         self._m_buf.zero_()
         self._v_buf.zero_()
+        self._m_hat_buf.zero_()
+        self._v_hat_buf.zero_()
 
     def _flat_grad(self) -> torch.Tensor:
         """Return current gradient as a flat vector."""
         if self._flat_grads_fn is not None:
             g = self._flat_grads_fn()
-            return g.clone() if isinstance(g, torch.Tensor) else g
+            # Avoid unnecessary clone if already a tensor
+            return g.detach() if isinstance(g, torch.Tensor) else g
         self._grad_buf.zero_()
         for i, p in enumerate(self.ps):
             if p.grad is not None:
                 s, e = int(self.offsets[i]), int(self.offsets[i + 1])
                 self._grad_buf[s:e].copy_(p.grad.view(-1))
-        return self._grad_buf.clone()
+        return self._grad_buf
 
     def _apply_update(self, sign: float = 1.0) -> None:
         """In-place parameter update: p += sign * step_buf segment."""
@@ -71,7 +80,7 @@ class TRAdam(Optimizer):
             if self._flat_params_fn is not None:
                 base = self._flat_params_fn()
                 updated = base + sign * self._step_buf
-                torch.nn.utils.vector_to_parameters(updated, self.ps)
+                vector_to_parameters(updated, self.ps)
             else:
                 for i, p in enumerate(self.ps):
                     s, e = int(self.offsets[i]), int(self.offsets[i + 1])
@@ -87,24 +96,29 @@ class TRAdam(Optimizer):
         self._m_buf.mul_(self.betas[0]).add_(grad, alpha=1 - self.betas[0])
         self._v_buf.mul_(self.betas[1]).addcmul_(grad, grad, value=1 - self.betas[1])
 
-        # Bias-corrected estimates
-        m_hat = self._m_buf / (1 - self.betas[0] ** self.t)
-        v_hat = self._v_buf / (1 - self.betas[1] ** self.t)
+        # Bias-corrected estimates using pre-allocated buffers
+        bias_correction1 = 1 - self.betas[0] ** self.t
+        bias_correction2 = 1 - self.betas[1] ** self.t
+        
+        torch.div(self._m_buf, bias_correction1, out=self._m_hat_buf)
+        torch.div(self._v_buf, bias_correction2, out=self._v_hat_buf)
 
-        # Compute step direction
-        s = m_hat.div(v_hat.sqrt().add(self.eps))
+        # Compute step direction using pre-allocated buffers
+        torch.sqrt(self._v_hat_buf, out=self._sqrt_buf)
+        self._sqrt_buf.add_(self.eps)
+        torch.div(self._m_hat_buf, self._sqrt_buf, out=self._step_buf)
 
-        # Determine step length
+        # Determine step length and scale
         if self.norm_type == torch.inf:
-            step_len = torch.norm(s, p=torch.inf).item()
+            step_len = torch.norm(self._step_buf, p=torch.inf).item()
         else:
-            step_len = s.dot(s).item()
+            step_len = self._step_buf.dot(self._step_buf).item()
 
-        # Scale update
+        # Apply scaling in-place
         if step_len > self.lr:
-            self._step_buf.copy_(s.mul(self.lr / step_len))
+            self._step_buf.mul_(self.lr / step_len)
         else:
-            self._step_buf.copy_(s.mul(self.lr))
+            self._step_buf.mul_(self.lr)
 
         # Apply update
         self._apply_update(sign=-1.0)

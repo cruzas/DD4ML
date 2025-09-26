@@ -161,6 +161,10 @@ class LSSR1_TR(Optimizer):
         self.rank = dist.get_rank() if dist.is_initialized() else 0
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
 
+        # Caching for efficiency
+        self._hess_memory_size_cache = 0
+        self._precomputed_for_size = -1
+
         self._flat_grads_fn = (
             flat_grads_fn if flat_grads_fn is not None else self._flatten_grads
         )
@@ -182,6 +186,21 @@ class LSSR1_TR(Optimizer):
             buf /= self.world_size
         dist.broadcast(buf, src=0)
         return buf.to(value.dtype)
+
+    def _avg_scalar_batch(self, values: Tensor) -> Tensor:
+        """
+        Perform reduce-average on multiple scalar tensors across ranks, then broadcast.
+        If `sync` is False or single process, return values unchanged.
+        """
+        if not (self.sync and self.world_size > 1):
+            return values
+
+        buf = values.detach().to(torch.float64)
+        dist.reduce(buf, dst=0, op=dist.ReduceOp.SUM)
+        if self.rank == 0:
+            buf /= self.world_size
+        dist.broadcast(buf, src=0)
+        return buf.to(values.dtype)
 
     def _flatten_params(self) -> Tensor:
         """
@@ -249,8 +268,9 @@ class LSSR1_TR(Optimizer):
 
         # Synchronize loss and gradient if needed
         if self.sync and self.world_size > 1:
-            loss = self._avg_scalar(loss)
-            deriv = self._avg_scalar(deriv)
+            scalars = torch.tensor([loss, deriv], dtype=loss.dtype, device=loss.device)
+            scalars_synced = self._avg_scalar_batch(scalars)
+            loss, deriv = scalars_synced[0], scalars_synced[1]
             dist.broadcast(grad, src=0)
 
         return loss, grad, deriv
@@ -479,9 +499,10 @@ class LSSR1_TR(Optimizer):
         gn = torch.norm(g)
 
         if self.sync and self.world_size > 1:
-            loss = self._avg_scalar(loss)
+            scalars = torch.tensor([loss, gn], dtype=loss.dtype, device=loss.device)
+            scalars_synced = self._avg_scalar_batch(scalars)
+            loss, gn = scalars_synced[0], scalars_synced[1]
             dist.broadcast(g, src=0)
-            gn = self._avg_scalar(gn)
 
         if gn <= self.tol:
             return loss, g
@@ -491,19 +512,27 @@ class LSSR1_TR(Optimizer):
         st = self.state
 
         # Update LSR1 memory if second-order is enabled and previous gradient exists
+        hess_memory_updated = False
         if self.second_order and st["prev_grad"] is not None:
             sk = wk - st["old_wk"]
             yk = g - st["prev_grad"]
             if sk.norm() > self.tol and yk.norm() > self.tol:
                 self.hess.update_memory(sk, yk)  # Also takes care of updating gamma
                 self.gamma = self.hess.gamma
+                hess_memory_updated = True
 
         st["old_wk"], st["prev_grad"] = wk.clone(), g.clone()
 
+        # Only precompute if Hessian memory changed
+        current_memory_size = len(self.hess._S)
+        if (self.second_order and current_memory_size > 0 and 
+            (hess_memory_updated or self._precomputed_for_size != current_memory_size)):
+            self.hess.precompute()
+            self._precomputed_for_size = current_memory_size
+
         # Solve trust-region subproblem: second-order if memory available, otherwise first-order
-        if self.second_order and len(self.hess._S) > 0:
+        if self.second_order and current_memory_size > 0:
             # pred_red = -(g*p + 0.5*p*B*p)
-            # print(f"Calling solve_tr_second_order with delta={self.delta}, gamma={self.gamma}")
             p_star, pred_red = solve_tr_second_order(
                 gradient=g,
                 grad_norm=gn,
@@ -519,13 +548,15 @@ class LSSR1_TR(Optimizer):
 
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
-        # Print shapes
         vk.mul_(self.mu).add_(wk - st["old_wk"])
+        
+        # Cache norm computations
         vk_norm_sq = vk.dot(vk)
         if vk_norm_sq > self.tol:
             vk_norm = math.sqrt(float(vk_norm_sq))
             scale = min(1.0, self.delta / vk_norm)
             vk.mul_(scale)
+            
         # Combine p_star and vk, then bound combined step to trust-region radius
         p_comb = p_star + vk
         p_comb_norm_sq = p_comb.dot(p_comb)
@@ -533,7 +564,13 @@ class LSSR1_TR(Optimizer):
             p_comb_norm = math.sqrt(float(p_comb_norm_sq))
             scale = min(1.0, self.delta / p_comb_norm)
             p_comb.mul_(scale)
-        st["flat_vk"] = vk.clone()  # .detach()  # Store updated vk for next iteration
+            # Update cached norm after scaling
+            p_comb_norm_sq = p_comb.dot(p_comb)
+            
+        st["flat_vk"] = vk.clone()
+        
+        # Cache frequently used values for line search
+        st["_p_comb_norm_sq"] = p_comb_norm_sq
 
         # Prepare line search with initial loss and directional derivative
         phi_0 = loss
@@ -568,7 +605,12 @@ class LSSR1_TR(Optimizer):
             rho = float("inf")
         else:
             rho = (loss - new_loss) / pred_red if (alpha > 0 and pred_red < 0) else 0.0
-        s_norm_sq = p_step.dot(p_step)
+            
+        # Use cached norm if available and step is just scaled version
+        if alpha == 1.0 and "_p_comb_norm_sq" in st:
+            s_norm_sq = st["_p_comb_norm_sq"]
+        else:
+            s_norm_sq = p_step.dot(p_step)
         s_norm = math.sqrt(float(s_norm_sq))
 
         # Adjust trust-region radius based on ρ and step norm

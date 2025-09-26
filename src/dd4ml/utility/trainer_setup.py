@@ -143,35 +143,38 @@ def get_config_model_and_trainer(args, wandb_config):
     if hasattr(all_config.trainer, "norm_type"):
         all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
 
+    # Cache frequently accessed config objects
+    trainer_config = all_config.trainer
+    model_config = all_config.model
+    device = get_device()
+
     # Model instantiation (with optional parallelization).
-    if getattr(all_config.trainer, "use_pmw", False) and hasattr(
-        all_config.model.model_class, "as_model_dict"
+    if getattr(trainer_config, "use_pmw", False) and hasattr(
+        model_config.model_class, "as_model_dict"
     ):
         dprint("Using Parallel Model Wrapper and Model Handler")
-        model_instance = all_config.model.model_class(all_config.model)
+        model_instance = model_config.model_class(model_config)
         model_dict = model_instance.as_model_dict()
         model_handler = ModelHandler(
             model_dict,
-            all_config.model.num_subdomains,
-            all_config.model.num_replicas_per_subdomain,
+            model_config.num_subdomains,
+            model_config.num_replicas_per_subdomain,
         )
-        # if dist.get_rank() == 0: pprint.pprint(model_handler.nn_structure)
-        all_config.trainer.model_handler = model_handler
+        trainer_config.model_handler = model_handler
 
-        sample_input = dataset.get_sample_input(all_config.trainer)
+        sample_input = dataset.get_sample_input(trainer_config)
         if sample_input.shape[0] == 1:
-            other_sample = dataset.get_sample_input(all_config.trainer)
+            other_sample = dataset.get_sample_input(trainer_config)
             sample_input = torch.cat([sample_input, other_sample], dim=0)
 
         model = ParallelizedModel(model_handler, sample=sample_input)
     else:
-        model = all_config.model.model_class(all_config.model)
-        device = get_device()
+        model = model_config.model_class(model_config)
         model.to(device)
 
         if (
             dist.is_initialized() and dist.get_world_size() > 1
-        ):  # and all_config.trainer.data_parallel
+        ):
             loc_rank = int(os.environ.get("LOCAL_RANK", 0))
             print(
                 f"Rank {dist.get_rank()}, local rank {loc_rank}, cuda available: {torch.cuda.is_available()}"
@@ -251,8 +254,6 @@ def get_config_model_and_trainer(args, wandb_config):
     elif optimizer_name == "apts_d":
         from dd4ml.optimizers.apts_d import APTS_D
 
-        all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
-
         all_config.trainer = APTS_D.setup_APTS_hparams(all_config.trainer)
         all_config.trainer.apts_d = True
 
@@ -260,24 +261,22 @@ def get_config_model_and_trainer(args, wandb_config):
             params=model.parameters(),
             model=model,
             criterion=criterion,
-            device=get_device(),
-            nr_models=all_config.model.num_subdomains,
-            glob_opt=all_config.trainer.glob_opt,
-            glob_opt_hparams=all_config.trainer.glob_opt_hparams,
-            loc_opt=all_config.trainer.loc_opt,
-            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
-            glob_pass=all_config.trainer.glob_pass,
-            foc=all_config.trainer.foc,
-            norm_type=all_config.trainer.norm_type,
-            max_loc_iters=all_config.trainer.max_loc_iters,
-            max_glob_iters=all_config.trainer.max_glob_iters,
-            tol=all_config.trainer.tol,
-            **all_config.trainer.apts_params,
+            device=device,
+            nr_models=model_config.num_subdomains,
+            glob_opt=trainer_config.glob_opt,
+            glob_opt_hparams=trainer_config.glob_opt_hparams,
+            loc_opt=trainer_config.loc_opt,
+            loc_opt_hparams=trainer_config.loc_opt_hparams,
+            glob_pass=trainer_config.glob_pass,
+            foc=trainer_config.foc,
+            norm_type=trainer_config.norm_type,
+            max_loc_iters=trainer_config.max_loc_iters,
+            max_glob_iters=trainer_config.max_glob_iters,
+            tol=trainer_config.tol,
+            **trainer_config.apts_params,
         )
     elif optimizer_name == "apts_p":
         from dd4ml.optimizers.apts_p import APTS_P
-
-        all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
 
         all_config.trainer = APTS_P.setup_APTS_hparams(all_config.trainer)
         loc_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -286,23 +285,21 @@ def get_config_model_and_trainer(args, wandb_config):
             params=model.parameters(),
             model=model,
             criterion=criterion,
-            device=get_device(),
-            nr_models=all_config.model.num_subdomains,
-            glob_opt=all_config.trainer.glob_opt,
-            glob_opt_hparams=all_config.trainer.glob_opt_hparams,
-            loc_opt=all_config.trainer.loc_opt,
-            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
-            glob_pass=all_config.trainer.glob_pass,
-            norm_type=all_config.trainer.norm_type,
-            max_loc_iters=all_config.trainer.max_loc_iters,
-            max_glob_iters=all_config.trainer.max_glob_iters,
-            tol=all_config.trainer.tol,
-            **all_config.trainer.apts_params,
+            device=device,
+            nr_models=model_config.num_subdomains,
+            glob_opt=trainer_config.glob_opt,
+            glob_opt_hparams=trainer_config.glob_opt_hparams,
+            loc_opt=trainer_config.loc_opt,
+            loc_opt_hparams=trainer_config.loc_opt_hparams,
+            glob_pass=trainer_config.glob_pass,
+            norm_type=trainer_config.norm_type,
+            max_loc_iters=trainer_config.max_loc_iters,
+            max_glob_iters=trainer_config.max_glob_iters,
+            tol=trainer_config.tol,
+            **trainer_config.apts_params,
         )
     elif optimizer_name == "apts_pinn":
         from dd4ml.optimizers.apts_pinn import APTS_PINN
-
-        all_config.trainer.norm_type = parse_norm(all_config.trainer.norm_type)
 
         all_config.trainer = APTS_PINN.setup_APTS_hparams(all_config.trainer)
 
@@ -310,20 +307,20 @@ def get_config_model_and_trainer(args, wandb_config):
             params=model.parameters(),
             model=model,
             criterion=criterion,
-            device=get_device(),
-            glob_opt=all_config.trainer.glob_opt,
-            glob_opt_hparams=all_config.trainer.glob_opt_hparams,
-            loc_opt=all_config.trainer.loc_opt,
-            loc_opt_hparams=all_config.trainer.loc_opt_hparams,
-            glob_pass=all_config.trainer.glob_pass,
-            foc=all_config.trainer.foc,
-            norm_type=all_config.trainer.norm_type,
-            max_loc_iters=all_config.trainer.max_loc_iters,
-            max_glob_iters=all_config.trainer.max_glob_iters,
-            tol=all_config.trainer.tol,
-            num_subdomains=all_config.trainer.num_subdomains,
-            overlap=all_config.trainer.overlap,
-            **all_config.trainer.apts_params,
+            device=device,
+            glob_opt=trainer_config.glob_opt,
+            glob_opt_hparams=trainer_config.glob_opt_hparams,
+            loc_opt=trainer_config.loc_opt,
+            loc_opt_hparams=trainer_config.loc_opt_hparams,
+            glob_pass=trainer_config.glob_pass,
+            foc=trainer_config.foc,
+            norm_type=trainer_config.norm_type,
+            max_loc_iters=trainer_config.max_loc_iters,
+            max_glob_iters=trainer_config.max_glob_iters,
+            tol=trainer_config.tol,
+            num_subdomains=trainer_config.num_subdomains,
+            overlap=trainer_config.overlap,
+            **trainer_config.apts_params,
         )
     elif optimizer_name == "lssr1_tr":
         from dd4ml.optimizers.lssr1_tr import LSSR1_TR
@@ -366,27 +363,27 @@ def get_config_model_and_trainer(args, wandb_config):
 
         optimizer_obj = ASNTR(
             params=model.parameters(),
-            device=get_device(),
-            lr=all_config.trainer.learning_rate,
-            delta=all_config.trainer.delta,
-            min_delta=all_config.trainer.min_delta,
-            max_delta=all_config.trainer.max_delta,
-            gamma=all_config.trainer.gamma,
-            second_order=all_config.trainer.glob_second_order,
-            dogleg=all_config.trainer.dogleg,
-            mem_length=all_config.trainer.mem_length,
-            eta=all_config.trainer.eta,
-            nu=all_config.trainer.nu,
-            eta_1=all_config.trainer.eta_1,
-            eta_2=all_config.trainer.eta_2,
-            tau_1=all_config.trainer.tau_1,
-            tau_2=all_config.trainer.tau_2,
-            tau_3=all_config.trainer.tau_3,
-            norm_type=all_config.trainer.norm_type,
-            c_1=all_config.trainer.c_1,
-            c_2=all_config.trainer.c_2,
-            alpha=all_config.trainer.alpha,
-            tol=all_config.trainer.tol,
+            device=device,
+            lr=trainer_config.learning_rate,
+            delta=trainer_config.delta,
+            min_delta=trainer_config.min_delta,
+            max_delta=trainer_config.max_delta,
+            gamma=trainer_config.gamma,
+            second_order=trainer_config.glob_second_order,
+            dogleg=trainer_config.dogleg,
+            mem_length=trainer_config.mem_length,
+            eta=trainer_config.eta,
+            nu=trainer_config.nu,
+            eta_1=trainer_config.eta_1,
+            eta_2=trainer_config.eta_2,
+            tau_1=trainer_config.tau_1,
+            tau_2=trainer_config.tau_2,
+            tau_3=trainer_config.tau_3,
+            norm_type=trainer_config.norm_type,
+            c_1=trainer_config.c_1,
+            c_2=trainer_config.c_2,
+            alpha=trainer_config.alpha,
+            tol=trainer_config.tol,
         )
 
     else:

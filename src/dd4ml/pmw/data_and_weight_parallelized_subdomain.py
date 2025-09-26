@@ -5,13 +5,14 @@ from .weight_parallelized_model import WeightParallelizedModel
 
 
 class DataAndWeightParallelizedSubdomain(BasePMWModel):
+    """
+    This class defines a subdomain in data. The subdomain has subdomains in weights and can parallelize forward and backward passes in data.
+
+    rank_list = list of lists containing the ranks of the model replicas that are responsible for each layer, e.g. [[0, 1], [2, 3], [4, 5]] (3 replicas, 2 layers each replica)
+    """
+
     def __init__(self, model_handler, sample):
         super().__init__()
-        """
-        This function defines a subdomain in data. The subdomain has subdomains in weights and can parallelize forward and backward passes in data.
-        
-        rank_list = list of lists containing the ranks of the model replicas that are responsible for each layer, e.g. [[0, 1], [2, 3], [4, 5]] (3 replicas, 2 layers each replica)
-        """
         self.model_handler = model_handler
         self.num_replicas_per_subdomain = self.model_handler.num_replicas_per_subdomain
         self.weight_parallelized_model = WeightParallelizedModel(
@@ -19,6 +20,8 @@ class DataAndWeightParallelizedSubdomain(BasePMWModel):
         )
 
     def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):
+        if chunks_amount < 1:
+            raise ValueError(f"chunks_amount must be >= 1, got {chunks_amount}")
         return self.weight_parallelized_model.forward(
             x,
             chunks_amount=chunks_amount,
@@ -31,15 +34,23 @@ class DataAndWeightParallelizedSubdomain(BasePMWModel):
         if sync:
             self.sync_grads()
 
+    def _get_parameters(self):
+        """Get model parameters for synchronization."""
+        return self.weight_parallelized_model.subdomain.parameters()
+
+    def _get_sync_group(self):
+        """Get the communication group for synchronization."""
+        return self.model_handler.get_layers_copy_group(mode="local")
+
     def sync_params(self, method="average"):
         # TODO/NOTE: Use the sharding class
         if self.num_replicas_per_subdomain > 1:
             if method not in ["average", "sum"]:
                 raise ValueError(f"Method {method} is not supported.")
-            for param in self.weight_parallelized_model.subdomain.parameters():
+            for param in self._get_parameters():
                 dist.all_reduce(
                     tensor=param.data,
-                    group=self.model_handler.get_layers_copy_group(mode="local"),
+                    group=self._get_sync_group(),
                     op=dist.ReduceOp.SUM,
                 )
                 if method == "average":
@@ -47,10 +58,11 @@ class DataAndWeightParallelizedSubdomain(BasePMWModel):
 
     def sync_grads(self):
         if self.num_replicas_per_subdomain > 1:
-            for param in self.weight_parallelized_model.subdomain.parameters():
-                dist.all_reduce(
-                    tensor=param.grad,
-                    group=self.model_handler.get_layers_copy_group(mode="local"),
-                    op=dist.ReduceOp.SUM,
-                )
-                param.grad /= self.num_replicas_per_subdomain
+            for param in self._get_parameters():
+                if param.grad is not None:
+                    dist.all_reduce(
+                        tensor=param.grad,
+                        group=self._get_sync_group(),
+                        op=dist.ReduceOp.SUM,
+                    )
+                    param.grad /= self.num_replicas_per_subdomain

@@ -8,6 +8,11 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from .optimizer_utils import get_state_dict
 
 
+def _get_device():
+    """Cache device to avoid repeated CUDA checks."""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 def flatten_params(model, out=None):
     # Infer param dtype/device from the first parameter
     first = next(model.parameters(), None)
@@ -72,7 +77,7 @@ def clone_model(model):
 
 
 def broadcast_shuffle(num_layers: int, rank: int, world_size: int) -> torch.Tensor:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = _get_device()
     if rank == 0:
         perm = torch.randperm(num_layers, dtype=torch.long, device=device)
     else:
@@ -82,18 +87,11 @@ def broadcast_shuffle(num_layers: int, rank: int, world_size: int) -> torch.Tens
 
 
 def split_indices(perm: torch.Tensor, rank: int, world_size: int) -> torch.Tensor:
-    # q, r = divmod(len(perm), world_size)
-    # start = rank * q + min(rank, r)
-    # end = start + q + (1 if rank < r else 0)
-    # return perm[start:end]
     n = len(perm)
-    start, remaining = 0, n
-    for i in range(world_size):
-        size = remaining // (world_size - i) if i < world_size - 1 else remaining
-        if i == rank:
-            return perm[start : start + size]
-        start += size
-        remaining -= size
+    q, r = divmod(n, world_size)
+    start = rank * q + min(rank, r)
+    end = start + q + (1 if rank < r else 0)
+    return perm[start:end]
 
 
 def mark_trainable(model: nn.Module):
@@ -101,6 +99,9 @@ def mark_trainable(model: nn.Module):
 
     params = list(model.parameters())
     num_layers = len(params)
+
+    if num_layers == 0:
+        return model
 
     if world_size > num_layers:
         raise ValueError(
@@ -131,37 +132,23 @@ def trainable_params_to_vector(model: nn.Module) -> torch.Tensor:
     """
     Returns a flat vector containing all trainable parameters of the model.
     """
-    return torch.cat(
-        [p.detach().view(-1) for p in model.parameters() if p.requires_grad]
-    ).clone()
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    if not trainable_params:
+        return torch.tensor([], dtype=torch.float32)
+
+    return torch.cat([p.detach().view(-1) for p in trainable_params]).clone()
 
 
 def trainable_grads_to_vector(model: nn.Module) -> torch.Tensor:
     """
     Returns a flat vector containing the gradients of all trainable parameters of the model.
     """
-    grads = []
-    for p in model.parameters():
-        if not p.requires_grad:
-            continue
-        if p.grad is None:
-            grads.append(torch.zeros_like(p).view(-1))
-        else:
-            grads.append(p.grad.view(-1))
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    if not trainable_params:
+        return torch.tensor([], dtype=torch.float32)
+
+    grads = [p.grad.view(-1) if p.grad is not None else torch.zeros_like(p).view(-1)
+             for p in trainable_params]
     return torch.cat(grads).detach()
 
 
-# def trainable_grads_to_vector(model: nn.Module) -> torch.Tensor:
-#     """
-#     Returns a vector containing only the trainable gradients of the model.
-#     """
-#     return torch.cat(
-#         [
-#             (
-#                 p.grad.view(-1)
-#                 if p.requires_grad and p.grad is not None
-#                 else p.new_zeros(p.numel())
-#             )
-#             for p in model.parameters()
-#         ]
-#     ).detach()

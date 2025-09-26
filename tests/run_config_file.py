@@ -30,6 +30,21 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 
+# Constants
+DEFAULT_SEED = 3407
+LOG_FREQUENCY = 5
+SAVE_FREQUENCY_EPOCH = 5
+SAVE_FREQUENCY_BATCH = 2000
+BARRIER_TIMEOUT = 30
+
+
+def get_optimizer_delta_info(optimizer):
+    """Extract delta/learning rate info from optimizer."""
+    if hasattr(optimizer, "delta"):
+        return optimizer.delta, "delta"
+    return optimizer.param_groups[0]["lr"], "lr"
+
+
 def parse_cmd_args() -> argparse.Namespace:
     num_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
     parser = argparse.ArgumentParser(
@@ -136,11 +151,13 @@ def parse_cmd_args() -> argparse.Namespace:
 def wait_and_exit(rank: int) -> None:
     """Wait at the barrier and exit gracefully."""
     try:
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier(timeout=BARRIER_TIMEOUT)
         sys.exit(0)
     except Exception as e:
-        print(f"Barrier timeout: {e}. Aborting process group...")
-        dist.destroy_process_group()
+        print(f"Barrier timeout: {e}. Cleaning up...")
+        if dist.is_initialized():
+            dist.destroy_process_group()
         sys.exit(1)
 
 
@@ -189,33 +206,20 @@ def main(
     trial_args = {**args, **wandb_config}
     if trial_args["use_seed"]:
         trial_num = trial_args["trial_num"]
-        seed = wandb_config.get("seed", 3407) * trial_num
+        seed = wandb_config.get("seed", DEFAULT_SEED) * trial_num
         set_seed(seed)
 
-    apts_id = (
-        "nst_"
-        + str(trial_args["num_stages"])
-        + "_nsd_"
-        + str(trial_args["num_subdomains"])
-        + "_nrpsd_"
-        + str(trial_args["num_replicas_per_subdomain"])
-    )
+    apts_id = f"nst_{trial_args['num_stages']}_nsd_{trial_args['num_subdomains']}_nrpsd_{trial_args['num_replicas_per_subdomain']}"
     if trial_args["use_seed"]:
         apts_id += str(seed)
 
     log_fn = wandb.log if (use_wandb and rank == 0) else dprint
 
     def epoch_end_callback(
-        trainer, save_model: bool = False, save_frequency: int = 5
+        trainer, save_model: bool = False, save_frequency: int = SAVE_FREQUENCY_EPOCH
     ) -> None:
 
-        # Check if delta is present in the optimizer's attributes
-        if not hasattr(trainer.optimizer, "delta"):
-            delta = trainer.optimizer.param_groups[0]["lr"]
-            thing_to_print = "lr"
-        else:
-            delta = trainer.optimizer.delta
-            thing_to_print = "delta"
+        delta, thing_to_print = get_optimizer_delta_info(trainer.optimizer)
 
         if isinstance(
             trainer.train_dataset,
@@ -255,17 +259,11 @@ def main(
             )
 
     def batch_end_callback(
-        trainer, save_model: bool = True, save_frequency: int = 2000
+        trainer, save_model: bool = True, save_frequency: int = SAVE_FREQUENCY_BATCH
     ) -> None:
-        # Check if delta is present in the optimizer's attributes
-        if not hasattr(trainer.optimizer, "delta"):
-            delta = trainer.optimizer.param_groups[0]["lr"]
-            thing_to_print = "lr"
-        else:
-            delta = trainer.optimizer.delta
-            thing_to_print = "delta"
+        delta, thing_to_print = get_optimizer_delta_info(trainer.optimizer)
 
-        if trainer.iter_num % 5 == 0:
+        if trainer.iter_num % LOG_FREQUENCY == 0:
             if rank == 0 and use_wandb:
                 log_fn(
                     {
@@ -373,8 +371,15 @@ def run_cluster(args: dict, sweep_config: dict) -> None:
 
 if __name__ == "__main__":
     args = vars(parse_cmd_args())
-    with open(args["sweep_config"], "r") as f:
-        sweep_config = yaml.safe_load(f)
+    try:
+        with open(args["sweep_config"], "r") as f:
+            sweep_config = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Config file {args['sweep_config']} not found")
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        print(f"Error parsing YAML file {args['sweep_config']}: {e}")
+        sys.exit(1)
 
     comp_env = detect_environment()
     if comp_env == "local":

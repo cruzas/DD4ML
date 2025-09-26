@@ -22,6 +22,23 @@ from dd4ml.datasets.pinn_allencahn_time import AllenCahn1DTimeDataset
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
+
+# Cache dataset type tuples for efficiency
+PINN_DATASETS = (
+    Poisson1DDataset,
+    Poisson2DDataset,
+    Poisson3DDataset,
+    AllenCahn1DDataset,
+    AllenCahn1DTimeDataset,
+)
+
+ACCURACY_EXCLUDED_DATASETS = (
+    Poisson1DDataset,
+    Poisson2DDataset,
+    Poisson3DDataset,
+    AllenCahn1DDataset,
+    SineOperatorDataset,
+)
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 from dd4ml.utility import CfgNode as CN
 from dd4ml.utility import closure, dprint
@@ -119,6 +136,14 @@ class Trainer:
         self.last_loss = float("inf")
         self.grad_evals = 0.0
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
+
+        # Cache optimizer type checks for performance
+        optimizer_name = self.optimizer.__class__.__name__.lower()
+        self._is_tr_or_apts = "tr" in optimizer_name or "apts" in optimizer_name
+        self._is_apts_ip = "apts_ip" in optimizer_name
+        self._is_apts_pinn = "apts_pinn" in optimizer_name
+        self._is_asntr = "asntr" in optimizer_name
+        self._is_lssr1_tr = "lssr1_tr" in optimizer_name
 
         # timing
         self.total_start_time = 0.0  # for computing the total running time
@@ -319,15 +344,15 @@ class Trainer:
 
     def _apts_ip_present(self):
         """Check if APTS_IP is the optimizer itself..."""
-        return "apts_ip" in self.optimizer.__class__.__name__.lower()
+        return self._is_apts_ip
 
     def _apts_pinn_present(self):
         """Check if APTS_PINN is the optimizer itself..."""
-        return "apts_pinn" in self.optimizer.__class__.__name__.lower()
+        return self._is_apts_pinn
 
     def _asntr_present(self):
         # Check if ASNTR is the optimizer itself...
-        asntr_is_opt = "asntr" in self.optimizer.__class__.__name__.lower()
+        asntr_is_opt = self._is_asntr
         # ...or whether it is the global optimizer in the case of APTS*
         asntr_is_glob_opt = (
             hasattr(self.optimizer, "glob_opt")
@@ -338,7 +363,7 @@ class Trainer:
 
     def _lssr1_tr_present(self):
         # Check if LSSR1_TR is the optimizer itself...
-        lssr1_tr_is_opt = "lssr1_tr" in self.optimizer.__class__.__name__.lower()
+        lssr1_tr_is_opt = self._is_lssr1_tr
         # ...or whether it is the global optimizer in the case of APTS*
         lssr1_tr_is_glob_opt = (
             hasattr(self.optimizer, "glob_opt")
@@ -477,16 +502,7 @@ class Trainer:
 
     def run(self):
         self.setup_data_loaders()
-        if isinstance(
-            self.train_dataset,
-            (
-                Poisson1DDataset,
-                Poisson2DDataset,
-                Poisson3DDataset,
-                AllenCahn1DDataset,
-                AllenCahn1DTimeDataset,
-            ),
-        ):
+        if isinstance(self.train_dataset, PINN_DATASETS):
             self.run_by_epoch_PINN()
         elif self.config.run_by_epoch:
             self.run_by_epoch()
@@ -622,10 +638,7 @@ class Trainer:
 
     def _tr_or_apts_present(self):
         """Check if the optimizer is a trust-region or APTS optimizer."""
-        return (
-            "tr" in self.optimizer.__class__.__name__.lower()
-            or "apts" in self.optimizer.__class__.__name__.lower()
-        )
+        return self._is_tr_or_apts
 
     def _move_to_device(self, data):
         if isinstance(data, (list, tuple)):
@@ -634,16 +647,7 @@ class Trainer:
 
     def compute_accuracy(self):
         """Compute test accuracy across all processes (and pipeline stages)."""
-        if isinstance(
-            self.test_dataset,
-            (
-                Poisson1DDataset,
-                Poisson2DDataset,
-                Poisson3DDataset,
-                AllenCahn1DDataset,
-                SineOperatorDataset,
-            ),
-        ):
+        if isinstance(self.test_dataset, ACCURACY_EXCLUDED_DATASETS):
             self.accuracy = float("nan")
             return
 
@@ -812,7 +816,7 @@ class Trainer:
                     "labels_d": y_d,
                     "hNk": self._compute_hNk(),
                 }
-            elif "asntr" in self.optimizer.__class__.__name__.lower():
+            elif self._is_asntr:
                 closure_d = closure(
                     x_d,
                     y_d,
@@ -934,7 +938,7 @@ class Trainer:
                 "labels_d": y_d,
                 "hNk": self._compute_hNk(),
             }
-        elif "asntr" in self.optimizer.__class__.__name__.lower():
+        elif self._is_asntr:
             closure_d = closure(
                 x_d,
                 y_d,

@@ -84,28 +84,33 @@ class APTS_P(APTS_Base):
         if isinstance(self.loc_opt, ASNTR):
             self.loc_closure_d = self.non_foc_loc_closure_d
         
-        # Compute number of parameters in local and global models
-        self.n_global = self.glob_params_to_vector().numel()
-        self.n_local = self.loc_params_to_vector().numel()
+        # Cache parameter vectors to avoid repeated expensive computations
+        temp_global = self.glob_params_to_vector()
+        temp_local = self.loc_params_to_vector()
+        self.n_global = temp_global.numel()
+        self.n_local = temp_local.numel()
         self.sqrt_n_global = math.sqrt(self.n_global)
         self.sqrt_n_local = math.sqrt(self.n_local)
-        print(f"Rank {dist.get_rank()}. Nglobal: {self.n_global}, Nlocal: {self.n_local}")
                 
         # Convert global optimizer bounds from inf-norm to 2-norm
         self.glob_opt.max_delta = self.max_delta * self.sqrt_n_global
         self.glob_opt.min_delta = self.min_delta * self.sqrt_n_global
         # Convert local optimizer bounds from inf-norm to 2-norm
-        self.loc_opt.max_delta = self.glob_opt.max_delta #self.max_delta * self.sqrt_n_local
-        self.loc_opt.min_delta = self.glob_opt.min_delta #self.min_delta * self.sqrt_n_local
+        self.loc_opt.max_delta = self.glob_opt.max_delta
+        self.loc_opt.min_delta = self.glob_opt.min_delta
         
         # Modify delta for global and local optimizers
         self.glob_opt.delta = max(self.glob_opt.min_delta, min(self.glob_opt.max_delta, self.delta * self.sqrt_n_global))
-        self.loc_opt.delta = self.glob_opt.delta # min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local)
+        self.loc_opt.delta = self.glob_opt.delta
 
         # Print name of glob_opt and loc_opt
         dprint(
             f"{self.__name__} global optimizer: {type(self.glob_opt).__name__}; local optimizer: {type(self.loc_opt).__name__}"
         )
+
+        # Pre-allocate buffers for efficiency
+        self._step_buffer = torch.empty_like(temp_global)  # For step computation
+        self._param_buffer = torch.empty_like(temp_global)  # For parameter operations
 
     @torch.no_grad()
     def sync_loc_to_glob(self) -> None:
@@ -130,15 +135,18 @@ class APTS_P(APTS_Base):
 
         # Multi-process merge
         with torch.no_grad():
-            # Copy owned slices; zero the others
-            for pg, pl in zip(self.model.parameters(), self.loc_model.parameters()):
+            # Single pass: copy owned slices and zero others, then reduce
+            global_params = list(self.model.parameters())
+            local_params = list(self.loc_model.parameters())
+            
+            for pg, pl in zip(global_params, local_params):
                 if pl.requires_grad:
                     pg.copy_(pl.data)  # owner rank writes its update
                 else:
                     pg.zero_()  # non-owners write zeros
 
             # Sum across all ranks - only the owner contributes a non-zero value
-            for pg in self.model.parameters():
+            for pg in global_params:
                 dist.all_reduce(pg.data, op=dist.ReduceOp.SUM)
 
     @torch.no_grad()
@@ -158,7 +166,7 @@ class APTS_P(APTS_Base):
         self.delta = min(self.max_delta, max(self.min_delta, self.glob_opt.delta / self.sqrt_n_global))
         self.update_pytorch_lr()
 
-        self.loc_opt.delta = self.glob_opt.delta #max(self.loc_opt.min_delta, min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local))
+        self.loc_opt.delta = self.glob_opt.delta
         if hasattr(self.loc_opt, "update_pytorch_lr"):
             self.loc_opt.update_pytorch_lr()
 
@@ -203,10 +211,11 @@ class APTS_P(APTS_Base):
         # Synchronize parameters from local models to global model
         self.sync_loc_to_glob()
 
-        # Compute trial step
-        step = self.glob_params_to_vector() - self.init_glob_flat
+        # Compute trial step using pre-allocated buffer
+        current_params = self.glob_params_to_vector()
+        torch.sub(current_params, self.init_glob_flat, out=self._step_buffer)
         # Clamp step to the delta bound
-        step = step.clamp(min=-self.delta, max=self.delta)
+        self._step_buffer.clamp_(min=-self.delta, max=self.delta)
         
         # Aggregate local losses
         pred = self.init_loc_loss - loc_loss
@@ -214,7 +223,7 @@ class APTS_P(APTS_Base):
             dist.all_reduce(pred, op=dist.ReduceOp.SUM)
 
         # Perform global control on step and update delta
-        loss, grad, new_base_delta = self.control_step(step, pred)
+        loss, grad, new_base_delta = self.control_step(self._step_buffer, pred)
         self.delta = new_base_delta
 
         # Update global optimizer's delta based on the new base delta    

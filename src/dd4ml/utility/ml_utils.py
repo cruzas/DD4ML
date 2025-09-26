@@ -15,7 +15,7 @@ def get_device(device=None):
     else:
         return (
             f"cuda:{torch.cuda.current_device()}"
-            if dist.get_backend() != "gloo"
+            if dist.is_initialized() and dist.get_backend() != "gloo"
             else "cpu"
         )
 
@@ -116,14 +116,12 @@ def closure(
         if has_model_handler and model.model_handler.is_last_stage():
             for i, out in enumerate(outputs):
                 losses[i] = criterion(out, targets[i].to(out.device))
-            loss = torch.tensor((sum(losses) / len(losses)), device=model.tensor_device)
+            loss = torch.stack(losses).mean().to(model.tensor_device)
         elif not has_model_handler:
             loss = criterion(outputs, targets.to(outputs.device))
 
         # Distributed processing (only if model_handler is present)
         if has_model_handler:
-            # Determine original data type
-            orig_dtype = loss.dtype
             # Cast to float64 for all_reduce
             loss = loss.to(torch.float64)
 
@@ -198,7 +196,7 @@ def closure(
 
 
 def decide_tensor_device(ws, backend, gpu_id):
-    loc_rank = os.environ["LOCAL_RANK"]
+    loc_rank = int(os.environ.get("LOCAL_RANK", "0"))
     if torch.cuda.is_available():
         if backend == "gloo":
             if torch.cuda.device_count() < ws:
@@ -218,9 +216,15 @@ def list_flattener(l):
     """
     Flattens a list of lists of lists of ... to a single list.
     """
-    while any(isinstance(i, list) for i in l):
-        l = [item for sublist in l for item in sublist]
-    return l
+    def _flatten(lst):
+        result = []
+        for item in lst:
+            if isinstance(item, list):
+                result.extend(_flatten(item))
+            else:
+                result.append(item)
+        return result
+    return _flatten(l)
 
 
 def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
@@ -232,7 +236,16 @@ def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
 
     # Check if the model has already been trained
     max_epoch_already_trained = -1
-    saved_networks = os.listdir("../saved_networks")
+    saved_networks_dir = "../saved_networks"
+    if not os.path.exists(saved_networks_dir):
+        return (
+            starting_epoch,
+            starting_num_iters,
+            epoch_results,
+            iter_results,
+            starting_network,
+        )
+    saved_networks = os.listdir(saved_networks_dir)
     for saved_network in saved_networks:
         if base_file_name in saved_network:
             saved_network_epoch = int(

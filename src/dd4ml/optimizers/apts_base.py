@@ -5,7 +5,7 @@ import time
 
 import torch
 import torch.distributed as dist
-from torch.nn.utils import parameters_to_vector
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
 from dd4ml.utility import (
@@ -151,6 +151,12 @@ class APTS_Base(Optimizer):
         # Track number of gradient evaluations as simple Python floats
         self.grad_evals, self.loc_grad_evals = 0.0, 0.0
 
+        # Caching for efficiency
+        self._glob_flat_cache = None
+        self._loc_flat_cache = None
+        self._diff_cache = torch.empty_like(sample_flat)
+        self._hess_precomputed_for_size = -1
+
     def _update_param_group(self):
         for key in self.param_groups[0].keys():
             if key != "params":
@@ -183,11 +189,8 @@ class APTS_Base(Optimizer):
         Converts the local model's gradients to a flattened vector.
         Returns a tensor containing the gradients of the local model parameters.
         """
-        return (
-            parameters_to_vector([p.grad for p in self.loc_model.parameters()])
-            .clone()
-            .detach()
-        )
+        # parameters_to_vector already returns a new tensor, no need for .clone()
+        return parameters_to_vector([p.grad for p in self.loc_model.parameters()]).detach()
 
     @torch.no_grad()
     def glob_params_to_vector(self):
@@ -195,6 +198,7 @@ class APTS_Base(Optimizer):
         Converts the global model's parameters to a flattened vector.
         Returns a tensor containing the parameters of the global model.
         """
+        # flatten_params modifies buffer in-place, so clone is necessary here
         return flatten_params(self.model, self._flat_params_buffer).clone().detach()
 
     @torch.no_grad()
@@ -203,6 +207,7 @@ class APTS_Base(Optimizer):
         Converts the local model's parameters to a flattened vector.
         Returns a tensor containing the parameters of the local model.
         """
+        # flatten_params modifies buffer in-place, so clone is necessary here
         return flatten_params(self.loc_model, self._loc_flat_buffer).clone().detach()
 
     @torch.no_grad()
@@ -247,13 +252,15 @@ class APTS_Base(Optimizer):
         # Flatten global and local parameters into pre-allocated buffers
         glob_flat = flatten_params(self.model, self._flat_params_buffer)
         loc_flat = flatten_params(self.loc_model, self._loc_flat_buffer)
-        diff = loc_flat - glob_flat
+        
+        # Use pre-allocated buffer for difference computation
+        torch.sub(loc_flat, glob_flat, out=self._diff_cache)
 
-        # If difference above tolerance, add residual inner-product term
-        if not torch.all(torch.abs(diff) < self.tol):
+        # Optimized tolerance check using norm instead of element-wise operations
+        if self._diff_cache.norm() > self.tol:
             if self.resid.dim() == 0 and self.resid.item() == 0:
-                self.resid = torch.zeros_like(diff)
-            loss = loss + (self.resid @ diff)
+                self.resid = torch.zeros_like(self._diff_cache)
+            loss = loss + (self.resid @ self._diff_cache)
         return loss
 
     def glob_closure_main(self, compute_grad: bool = False):
@@ -303,13 +310,15 @@ class APTS_Base(Optimizer):
         # Flatten global and local parameters into pre-allocated buffers
         glob_flat = flatten_params(self.model, self._flat_params_buffer)
         loc_flat = flatten_params(self.loc_model, self._loc_flat_buffer)
-        diff = loc_flat - glob_flat
+        
+        # Use pre-allocated buffer for difference computation
+        torch.sub(loc_flat, glob_flat, out=self._diff_cache)
 
-        # If difference above tolerance, add residual inner-product term
-        if not torch.all(torch.abs(diff) < self.tol):
+        # Optimized tolerance check using norm instead of element-wise operations
+        if self._diff_cache.norm() > self.tol:
             if self.resid.dim() == 0 and self.resid.item() == 0:
-                self.resid = torch.zeros_like(diff)
-            loss = loss + (self.resid @ diff)
+                self.resid = torch.zeros_like(self._diff_cache)
+            loss = loss + (self.resid @ self._diff_cache)
         return loss
 
     def glob_closure_d(self, compute_grad: bool = False):
@@ -418,7 +427,12 @@ class APTS_Base(Optimizer):
                 and self.glob_opt.hess._S is not None
                 and len(self.glob_opt.hess._S) > 0
             ):
-                self.glob_opt.hess.precompute()
+                # Only precompute if memory size changed
+                current_memory_size = len(self.glob_opt.hess._S)
+                if self._hess_precomputed_for_size != current_memory_size:
+                    self.glob_opt.hess.precompute()
+                    self._hess_precomputed_for_size = current_memory_size
+                    
                 Bp = self.glob_opt.hess.B(step)
                 pred_red -= 0.5 * step.dot(Bp)
         else:

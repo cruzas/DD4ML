@@ -235,12 +235,16 @@ class GeneralizedDistributedDataLoader(DataLoader):
         batch_size,
         shuffle,
         overlap: float | int = 0.0,
-        device="cpu" if not torch.cuda.is_available() else "cuda",
+        device=None,
         num_workers=0,
         pin_memory=False,
         seed=0,
         **kwargs,
     ):
+        # Set default device if not provided
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
         if "drop_last" in kwargs:
             print("(WARNING) drop_last will always be True in GeneralizedDistributedDataLoader.")
             kwargs.pop("drop_last")
@@ -500,24 +504,24 @@ class Power_DL:
         self.dataset.data = change_channel_position(self.dataset.data)
         # self.dataset.data = normalize_dataset(self.dataset.data, mean, std) # Data normalization
 
-        dtype = torch.LongTensor
-        if torch.cuda.is_available() and (
-            "MNIST" in str(dataset.__class__) or "CIFAR" in str(dataset.__class__)
-        ):
-            dtype = torch.cuda.LongTensor
-        elif torch.cuda.is_available() and "Sine" in str(dataset.__class__):
-            dtype = torch.cuda.FloatTensor
-        elif not torch.cuda.is_available() and (
-            "MNIST" in str(dataset.__class__) or "CIFAR" in str(dataset.__class__)
-        ):
-            dtype = torch.LongTensor
-        elif not torch.cuda.is_available() and "Sine" in str(dataset.__class__):
-            if self.precision == 32:
-                dtype = torch.float32
-            elif self.precision == 64:
-                dtype = torch.float64
-            elif self.precision == 16:
-                dtype = torch.float16
+        cuda_available = torch.cuda.is_available()
+        dataset_class_name = str(dataset.__class__)
+
+        if cuda_available:
+            if "MNIST" in dataset_class_name or "CIFAR" in dataset_class_name:
+                dtype = torch.cuda.LongTensor
+            elif "Sine" in dataset_class_name:
+                dtype = torch.cuda.FloatTensor
+            else:
+                dtype = torch.LongTensor
+        else:
+            if "MNIST" in dataset_class_name or "CIFAR" in dataset_class_name:
+                dtype = torch.LongTensor
+            elif "Sine" in dataset_class_name:
+                precision_map = {32: torch.float32, 64: torch.float64, 16: torch.float16}
+                dtype = precision_map.get(self.precision, torch.float32)
+            else:
+                dtype = torch.LongTensor
 
         try:
             # TODO: Copy on cuda to avoid problems with parallelization (and maybe other problems)

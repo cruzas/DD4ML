@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Tuple
+from typing import Callable, Iterable, Tuple
 
 import torch
 from torch.optim import Optimizer
@@ -81,6 +81,10 @@ class TR(Optimizer):
             self.hess = None  # type: ignore
             self.obs = None  # type: ignore
 
+        # Caching for efficiency
+        self._precomputed_for_size = -1
+        self._step_norm_cache = None
+
     def _flat_grad(self) -> torch.Tensor:
         """Return the current gradient as a single flat vector."""
         if self._flat_grads_fn is not None:
@@ -134,7 +138,7 @@ class TR(Optimizer):
     def step(self, closure, **_) -> Tuple[float, torch.Tensor]:
         # Evaluate loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
-        grad = _["grad"].clone() if "grad" in _ else self._flat_grad()
+        grad = _["grad"] if "grad" in _ else self._flat_grad()
         if isinstance(grad, WeightParallelizedTensor):
             grad = grad.detach()
         gn = torch.norm(grad, p=self.norm_type)
@@ -143,8 +147,17 @@ class TR(Optimizer):
         if gn <= self.tol:
             return loss, grad
 
+        # Precompute Hessian if needed (only when memory changes)
+        current_memory_size = 0
+        if self.second_order and self.hess is not None:
+            current_memory_size = len(self.hess._S)
+            if (current_memory_size > 0 and 
+                self._precomputed_for_size != current_memory_size):
+                self.hess.precompute()
+                self._precomputed_for_size = current_memory_size
+
         # First- or second-order TR step
-        if self.second_order and len(self.hess._S) > 0:
+        if self.second_order and current_memory_size > 0:
             # pred_red = -(g*p + 0.5*p*B*p)
             self._step_buf, pred_red = solve_tr_second_order(
                 gradient=grad,
@@ -161,6 +174,9 @@ class TR(Optimizer):
                 grad, gn, self.delta, self.tol
             )
 
+        # Cache step norm for later use
+        self._step_norm_cache = self._step_buf.norm()
+
         # Trial step
         self._apply_update()
         trial_loss = closure(compute_grad=True)
@@ -174,16 +190,21 @@ class TR(Optimizer):
 
         if rho > self.nu_dec:
             # Accept
-            if self.second_order:
+            if self.second_order and self.hess is not None:
                 # Update Hessian memory
                 sk = self._step_buf.clone()
                 yk = (trial_grad - grad).clone()
 
-                if sk.norm() > self.tol and yk.norm() > self.tol:
+                # Cache norms to avoid recomputation
+                sk_norm = self._step_norm_cache  # Use cached step norm
+                yk_norm = yk.norm()
+
+                if sk_norm > self.tol and yk_norm > self.tol:
                     # Also takes care of updating gamma
                     self.hess.update_memory(sk, yk)
 
-            if rho > self.nu_inc and self._step_buf.norm() >= 0.9 * self.delta:
+            # Use cached step norm instead of recomputing
+            if rho > self.nu_inc and self._step_norm_cache >= 0.9 * self.delta:
                 self.delta = min(
                     self.max_delta,
                     self.inc_factor * self.delta,

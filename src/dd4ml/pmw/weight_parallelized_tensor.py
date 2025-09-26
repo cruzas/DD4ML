@@ -17,6 +17,8 @@ class WeightParallelizedTensor(BasePMWModel):
         # Cache for the global shape of the tensor. This will be computed on
         # demand and invalidated whenever a relevant attribute changes.
         self._cached_shape = None
+        # Cache for device calls to avoid repeated computation
+        self._cached_device = None
 
     def detach(self):
         return torch.cat([p.detach().view(-1) for p in self.tensor])
@@ -68,15 +70,17 @@ class WeightParallelizedTensor(BasePMWModel):
 
         # Compute local size along dim 0 (sum over all local shards)
         local_dim0 = sum(p.size(0) for p in self.tensor)
-        dim0_tensor = torch.tensor(local_dim0, device=get_device())
+        if self._cached_device is None:
+            self._cached_device = get_device()
+        dim0_tensor = torch.tensor(local_dim0, device=self._cached_device)
 
         # Gather all local_dim0 values from every rank
         world_size = dist.get_world_size(self.master_group)
         gathered = [torch.zeros_like(dim0_tensor) for _ in range(world_size)]
         dist.all_gather(gathered, dim0_tensor, group=self.master_group)
 
-        # Sum to get global size along dim 0
-        global_dim0 = sum(int(x.item()) for x in gathered)
+        # Sum to get global size along dim 0 - optimize by avoiding repeated item() calls
+        global_dim0 = torch.stack(gathered).sum().item()
 
         # The remaining dimensions are the same on all shards
         rest = list(self.tensor[0].shape[1:])
@@ -98,6 +102,9 @@ class WeightParallelizedTensor(BasePMWModel):
         """
         self.tensor = [p.to(device) for p in self.tensor]
         self.device = device
+        # Invalidate caches when device changes
+        self._cached_device = None
+        self._cached_shape = None
         return self
 
     def __iter__(self):
@@ -141,25 +148,34 @@ class WeightParallelizedTensor(BasePMWModel):
     def dot(self, other: "WeightParallelizedTensor | torch.Tensor"):
         """Return global dot product."""
         if isinstance(other, WeightParallelizedTensor):
-            if self.numel() != other.numel() or len(self.tensor) != len(other.tensor):
-                raise ValueError("Tensors must have the same shape")
-            local_dp = sum(
-                torch.dot(p.flatten(), q.flatten())
-                for p, q in zip(self.tensor, other.tensor)
+            # Optimize validation - check tensor count first as it's cheaper
+            if len(self.tensor) != len(other.tensor):
+                raise ValueError("Tensors must have the same number of shards")
+            # Check numel only if tensor count matches
+            if self.numel() != other.numel():
+                raise ValueError("Tensors must have the same total number of elements")
+            # Optimize dot product computation - avoid repeated flattening
+            local_dp = torch.tensor(
+                0.0, device=self.tensor[0].device, dtype=self.tensor[0].dtype
             )
+            for p, q in zip(self.tensor, other.tensor):
+                local_dp += torch.dot(p.flatten(), q.flatten())
         elif isinstance(other, torch.Tensor):
             flat_other = other.flatten()
-            if flat_other.numel() != self.numel():
+            self_numel = self.numel()
+            if flat_other.numel() != self_numel:
                 raise ValueError("Tensor sizes do not match")
             local_dp = torch.dot(self.detach(), flat_other.to(self.device))
         else:
             raise TypeError("Unsupported tensor type")
 
-        device = (
-            torch.device(f"cuda:{torch.cuda.current_device()}")
-            if self.backend != "gloo"
-            else torch.device("cpu")
-        )
+        # More robust backend device selection
+        if self.backend == "gloo":
+            device = torch.device("cpu")
+        elif self.backend in ("nccl", "cuda") or torch.cuda.is_available():
+            device = torch.device(f"cuda:{torch.cuda.current_device()}")
+        else:
+            device = torch.device("cpu")
         local_dp = local_dp.to(device)
         dist.all_reduce(local_dp, group=self.master_group, op=dist.ReduceOp.SUM)
         return local_dp
@@ -231,7 +247,9 @@ class WeightParallelizedTensor(BasePMWModel):
         """
         Sum all elements across local shards, then reduce globally.
         """
-        local_sum = sum(p.sum() for p in self.tensor).to(get_device())
+        if self._cached_device is None:
+            self._cached_device = get_device()
+        local_sum = sum(p.sum() for p in self.tensor).to(self._cached_device)
         dist.all_reduce(local_sum, group=self.master_group, op=dist.ReduceOp.SUM)
         return local_sum
 
@@ -280,8 +298,9 @@ class WeightParallelizedTensor(BasePMWModel):
         return self.tensor[0].dtype if self.tensor else torch.float32
 
     def invalidate_shape_cache(self):
-        """Clear the cached global shape."""
+        """Clear the cached global shape and device."""
         self._cached_shape = None
+        self._cached_device = None
 
     def clone(self):
         """
@@ -319,7 +338,7 @@ class WeightParallelizedTensor(BasePMWModel):
             master_group=self.master_group,
             rank=self.rank,
         )
-    
+
     def max(self, dim=None, keepdim=False):
         """
         Compute the global maximum across all shards.
@@ -329,7 +348,9 @@ class WeightParallelizedTensor(BasePMWModel):
         if dim is not None:
             raise NotImplementedError("Per-dimension max is not supported yet.")
         # Local maximum
-        local_max = max(p.max() for p in self.tensor).to(get_device())
+        if self._cached_device is None:
+            self._cached_device = get_device()
+        local_max = max(p.max() for p in self.tensor).to(self._cached_device)
         # Reduce globally
         dist.all_reduce(local_max, group=self.master_group, op=dist.ReduceOp.MAX)
         return local_max

@@ -1,3 +1,5 @@
+import torch.nn as nn
+import torch.optim as optim
 from .deeponet_loss import DeepONetMSELoss
 from .ml_utils import cross_entropy_transformers
 from .utils import import_attr
@@ -94,17 +96,15 @@ MODEL_MAP = {
 }
 
 CRITERION_MAP = {
-    "cross_entropy": ("", lambda ds=None: __import__("torch.nn").nn.CrossEntropyLoss()),
+    "cross_entropy": ("", lambda ds=None: nn.CrossEntropyLoss()),
     "weighted_cross_entropy": (
         "",
-        lambda ds: __import__("torch.nn").nn.CrossEntropyLoss(
-            weight=ds.compute_class_weights()
-        ),
+        lambda ds: nn.CrossEntropyLoss(weight=ds.compute_class_weights()),
     ),
-    "mse": ("", lambda ds=None: __import__("torch.nn").nn.MSELoss()),
+    "mse": ("", lambda ds=None: nn.MSELoss()),
     "cross_entropy_transformers": (
         "",
-        lambda ds=None: cross_entropy_transformers,  # Assumes defined elsewhere.
+        lambda ds=None: cross_entropy_transformers,
     ),
     "pinn_poisson": (
         "dd4ml.utility.pinn_poisson_loss",
@@ -135,33 +135,23 @@ CRITERION_MAP = {
 OPTIMIZER_MAP = {
     "sgd": (
         "",
-        lambda model, lr: __import__("torch.optim").optim.SGD(
-            model.parameters(), lr=lr, momentum=0.9
-        ),
+        lambda model, lr: optim.SGD(model.parameters(), lr=lr, momentum=0.9),
     ),
     "adam": (
         "",
-        lambda model, lr: __import__("torch.optim").optim.Adam(
-            model.parameters(), lr=lr
-        ),
+        lambda model, lr: optim.Adam(model.parameters(), lr=lr),
     ),
     "adamw": (
         "",
-        lambda model, lr: __import__("torch.optim").optim.AdamW(
-            model.parameters(), lr=lr
-        ),
+        lambda model, lr: optim.AdamW(model.parameters(), lr=lr),
     ),
     "adagrad": (
         "",
-        lambda model, lr: __import__("torch.optim").optim.Adagrad(
-            model.parameters(), lr=lr
-        ),
+        lambda model, lr: optim.Adagrad(model.parameters(), lr=lr),
     ),
     "rmsprop": (
         "",
-        lambda model, lr: __import__("torch.optim").optim.RMSprop(
-            model.parameters(), lr=lr
-        ),
+        lambda model, lr: optim.RMSprop(model.parameters(), lr=lr),
     ),
 }
 

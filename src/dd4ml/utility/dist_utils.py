@@ -1,6 +1,5 @@
 import os
 import datetime
-loc_rank = os.environ.get('SLURM_LOCALID', '0')
 import sys
 import pickle
 import socket
@@ -9,6 +8,21 @@ from contextlib import closing
 import torch
 import torch.distributed as dist
 import random
+
+
+def _get_local_rank():
+    """Get local rank, computed when needed to avoid issues with module loading."""
+    return int(os.environ.get('SLURM_LOCALID', '0'))
+
+
+def _get_device_for_backend():
+    """Get appropriate device based on distributed backend."""
+    if not dist.is_initialized():
+        return torch.device('cpu')
+    backend = dist.get_backend()
+    if backend == 'nccl':
+        return torch.device(f'cuda:{_get_local_rank()}')
+    return torch.device('cpu')
 
 def is_main_process():
     return int(os.environ.get("SLURM_PROCID", 0)) == 0
@@ -56,7 +70,8 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
         env_vars['RANK'] = os.environ.get('SLURM_PROCID', '0') if multi_gpu else os.environ.get('SLURM_NODEID', '0')
         env_vars['LOCAL_RANK'] = os.environ.get('SLURM_LOCALID', '0')
         
-        if is_cuda_enabled: torch.cuda.set_device(int(os.environ['SLURM_LOCALID']))
+        if is_cuda_enabled:
+            torch.cuda.set_device(_get_local_rank())
         rank = int(env_vars['RANK'])
         world_size = int(env_vars['WORLD_SIZE'])
     else:  # Local environment
@@ -73,34 +88,48 @@ def prepare_distributed_environment(rank=None, master_addr=None, master_port=Non
 
 def send_shape(shape: list, dst: int, device=None):
     if device is None:
-        device = torch.device(f'cuda:{loc_rank}') if dist.get_backend() == 'nccl' else torch.device('cpu')
+        device = _get_device_for_backend()
+
+    # Pre-create tensors to avoid repeated allocation
     for s in shape:
-        dist.send(tensor=torch.tensor(
-            s, dtype=torch.int32).to(device), dst=dst)
-    dist.send(tensor=torch.tensor(-1, dtype=torch.int32).to(device), dst=dst)
+        tensor = torch.tensor(s, dtype=torch.int32, device=device)
+        dist.send(tensor=tensor, dst=dst)
+
+    # Send termination signal
+    end_tensor = torch.tensor(-1, dtype=torch.int32, device=device)
+    dist.send(tensor=end_tensor, dst=dst)
 
 def receive_shape(src: int, device=None):
     if device is None:
-        device = torch.device(f'cuda:{loc_rank}') if dist.get_backend() == 'nccl' else torch.device('cpu')
+        device = _get_device_for_backend()
+
     shape = []
-    temp = 0
+    # Pre-allocate tensor to avoid repeated allocation
+    recv_tensor = torch.tensor(0, dtype=torch.int32, device=device)
+
     while True:
-        temp = torch.tensor((0), dtype=torch.int32).to(device)
-        dist.recv(tensor=temp, src=src)
-        if temp == -1:
+        dist.recv(tensor=recv_tensor, src=src)
+        if recv_tensor.item() == -1:
             break
-        shape.append(temp.item())
+        shape.append(recv_tensor.item())
+
     return shape
 
 def check_gpus_per_rank():
+    world_size = dist.get_world_size()
     loc_gpus = torch.cuda.device_count()
-    gpu_counts = [torch.tensor(0).cuda() for _ in range(dist.get_world_size())]
-    dist.all_gather(gpu_counts, torch.tensor(loc_gpus).cuda())
+
+    # Create tensors more efficiently
+    local_gpu_tensor = torch.tensor(loc_gpus, device='cuda')
+    gpu_counts = [torch.zeros_like(local_gpu_tensor) for _ in range(world_size)]
+
+    dist.all_gather(gpu_counts, local_gpu_tensor)
     gpu_counts = [gpu.item() for gpu in gpu_counts]
+
     if len(set(gpu_counts)) != 1:
         raise ValueError("Mismatch in the number of GPUs across ranks")
-    else:
-        return gpu_counts[0]
+
+    return gpu_counts[0]
 
 def gather_node_info():
     glob_rank = dist.get_rank()
@@ -108,40 +137,45 @@ def gather_node_info():
     loc_info = {node_name: glob_rank}
     gathered_info = [None] * dist.get_world_size()
     dist.all_gather_object(gathered_info, loc_info)
-    node_rank_dict = {}
+
+    # Use defaultdict for more efficient dictionary operations
+    from collections import defaultdict
+    node_rank_dict = defaultdict(list)
+
     for info in gathered_info:
         for node, rank in info.items():
-            if node in node_rank_dict:
-                node_rank_dict[node].append(rank)
-            else:
-                node_rank_dict[node] = [rank]
-    for node in node_rank_dict:
-        node_rank_dict[node].sort()
-    return node_rank_dict
+            node_rank_dict[node].append(rank)
 
-def broadcast_dict(d, src, group=None):
-    l = [d]
-    dist.broadcast_object_list(l, src=src, group=group)
-    n = l[0]
-    return n
+    # Sort all rank lists and convert back to regular dict
+    return {node: sorted(ranks) for node, ranks in node_rank_dict.items()}
+
+def broadcast_dict(dictionary, src, group=None):
+    obj_list = [dictionary]
+    dist.broadcast_object_list(obj_list, src=src, group=group)
+    broadcasted_dict = obj_list[0]
+    return broadcasted_dict
 
 def all_gather_dict(loc_dict, group=None):
     serialized_dict = pickle.dumps(loc_dict)
-    tensor_dict = torch.ByteTensor(list(serialized_dict))
-    loc_len = torch.tensor(
-        [tensor_dict.size(0)], dtype=torch.int64, device=tensor_dict.device)
-    max_len = torch.tensor([0], dtype=torch.int64,
-                              device=tensor_dict.device)
-    dist.all_reduce(loc_len, op=dist.ReduceOp.MAX)
-    max_len = loc_len.item()
+    tensor_dict = torch.frombuffer(serialized_dict, dtype=torch.uint8)
+
+    # Get tensor length and find maximum across all processes
+    loc_len = torch.tensor(tensor_dict.size(0), dtype=torch.int64, device=tensor_dict.device)
+    max_len_tensor = loc_len.clone()
+    dist.all_reduce(max_len_tensor, op=dist.ReduceOp.MAX)
+    max_len = max_len_tensor.item()
+
+    # Pad tensor to maximum length
     if tensor_dict.size(0) < max_len:
-        tensor_dict = torch.cat([tensor_dict, torch.zeros(
-            max_len - tensor_dict.size(0), dtype=torch.uint8)])
-    group_size = dist.get_world_size() if group is None else len(
-        dist.get_process_group_ranks(group))
-    gathered_tensors = [torch.empty(
-        max_len, dtype=torch.uint8, device=tensor_dict.device) for _ in range(group_size)]
+        padding = torch.zeros(max_len - tensor_dict.size(0), dtype=torch.uint8, device=tensor_dict.device)
+        tensor_dict = torch.cat([tensor_dict, padding])
+
+    # Gather tensors from all processes
+    group_size = dist.get_world_size() if group is None else len(dist.get_process_group_ranks(group))
+    gathered_tensors = [torch.empty(max_len, dtype=torch.uint8, device=tensor_dict.device)
+                       for _ in range(group_size)]
     dist.all_gather(gathered_tensors, tensor_dict, group=group)
-    gathered_dicts = [pickle.loads(bytes(t.tolist()))
-                      for t in gathered_tensors]
+
+    # Deserialize gathered tensors back to dictionaries
+    gathered_dicts = [pickle.loads(t.numpy().tobytes()) for t in gathered_tensors]
     return gathered_dicts

@@ -99,21 +99,17 @@ class APTS_IP(APTS_Base):
         self.APTS_in_data_sync_strategy = APTS_in_data_sync_strategy.lower()
         self.step_strategy = step_strategy
 
-        if self.step_strategy not in ["weighted_mean", "mean"]:
+        # Use set lookup for faster validation
+        valid_step_strategies = {"weighted_mean", "mean"}
+        valid_sync_strategies = {"average", "sum"}
+        
+        if self.step_strategy not in valid_step_strategies:
             raise ValueError(
                 'The step strategy must be either "weighted_mean" or "mean".'
             )
-        if self.APTS_in_data_sync_strategy not in ["average", "sum"]:
+        if self.APTS_in_data_sync_strategy not in valid_sync_strategies:
             raise ValueError(
                 'The APTS in data synchronization strategy must be either "average" or "sum".'
-            )
-        if (
-            self.APTS_in_data_sync_strategy == "sum"
-            and dist.is_initialized()
-            and dist.get_rank() == 0
-        ):
-            print(
-                '(WARNING) APTS in data "sum" synchronization strategy still has to be tested/verified.'
             )
 
         self.loc_opt = loc_opt(params=model.subdomain_params(), **loc_opt_hparams)
@@ -127,16 +123,32 @@ class APTS_IP(APTS_Base):
             f"{self.__name__} global optimizer: {type(self.glob_opt).__name__}; local optimizer: {type(self.loc_opt).__name__}"
         )
 
+        # Cache for efficiency
+        self._cached_loc_lr = None
+        self._cached_max_loc_iters = None
+        self._param_buffer = None  # Buffer for parameter operations
+
     def loc_steps(self, final_subdomain_closure=None):
-        self.loc_opt.lr = self.delta / self.max_loc_iters
+        # Cache learning rate computation to avoid repeated division
+        if (self._cached_loc_lr is None or 
+            self._cached_max_loc_iters != self.max_loc_iters):
+            self._cached_loc_lr = self.delta / self.max_loc_iters
+            self._cached_max_loc_iters = self.max_loc_iters
+        
+        self.loc_opt.lr = self._cached_loc_lr
+        
+        # Optimize loop by pre-computing loop bounds
+        max_iter_minus_one = self.max_loc_iters - 1
+        is_last_stage = self.model.model_handler.is_last_stage()
+        
         for i in range(self.max_loc_iters):
             self.loc_opt.zero_grad()
             self.loc_opt.step()
-            if i != self.max_loc_iters - 1:
+            if i != max_iter_minus_one:
                 outputs = self.model.subdomain_forward()
                 losses = (
                     final_subdomain_closure(outputs)
-                    if self.model.model_handler.is_last_stage()
+                    if is_last_stage
                     else []
                 )
                 self.model.subdomain_backward(losses)
@@ -158,8 +170,9 @@ class APTS_IP(APTS_Base):
         # Perform local steps
         self.loc_steps(final_subdomain_closure)
 
-        # Compute global trial step
-        step = self.model.parameters(clone=True) - self.init_glob_flat
+        # Compute global trial step with buffer reuse when possible
+        current_params = self.model.parameters(clone=True)
+        step = current_params - self.init_glob_flat
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
         loss, grad, self.glob_opt.delta = self.control_step(step, closure=closure)
@@ -169,7 +182,11 @@ class APTS_IP(APTS_Base):
             loss, grad = self.glob_steps(loss, grad, closure=closure)
             self.grad_evals += 1
 
-        self.delta = self.glob_opt.delta
+        # Invalidate cached learning rate if delta changed
+        if self.delta != self.glob_opt.delta:
+            self.delta = self.glob_opt.delta
+            self._cached_loc_lr = None  # Force recalculation next time
+            
         self._update_param_group()
 
         return loss

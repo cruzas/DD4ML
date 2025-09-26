@@ -5,8 +5,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 
 from .base_pmw_model import BasePMWModel
-from .data_and_weight_parallelized_subdomain import \
-    DataAndWeightParallelizedSubdomain
+from .data_and_weight_parallelized_subdomain import DataAndWeightParallelizedSubdomain
 
 
 class ParallelizedModel(BasePMWModel):
@@ -18,8 +17,6 @@ class ParallelizedModel(BasePMWModel):
         num_subdomains is the next shell, which deals with data-parallelism (Domain Decomposition approach).
         num_replicas_per_subdomain refers to the number of replicas in each data-parallel subdomain (exact data parallelism to speed up computation within each subdomain).
         stage_list is the list of pipeline stages per replica in each subdomain
-
-        NOTE: REMAKE COMMENTS !!!!!!!!!!!!!!!!!!!
 
         E.g. num_subdomains = 2; num_replicas_per_subdomain = 3; stage_list = [(Layer0, Layer0dict), (Layer1, Layer1dict), (Layer2, Layer2dict)])
 
@@ -72,8 +69,9 @@ class ParallelizedModel(BasePMWModel):
             return gathered_state_dicts[0]
 
         sd, rep, _, _ = self.model_handler.rank_to_position()
+        replica_ranks = self.model_handler.replica_ranks()
+
         if sd == 0 and rep == 0:
-            replica_ranks = self.model_handler.replica_ranks()
             subdomain_state_dict = (
                 self.subdomain.weight_parallelized_model.subdomain.state_dict()
             )
@@ -99,11 +97,8 @@ class ParallelizedModel(BasePMWModel):
                 else:
                     return merged_state_dict
 
-        if self.rank == dst_rank:
+        if self.rank == dst_rank and (sd != 0 or rep != 0):
             return dist.recv_object_list(src=replica_ranks[0])[0]
-
-    def parameters(self):
-        return self.subdomain.weight_parallelized_model.subdomain.parameters()
 
     def configure_params(self, train_config):
         return self.subdomain.weight_parallelized_model.subdomain.configure_params(
@@ -158,24 +153,39 @@ class ParallelizedModel(BasePMWModel):
         if self.num_subdomains > 1:
             if method not in ["average", "sum"]:
                 raise ValueError(f"Method {method} is not supported.")
-            for param in self.subdomain_params():
-                dist.all_reduce(
-                    tensor=param.data,
-                    group=self.model_handler.get_layers_copy_group(mode="global"),
-                    op=dist.ReduceOp.SUM,
-                )
+
+            # Collect all parameters for batch processing
+            params = list(self.subdomain_params())
+            if params:
+                # Perform all_reduce operations
+                for param in params:
+                    dist.all_reduce(
+                        tensor=param.data,
+                        group=self.model_handler.get_layers_copy_group(mode="global"),
+                        op=dist.ReduceOp.SUM,
+                    )
+
+                # Batch the averaging operation if needed
                 if method == "average":
-                    param.data /= self.tot_replicas
+                    for param in params:
+                        param.data /= self.tot_replicas
 
     def sync_grads(self):
         if self.num_subdomains > 1:
-            for param in self.subdomain_params():
-                dist.all_reduce(
-                    tensor=param.grad,
-                    group=self.model_handler.get_layers_copy_group(mode="global"),
-                    op=dist.ReduceOp.SUM,
-                )
-                param.grad /= self.tot_replicas
+            # Batch all gradient tensors for more efficient communication
+            params_with_grads = [
+                param for param in self.subdomain_params() if param.grad is not None
+            ]
+            if params_with_grads:
+                for param in params_with_grads:
+                    dist.all_reduce(
+                        tensor=param.grad,
+                        group=self.model_handler.get_layers_copy_group(mode="global"),
+                        op=dist.ReduceOp.SUM,
+                    )
+                # Batch the division operation
+                for param in params_with_grads:
+                    param.grad /= self.tot_replicas
 
     def normalize_grads(self, p=torch.inf):
         norm = self.subdomain.weight_parallelized_model.grad_norm(p=p)
@@ -204,11 +214,22 @@ class ParallelizedModel(BasePMWModel):
         last_stage_ranks = self.model_handler.get_stage_ranks(
             stage_name="last", mode="local"
         )
-        for _ in range(max_new_tokens):
+
+        # Pre-allocate tensor to avoid repeated concatenations
+        batch_size = idx.size(0)
+        device = idx.device
+        dtype = idx.dtype
+        max_seq_len = idx.size(1) + max_new_tokens
+
+        # Create output tensor with pre-allocated space
+        output_idx = torch.zeros((batch_size, max_seq_len), dtype=dtype, device=device)
+        output_idx[:, : idx.size(1)] = idx
+        current_len = idx.size(1)
+
+        for i in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at block_size
-            idx_cond = (
-                idx if idx.size(1) <= self.block_size else idx[:, -self.block_size :]
-            )
+            start_pos = max(0, current_len - self.block_size)
+            idx_cond = output_idx[:, start_pos:current_len]
 
             # forward the model to get the logits for the index in the sequence
             logits = self.forward(
@@ -216,10 +237,8 @@ class ParallelizedModel(BasePMWModel):
             )[0]
 
             if not self.model_handler.is_last_stage():
-                # increase second dimension of idx by one to receive it in the broadcast
-                idx = torch.cat(
-                    (idx, torch.zeros((idx.size(0), 1), dtype=torch.long)), dim=1
-                )
+                # Pre-allocate space for the new token
+                current_len += 1
 
             if self.model_handler.is_last_stage():
                 # pluck the logits at the final step and scale by desired temperature
@@ -235,15 +254,19 @@ class ParallelizedModel(BasePMWModel):
                     idx_next = torch.multinomial(probs, num_samples=1)
                 else:
                     _, idx_next = torch.topk(probs, k=1, dim=-1)
-                # append sampled index to the running sequence and continue
-                idx = torch.cat((idx, idx_next), dim=1)
+                # add sampled index to the pre-allocated tensor
+                output_idx[:, current_len : current_len + 1] = idx_next
+                current_len += 1
 
-            # broadcast the idx to all replicas in the last stage
+            # broadcast the current sequence to all replicas in the last stage
+            current_sequence = output_idx[:, :current_len]
             idx_broadcast = dist.broadcast(
-                idx,
+                current_sequence,
                 src=last_stage_ranks[0],
                 group=self.model_handler.get_replica_group(),
                 async_op=True,
             )
             idx_broadcast.wait()
-        return idx
+            output_idx[:, :current_len] = current_sequence
+
+        return output_idx[:, :current_len]
