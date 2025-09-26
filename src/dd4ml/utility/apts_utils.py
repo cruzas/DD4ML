@@ -10,7 +10,8 @@ from .optimizer_utils import get_state_dict
 
 def _get_device():
     """Cache device to avoid repeated CUDA checks."""
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    from .utils import get_default_device
+    return get_default_device()
 
 
 def flatten_params(model, out=None):

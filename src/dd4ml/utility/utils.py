@@ -26,6 +26,11 @@ def broadcast_dict(d, src=0):
 # -----------------------------------------------------------------------------
 # From minGPT utils
 # -----------------------------------------------------------------------------
+def get_default_device():
+    """Get the default device (CUDA if available, otherwise CPU)."""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)

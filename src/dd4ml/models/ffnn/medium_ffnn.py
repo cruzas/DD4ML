@@ -33,6 +33,11 @@ class MediumFFNN(BaseFFNN):
             x = getattr(self, f"stage{i}")(x)
         return F.log_softmax(self.finish(x), dim=1)
 
+    def _create_fc_stages(self):
+        """Create FC stages using the factory helper."""
+        from ...utility.model_factory import create_fc_stage_modules
+        return create_fc_stage_modules(self.config)
+
     def as_model_dict(self):
         cfg = self.config
         md = {
@@ -68,37 +73,7 @@ class MediumFFNN(BaseFFNN):
                 "stage":    0,
                 "num_layer_shards": 1
             },
-            **{
-                f"stage{i}": {
-                    "callable": {
-                        "object": nn.Sequential,
-                        "settings": {
-                            "modules": [
-                                {
-                                    "object": nn.Linear,
-                                    "settings": {
-                                        "in_features":  cfg.fc_layers[i-2],
-                                        "out_features": cfg.fc_layers[i-1]
-                                    }
-                                },
-                                {
-                                    "object": nn.ReLU,
-                                    "settings": {"inplace": True}
-                                },
-                                {
-                                    "object": nn.Dropout,
-                                    "settings": {"p": cfg.dropout_p}
-                                }
-                            ]
-                        }
-                    },
-                    "dst":      {"to": [f"stage{i+1}"] if i < len(cfg.fc_layers) else ["finish"]},
-                    "rcv":      {"src": ["start"] if i == 2 else [f"stage{i-1}"], "strategy": None},
-                    "stage":    i - 1,
-                    "num_layer_shards": 1
-                }
-                for i in range(2, len(cfg.fc_layers) + 1)
-            },
+            **self._create_fc_stages(),
             "finish": {
                 "callable": {
                     "object": nn.Linear,

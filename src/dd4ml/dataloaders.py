@@ -243,7 +243,8 @@ class GeneralizedDistributedDataLoader(DataLoader):
     ):
         # Set default device if not provided
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            from .utility.utils import get_default_device
+            device = str(get_default_device())
 
         if "drop_last" in kwargs:
             print("(WARNING) drop_last will always be True in GeneralizedDistributedDataLoader.")
@@ -446,15 +447,17 @@ class Power_DL:
         dataset,
         batch_size=1,
         shuffle=False,
-        device=(
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        ),
+        device=None,  # Will use get_default_device() in __init__
         precision=torch.get_default_dtype(),
         overlapping_samples=0,
         SHARED_OVERLAP=False,  # if True: overlap samples are shared between minibatches
         mean=[],
         std=[],
     ):
+        # Set default device if not provided
+        if device is None:
+            from .utility.utils import get_default_device
+            device = get_default_device()
 
         self.dataset = dataset
         self.batch_size = batch_size
