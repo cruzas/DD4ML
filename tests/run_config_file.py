@@ -11,16 +11,15 @@ from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
-from dd4ml.utility import (
-    broadcast_dict,
-    detect_environment,
-    dprint,
-    find_free_port,
-    generic_run,
-    is_main_process,
-    prepare_distributed_environment,
-    set_seed,
-)
+from dd4ml.utility import (broadcast_dict, detect_environment, dprint,
+                           find_free_port, generic_run, is_main_process,
+                           prepare_distributed_environment, set_seed)
+
+# torch.autograd.set_detect_anomaly(True)
+# import warnings
+
+# warnings.filterwarnings("error")
+
 
 try:
     import wandb
@@ -306,7 +305,7 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 2
+    world_size = 1
     if args["use_pmw"]:
         world_size = (
             args["num_subdomains"]

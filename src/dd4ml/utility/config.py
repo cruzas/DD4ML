@@ -47,17 +47,34 @@ def make_std_config(config):
     has_tr = "tr" in optimizer_lower
 
     if not use_pmw:
-        keys_to_remove.update(["num_stages", "num_replicas_per_subdomain", "model_handler"])
+        keys_to_remove.update(
+            ["num_stages", "num_replicas_per_subdomain", "model_handler"]
+        )
         if not has_apts_d and not has_apts_p:
             keys_to_remove.add("num_subdomains")
 
     if not has_apts and not has_tr:
-        keys_to_remove.update([
-            "loc_opt", "loc_opt_hparams", "glob_opt", "glob_opt_hparams",
-            "max_loc_iters", "max_glob_iters", "norm_type", "delta",
-            "min_delta", "max_delta", "glob_pass", "foc", "dogleg",
-            "glob_second_order", "loc_second_order", "max_wolfe_iters", "mem_length"
-        ])
+        keys_to_remove.update(
+            [
+                "loc_opt",
+                "loc_opt_hparams",
+                "glob_opt",
+                "glob_opt_hparams",
+                "max_loc_iters",
+                "max_glob_iters",
+                "norm_type",
+                "delta",
+                "min_delta",
+                "max_delta",
+                "glob_pass",
+                "foc",
+                "dogleg",
+                "glob_second_order",
+                "loc_second_order",
+                "max_wolfe_iters",
+                "mem_length",
+            ]
+        )
 
     config = remove_keys(config, list(keys_to_remove))
     return config
@@ -68,7 +85,9 @@ def get_config(dataset_name: str, model_name: str, optimizer: str):
     Create the base configuration by combining system, data, model, and trainer settings.
     """
     from importlib import import_module
+
     from dd4ml.trainer import Trainer
+
     from .factory import DATASET_MAP, MODEL_MAP
 
     # Early validation

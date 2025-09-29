@@ -55,6 +55,7 @@ def closure(
     data_chunks_amount=1,
     grad_norm_clip=None,
     outputs_only=False,
+    precision_dtype=torch.float32,
 ):
     """
     NOTE: Losses from different chunks are averaged.
@@ -115,10 +116,10 @@ def closure(
 
         if has_model_handler and model.model_handler.is_last_stage():
             for i, out in enumerate(outputs):
-                losses[i] = criterion(out, targets[i].to(out.device))
+                losses[i] = criterion(out, targets[i].to(out.device).long())
             loss = torch.stack(losses).mean().to(model.tensor_device)
         elif not has_model_handler:
-            loss = criterion(outputs, targets.to(outputs.device))
+            loss = criterion(outputs, targets.to(outputs.device).long())
 
         # Distributed processing (only if model_handler is present)
         if has_model_handler:
@@ -132,7 +133,9 @@ def closure(
                         op=dist.ReduceOp.SUM,
                         group=model.model_handler.get_layers_copy_group(mode="global"),
                     )
-                    loss.div_(model.model_handler.tot_replicas)  # In-place division (safe in distributed context)
+                    loss.div_(
+                        model.model_handler.tot_replicas
+                    )  # In-place division (safe in distributed context)
                 last_ranks = model.model_handler.get_stage_ranks(
                     stage_name="last", mode="global"
                 )
@@ -149,7 +152,9 @@ def closure(
                         op=dist.ReduceOp.SUM,
                         group=model.model_handler.get_layers_copy_group(mode="local"),
                     )
-                    loss.div_(model.num_replicas_per_subdomain)  # In-place division (safe in distributed context)
+                    loss.div_(
+                        model.num_replicas_per_subdomain
+                    )  # In-place division (safe in distributed context)
                 last_stage_ranks = model.model_handler.get_stage_ranks(
                     stage_name="last", mode="local"
                 )
@@ -166,9 +171,16 @@ def closure(
             and dist.is_initialized()
             and dist.get_world_size() > 1
         ):
-            loss = loss.to(torch.float64)
+            # Use specified precision for distributed operations
+            # Ensure consistent precision throughout the reduction
+            original_dtype = loss.dtype
+            loss = loss.to(precision_dtype)
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
-            loss.div_(dist.get_world_size())  # In-place division (safe after all_reduce)
+            loss.div_(
+                dist.get_world_size()
+            )  # In-place division (safe after all_reduce)
+            # Convert back to original dtype if needed (but keep precision_dtype for training)
+            # loss = loss.to(original_dtype) if original_dtype != precision_dtype else loss
 
         # Compute gradients
         if compute_grad and torch.is_grad_enabled():
@@ -214,6 +226,7 @@ def list_flattener(l):
     """
     Flattens a list of lists of lists of ... to a single list.
     """
+
     def _flatten(lst):
         result = []
         for item in lst:
@@ -222,6 +235,7 @@ def list_flattener(l):
             else:
                 result.append(item)
         return result
+
     return _flatten(l)
 
 

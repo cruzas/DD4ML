@@ -57,6 +57,10 @@ parameters:
     value: 42
   tol:
     value: 1e-6
+  shuffle:
+    value: False
+  precision:
+    value: "float32"  # Options: "float32", "float64"
   batch_inc_factor:
     value: 1.0
   overlap:

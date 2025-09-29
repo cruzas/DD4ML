@@ -13,7 +13,7 @@ from itertools import chain, count
 
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Subset
 from torch.utils.data.distributed import DistributedSampler
 
 from dd4ml.datasets.deeponet_sine import SineOperatorDataset
@@ -57,6 +57,12 @@ class Trainer:
         C = CN()
         # tolerance for convergence
         C.tol = 1e-6
+        # data shuffling
+        C.shuffle = True
+        # random seed for reproducibility
+        C.seed = 42
+        # floating point precision for distributed training
+        C.precision = "float32"  # Options: "float32", "float64"
         # device
         C.device = "auto"
         # data loader workers
@@ -118,6 +124,9 @@ class Trainer:
         self.test_dataset = test_dataset
         self.callbacks = defaultdict(list)
 
+        # Set up precision handling FIRST
+        self.precision_dtype = torch.float32 if config.precision == "float32" else torch.float64
+
         # determine the device we'll train on
         if config.device == "auto":
             # print("Doing auto device selection...")
@@ -130,12 +139,34 @@ class Trainer:
             self.device = config.device
 
         self.model = self.model.to(self.device)
+        # Set model precision to match training precision
+        if self.precision_dtype == torch.float64:
+            self.model = self.model.double()
+            # Ensure optimizer uses double precision parameters
+            if hasattr(self.optimizer, 'param_groups'):
+                for group in self.optimizer.param_groups:
+                    for p in group['params']:
+                        if p.dtype != torch.float64:
+                            p.data = p.data.double()
+        else:
+            self.model = self.model.float()
         # adaptive-batch state
         self.current_batch_size = config.batch_size
         self.max_batch_size_reached = False
         self.last_loss = float("inf")
         self.grad_evals = 0.0
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
+
+        # Cache optimizer type checks for performance
+        optimizer_name = self.optimizer.__class__.__name__.lower()
+        self._is_tr_or_apts = "tr" in optimizer_name or "apts" in optimizer_name
+        self._is_apts_ip = "apts_ip" in optimizer_name
+        self._is_apts_pinn = "apts_pinn" in optimizer_name
+        self._is_asntr = "asntr" in optimizer_name
+        self._is_lssr1_tr = "lssr1_tr" in optimizer_name
+
+        # Set up precision handling
+        self.precision_dtype = torch.float32 if config.precision == "float32" else torch.float64
 
         # Pre-computed efficiency constants
         self._dataset_size_inv = 1.0 / len(self.train_dataset)
@@ -146,15 +177,9 @@ class Trainer:
 
         # Pre-allocated buffers for metric computation (guaranteed safe in @torch.no_grad())
         self._metric_buffer = torch.zeros(2, device=self.device, dtype=torch.float32)
-        self._perplexity_buffer = torch.zeros(2, device=self.device, dtype=torch.float32)
-
-        # Cache optimizer type checks for performance
-        optimizer_name = self.optimizer.__class__.__name__.lower()
-        self._is_tr_or_apts = "tr" in optimizer_name or "apts" in optimizer_name
-        self._is_apts_ip = "apts_ip" in optimizer_name
-        self._is_apts_pinn = "apts_pinn" in optimizer_name
-        self._is_asntr = "asntr" in optimizer_name
-        self._is_lssr1_tr = "lssr1_tr" in optimizer_name
+        self._perplexity_buffer = torch.zeros(
+            2, device=self.device, dtype=torch.float32
+        )
 
         # timing
         self.total_start_time = 0.0  # for computing the total running time
@@ -231,7 +256,7 @@ class Trainer:
                     cfg.overlap = 0
                 if pp_bs < 1:
                     raise ValueError(f"Batch size {pp_bs} < 1; increase batch size.")
-                shuffle_flag = not isinstance(ds_train, AllenCahn1DDataset)
+                shuffle_flag = cfg.shuffle and not isinstance(ds_train, AllenCahn1DDataset)
                 if shuffle_flag:
                     base_train = RandomSampler(ds_train)
                 else:
@@ -265,14 +290,59 @@ class Trainer:
                         f"Per-process batch size {pp_bs} < 1; increase global batch size."
                     )
 
-                shuffle_flag = not isinstance(ds_train, AllenCahn1DDataset)
-                base_train = DistributedSampler(
-                    ds_train,
-                    num_replicas=world_size,
-                    rank=rank,
-                    shuffle=shuffle_flag,
-                    drop_last=self._apts_ip_present(),
-                )
+                shuffle_flag = cfg.shuffle and not isinstance(ds_train, AllenCahn1DDataset)
+
+                # For deterministic distributed SGD, we want identical data ordering
+                # across different numbers of processes
+                if shuffle_flag:
+                    base_train = DistributedSampler(
+                        ds_train,
+                        num_replicas=world_size,
+                        rank=rank,
+                        shuffle=True,
+                        drop_last=self._apts_ip_present(),
+                        seed=getattr(cfg, 'seed', 42),
+                    )
+                else:
+                    # For deterministic distributed SGD: ensure identical batch composition
+                    # regardless of number of processes by using consistent global batching
+
+                    # Create a custom sampler that ensures all processes see the same logical batches
+                    # but distributed across processes
+                    class DeterministicDistributedSampler:
+                        def __init__(self, dataset, num_replicas, rank, batch_size):
+                            self.dataset_size = len(dataset)
+                            self.num_replicas = num_replicas
+                            self.rank = rank
+                            self.batch_size = batch_size
+
+                            # Calculate how many complete global batches we can make
+                            self.num_global_batches = self.dataset_size // batch_size
+
+                        def __iter__(self):
+                            indices = []
+                            # For each global batch, distribute samples across processes
+                            for global_batch_idx in range(self.num_global_batches):
+                                batch_start = global_batch_idx * self.batch_size
+                                batch_end = batch_start + self.batch_size
+                                global_batch = list(range(batch_start, batch_end))
+
+                                # Distribute this global batch across processes
+                                per_process_size = len(global_batch) // self.num_replicas
+                                start_idx = self.rank * per_process_size
+                                end_idx = start_idx + per_process_size
+
+                                indices.extend(global_batch[start_idx:end_idx])
+
+                            return iter(indices)
+
+                        def __len__(self):
+                            per_process_size = self.batch_size // self.num_replicas
+                            return self.num_global_batches * per_process_size
+
+                    base_train = DeterministicDistributedSampler(
+                        ds_train, world_size, rank, self.current_batch_size
+                    )
                 train_ov = OverlapBatchSampler(
                     base_sampler=base_train,
                     batch_size=pp_bs,
@@ -359,6 +429,7 @@ class Trainer:
                         rank=rank,
                         shuffle=False,
                         drop_last=self._apts_ip_present(),
+                        seed=getattr(cfg, 'seed', 42),
                     ),
                     num_workers=cfg.num_workers,
                     pin_memory=True,
@@ -644,7 +715,7 @@ class Trainer:
                         crit.current_xyz = x
                     if hasattr(crit, "current_xt"):
                         crit.current_xt = x
-                    loss = crit(out, y).item()
+                    loss = crit(out, y.long()).item()
                     bs = y.size(0)
                     total += loss * bs
                     n += bs
@@ -666,8 +737,8 @@ class Trainer:
 
     def _move_to_device(self, data):
         if isinstance(data, (list, tuple)):
-            return type(data)(d.to(self.device) for d in data)
-        return data.to(self.device)
+            return type(data)(d.to(self.device, dtype=self.precision_dtype) for d in data)
+        return data.to(self.device, dtype=self.precision_dtype)
 
     def compute_accuracy(self):
         """Compute test accuracy across all processes (and pipeline stages)."""
@@ -753,7 +824,7 @@ class Trainer:
                 # Flatten logits and targets
                 logits = outputs.view(-1, outputs.size(-1))
                 targets = y.view(-1)
-                loss = self.criterion(logits, targets)
+                loss = self.criterion(logits, targets.long())
                 total_loss += loss.item() * targets.numel()
                 total_tokens += targets.numel()
 
@@ -801,6 +872,7 @@ class Trainer:
                 self.model,
                 data_chunks_amount=self.config.data_chunks_amount,
                 compute_grad=False,
+                precision_dtype=self.precision_dtype,
             )
             batch_loss = c()
             batch_grad = None
@@ -814,6 +886,7 @@ class Trainer:
                 data_chunks_amount=self.config.data_chunks_amount,
                 compute_grad=True,
                 grad_norm_clip=self.config.grad_norm_clip,
+                precision_dtype=self.precision_dtype,
             )
 
             sig = inspect.signature(self.optimizer.step).parameters
@@ -822,7 +895,7 @@ class Trainer:
 
                 def final_subdomain_closure(outputs, y=y):
                     ys = y.chunk(len(outputs))
-                    return [self.criterion(o, yc) for o, yc in zip(outputs, ys)]
+                    return [self.criterion(o, yc.long()) for o, yc in zip(outputs, ys)]
 
                 step_args = {
                     "closure": general,
@@ -848,6 +921,7 @@ class Trainer:
                     data_chunks_amount=1,
                     compute_grad=True,
                     grad_norm_clip=self.config.grad_norm_clip,
+                    precision_dtype=self.precision_dtype,
                 )
                 step_args = {
                     "closure_main": general,
@@ -858,6 +932,14 @@ class Trainer:
                 step_args = {"closure": general}
 
             result = self.optimizer.step(**step_args)
+
+            # Debug: verify optimizer result consistency (disabled)
+            # if hasattr(self, 'epoch_num') and self.epoch_num <= 2:
+            #     if dist.is_initialized():
+            #         print(f"E{self.epoch_num} P{dist.get_rank()}: optimizer_result={result:.6f}")
+            #     else:
+            #         print(f"E{self.epoch_num} P0: optimizer_result={result:.6f}")
+
             # self.grad_evals += getattr(self.optimizer, "grad_evals", 0) / len(
             #     self.train_loader
             # )
@@ -923,6 +1005,7 @@ class Trainer:
                 model=self.model,
                 data_chunks_amount=self.config.data_chunks_amount,
                 compute_grad=True,
+                precision_dtype=self.precision_dtype,
             )
             batch_loss = warmup()
             batch_grad = None
@@ -937,6 +1020,7 @@ class Trainer:
             data_chunks_amount=self.config.data_chunks_amount,
             compute_grad=True,
             grad_norm_clip=self.config.grad_norm_clip,
+            precision_dtype=self.precision_dtype,
         )
 
         sig = inspect.signature(self.optimizer.step).parameters
@@ -944,7 +1028,7 @@ class Trainer:
 
             def final_subdomain_closure(outputs, y=y):
                 ys = y.chunk(len(outputs))
-                return [self.criterion(o, yc) for o, yc in zip(outputs, ys)]
+                return [self.criterion(o, yc.long()) for o, yc in zip(outputs, ys)]
 
             step_args = {
                 "closure": general,
@@ -970,6 +1054,7 @@ class Trainer:
                 data_chunks_amount=1,
                 compute_grad=True,
                 grad_norm_clip=self.config.grad_norm_clip,
+                precision_dtype=self.precision_dtype,
             )
             step_args = {
                 "closure_main": general,
@@ -1058,6 +1143,15 @@ class Trainer:
 
                 batch_loss, batch_grad, bs = self._train_one_batch(x, y, first)
                 total_samples += bs
+                # Debug: verify data ordering consistency (disabled)
+                # if self.epoch_num <= 2 and total_samples <= 20000:  # Only first few batches
+                #     if dist.is_initialized():
+                #         print(f"E{self.epoch_num} P{dist.get_rank()}: first_5_labels={y[:5].tolist()}, batch_size={bs}")
+                #     else:
+                #         print(f"E{self.epoch_num} P0: first_5_labels={y[:5].tolist()}, batch_size={bs}")
+                # print(
+                #     f"Process {dist.get_rank()}: batch_size={len(y)}, total_samples_so_far={total_samples}"
+                # )
 
                 # weight by global sample count (optimized with pre-computed scaling factor)
                 epoch_loss += batch_loss * bs * self._loss_scaling_factor

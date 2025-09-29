@@ -10,11 +10,11 @@ parameters:
   effective_batch_size:
     value: 10000 
   epochs: 
-    value: 80
+    value: 3
   max_iters:
     value: 4000
   learning_rate:
-    value: 0.1
+    value: 0.01
   dataset_name: 
     value: "mnist"
   model_name: 
@@ -25,6 +25,10 @@ parameters:
     value: 42
   tol:
     value: 1e-9
+  shuffle:
+    value: False
+  precision:
+    value: "float64"  # Options: "float32", "float64"
   # For parallel computation
   num_subdomains:
     value: 1
@@ -41,6 +45,6 @@ parameters:
   overlap:
     value: 0.0
   contiguous_subdomains:
-    value: True
+    value: False
   exclusive:
     value: True
