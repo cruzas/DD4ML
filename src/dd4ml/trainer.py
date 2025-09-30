@@ -125,7 +125,9 @@ class Trainer:
         self.callbacks = defaultdict(list)
 
         # Set up precision handling FIRST
-        self.precision_dtype = torch.float32 if config.precision == "float32" else torch.float64
+        self.precision_dtype = (
+            torch.float32 if config.precision == "float32" else torch.float64
+        )
 
         # determine the device we'll train on
         if config.device == "auto":
@@ -143,9 +145,9 @@ class Trainer:
         if self.precision_dtype == torch.float64:
             self.model = self.model.double()
             # Ensure optimizer uses double precision parameters
-            if hasattr(self.optimizer, 'param_groups'):
+            if hasattr(self.optimizer, "param_groups"):
                 for group in self.optimizer.param_groups:
-                    for p in group['params']:
+                    for p in group["params"]:
                         if p.dtype != torch.float64:
                             p.data = p.data.double()
         else:
@@ -166,7 +168,9 @@ class Trainer:
         self._is_lssr1_tr = "lssr1_tr" in optimizer_name
 
         # Set up precision handling
-        self.precision_dtype = torch.float32 if config.precision == "float32" else torch.float64
+        self.precision_dtype = (
+            torch.float32 if config.precision == "float32" else torch.float64
+        )
 
         # Pre-computed efficiency constants
         self._dataset_size_inv = 1.0 / len(self.train_dataset)
@@ -256,7 +260,9 @@ class Trainer:
                     cfg.overlap = 0
                 if pp_bs < 1:
                     raise ValueError(f"Batch size {pp_bs} < 1; increase batch size.")
-                shuffle_flag = cfg.shuffle and not isinstance(ds_train, AllenCahn1DDataset)
+                shuffle_flag = cfg.shuffle and not isinstance(
+                    ds_train, AllenCahn1DDataset
+                )
                 if shuffle_flag:
                     base_train = RandomSampler(ds_train)
                 else:
@@ -290,7 +296,9 @@ class Trainer:
                         f"Per-process batch size {pp_bs} < 1; increase global batch size."
                     )
 
-                shuffle_flag = cfg.shuffle and not isinstance(ds_train, AllenCahn1DDataset)
+                shuffle_flag = cfg.shuffle and not isinstance(
+                    ds_train, AllenCahn1DDataset
+                )
 
                 # For deterministic distributed SGD, we want identical data ordering
                 # across different numbers of processes
@@ -301,7 +309,7 @@ class Trainer:
                         rank=rank,
                         shuffle=True,
                         drop_last=self._apts_ip_present(),
-                        seed=getattr(cfg, 'seed', 42),
+                        seed=getattr(cfg, "seed", 42),
                     )
                 else:
                     # For deterministic distributed SGD: ensure identical batch composition
@@ -328,7 +336,9 @@ class Trainer:
                                 global_batch = list(range(batch_start, batch_end))
 
                                 # Distribute this global batch across processes
-                                per_process_size = len(global_batch) // self.num_replicas
+                                per_process_size = (
+                                    len(global_batch) // self.num_replicas
+                                )
                                 start_idx = self.rank * per_process_size
                                 end_idx = start_idx + per_process_size
 
@@ -429,7 +439,7 @@ class Trainer:
                         rank=rank,
                         shuffle=False,
                         drop_last=self._apts_ip_present(),
-                        seed=getattr(cfg, 'seed', 42),
+                        seed=getattr(cfg, "seed", 42),
                     ),
                     num_workers=cfg.num_workers,
                     pin_memory=True,
@@ -737,7 +747,9 @@ class Trainer:
 
     def _move_to_device(self, data):
         if isinstance(data, (list, tuple)):
-            return type(data)(d.to(self.device, dtype=self.precision_dtype) for d in data)
+            return type(data)(
+                d.to(self.device, dtype=self.precision_dtype) for d in data
+            )
         return data.to(self.device, dtype=self.precision_dtype)
 
     def compute_accuracy(self):
@@ -841,11 +853,9 @@ class Trainer:
     def _train_one_batch(self, x, y, first_grad: bool):
         """Runs forward/backward/step on a single (x,y). Returns (batch_loss, batch_grad, bs)."""
         rank = dist.get_rank() if dist.is_initialized() else 0
-        print(f"Rank {rank}: _train_one_batch called, first_grad={first_grad}")
         x = self._move_to_device(x)
         y = self._move_to_device(y)
         bs = y.size(0)
-        print(f"Rank {rank}: Data moved to device, bs={bs}")
 
         # Special handling for PINN datasets
         if isinstance(
@@ -868,7 +878,6 @@ class Trainer:
 
         # warm-up closure if needed
         if first_grad:
-            print(f"Rank {rank}: Creating warm-up closure")
             c = closure(
                 x,
                 y,
@@ -880,16 +889,10 @@ class Trainer:
             )
             # Add barrier to ensure all processes are synchronized before calling closure
             if dist.is_initialized():
-                print(f"Rank {rank}: Waiting at barrier before calling closure")
                 dist.barrier()
-                print(f"Rank {rank}: Barrier passed, calling warm-up closure")
-            else:
-                print(f"Rank {rank}: Calling warm-up closure")
             batch_loss = c()
-            print(f"Rank {rank}: Warm-up closure completed, batch_loss={batch_loss}")
             batch_grad = None
         else:
-            print(f"Rank {rank}: Creating full-gradient closure")
             # full-gradient closure
             general = closure(
                 x,
@@ -946,16 +949,6 @@ class Trainer:
 
             result = self.optimizer.step(**step_args)
 
-            # Debug: verify optimizer result consistency (disabled)
-            # if hasattr(self, 'epoch_num') and self.epoch_num <= 2:
-            #     if dist.is_initialized():
-            #         print(f"E{self.epoch_num} P{dist.get_rank()}: optimizer_result={result:.6f}")
-            #     else:
-            #         print(f"E{self.epoch_num} P0: optimizer_result={result:.6f}")
-
-            # self.grad_evals += getattr(self.optimizer, "grad_evals", 0) / len(
-            #     self.train_loader
-            # )
             if not self._apts_ip_present():
                 if hasattr(self.optimizer, "grad_evals"):
                     self.grad_evals += (
@@ -1118,7 +1111,10 @@ class Trainer:
         # Ensure model and optimizer precision consistency for float64 training
         if self.precision_dtype == torch.float64:
             self.model = self.model.double()
-            if hasattr(self.optimizer, "loc_model") and self.optimizer.loc_model is not None:
+            if (
+                hasattr(self.optimizer, "loc_model")
+                and self.optimizer.loc_model is not None
+            ):
                 # APTS-based optimizers keep a separate local model that
                 # is cloned during initialisation.  When switching the main
                 # model to ``float64`` we must also convert this local copy,
@@ -1142,15 +1138,11 @@ class Trainer:
             f"Total number of training samples per process: {self.num_training_samples_per_process}"
         )
         rank = dist.get_rank() if dist.is_initialized() else 0
-        print(f"Rank {rank}: About to enter training loop")
 
         while self.epoch_num <= self.config.epochs:
-            print(f"Rank {rank}: Starting epoch {self.epoch_num}")
             epoch_loss = 0.0
             total_samples = 0
-            print(f"Rank {rank}: Creating iterator from train_loader")
             it = iter(self.train_loader)
-            print(f"Rank {rank}: Iterator created successfully")
             first = self.epoch_num == 0
 
             if hasattr(self.train_loader.sampler, "set_epoch"):
@@ -1159,10 +1151,8 @@ class Trainer:
 
             # loop until this rank has seen its shard (plus any overlap)
             while total_samples < self.num_training_samples_per_process:
-                print(f"Rank {rank}: Getting next batch (total_samples={total_samples})")
                 try:
                     batch = next(it)
-                    print(f"Rank {rank}: Got batch successfully, batch type: {type(batch)}, len: {len(batch) if hasattr(batch, '__len__') else 'N/A'}")
                 except StopIteration:
                     it = iter(self.train_loader)
                     batch = next(it)
@@ -1172,19 +1162,9 @@ class Trainer:
                     x = torch.cat([x, t], dim=1)
                 else:
                     x, y = batch
-                print(f"Rank {rank}: x.shape={x.shape}, y.shape={y.shape if hasattr(y, 'shape') else len(y)}")
 
                 batch_loss, batch_grad, bs = self._train_one_batch(x, y, first)
                 total_samples += bs
-                # Debug: verify data ordering consistency (disabled)
-                # if self.epoch_num <= 2 and total_samples <= 20000:  # Only first few batches
-                #     if dist.is_initialized():
-                #         print(f"E{self.epoch_num} P{dist.get_rank()}: first_5_labels={y[:5].tolist()}, batch_size={bs}")
-                #     else:
-                #         print(f"E{self.epoch_num} P0: first_5_labels={y[:5].tolist()}, batch_size={bs}")
-                # print(
-                #     f"Process {dist.get_rank()}: batch_size={len(y)}, total_samples_so_far={total_samples}"
-                # )
 
                 # weight by global sample count (optimized with pre-computed scaling factor)
                 epoch_loss += batch_loss * bs * self._loss_scaling_factor
