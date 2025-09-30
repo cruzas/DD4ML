@@ -376,6 +376,10 @@ class APTS_Base(Optimizer):
                 # Check if TR or LSSR1_TR optimizer
                 if isinstance(optim, (TR, LSSR1_TR)):
                     loss, grad = optim.step(closure=closure, loss=loss, grad=grad)
+                elif isinstance(optim, TRAdam):
+                    # For TRAdam, only use closure parameter
+                    loss = optim.step(closure=closure)
+                    grad = optim._flat_grad()
                 else:
                     # For ASNTR, we need to provide closure_d as well
                     loss, grad = optim.step(
@@ -390,7 +394,7 @@ class APTS_Base(Optimizer):
                 )
 
             # Stop iterations if gradient norm is below tolerance
-            if grad.norm(p=self.norm_type) <= optim.tol:
+            if hasattr(optim, 'tol') and grad.norm(p=self.norm_type) <= optim.tol:
                 break
 
         return loss, grad

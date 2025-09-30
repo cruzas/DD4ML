@@ -192,6 +192,13 @@ def get_config_model_and_trainer(args, wandb_config):
             model = DDP(
                 model, device_ids=[loc_rank] if torch.cuda.is_available() else None
             )
+
+    # Print total number of parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model: {model_config.model_class.__name__}")
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
     criterion_key = (
         wandb_config["criterion"] if wandb_config is not None else args["criterion"]
     )

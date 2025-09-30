@@ -321,20 +321,18 @@ def run_local(args: dict, sweep_config: dict) -> None:
                 # Update args with config file values
                 args[key] = value_dict["value"]
 
-    world_size = 2
+    # Always calculate world_size based on config values
+    world_size = (
+        args["num_subdomains"]
+        * args["num_replicas_per_subdomain"]
+        * args["num_stages"]
+    )
     if args["use_pmw"]:
-        calculated_world_size = (
-            args["num_subdomains"]
-            * args["num_replicas_per_subdomain"]
-            * args["num_stages"]
-        )
-        # Use the calculated world_size, don't force minimum of 1
-        world_size = calculated_world_size
         print(
             f"PMW enabled: world_size = {args['num_subdomains']} * {args['num_replicas_per_subdomain']} * {args['num_stages']} = {world_size}"
         )
     else:
-        print(f"PMW disabled: using default world_size = {world_size}")
+        print(f"PMW disabled: world_size = {args['num_subdomains']} * {args['num_replicas_per_subdomain']} * {args['num_stages']} = {world_size}")
 
     def spawn_training() -> None:
         if world_size == 1:
@@ -398,7 +396,8 @@ def run_cluster(args: dict, sweep_config: dict) -> None:
     wait_and_exit(rank)
 
 
-if __name__ == "__main__":
+def main_single_run():
+    """Run a single experiment with command line arguments."""
     args = vars(parse_cmd_args())
     try:
         with open(args["sweep_config"], "r") as f:
@@ -415,3 +414,7 @@ if __name__ == "__main__":
         run_local(args, sweep_config)
     else:
         run_cluster(args, sweep_config)
+
+
+if __name__ == "__main__":
+    main_single_run()

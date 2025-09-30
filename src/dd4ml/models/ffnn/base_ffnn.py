@@ -16,6 +16,7 @@ class BaseFFNN(BaseModel):
         C.input_features = None  # dimension of flattened input
         C.output_classes = None
         C.fc_layers = None  # list of hidden sizes
+        C.width = None  # width of hidden layers (overrides fc_layers values)
         C.dropout_p = 0.1
         return C
 
@@ -36,6 +37,11 @@ class BaseFFNN(BaseModel):
                     "ffnn-large": {"fc_layers": [512, 256, 128]},
                 }[config.model_type]
             )
+
+        # If width is specified, override fc_layers with uniform width
+        if config.width is not None and config.fc_layers is not None:
+            num_layers = len(config.fc_layers)
+            config.fc_layers = [config.width] * num_layers
 
         self.input_features = config.input_features
         self.output_classes = config.output_classes

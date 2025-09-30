@@ -20,6 +20,8 @@ parameters:
     value: "mnist"
   model_name:
     value: "ffnn"
+  width:
+    value: None
   criterion:
     value: "cross_entropy"
   seed:
@@ -41,9 +43,9 @@ parameters:
   accumulation_steps:
     value: None
   batch_inc_factor:
-    value: 1.5
+    value: 1.0
   overlap:
-    value: 0.33
+    value: 0.0
   contiguous_subdomains:
     value: False
   exclusive:

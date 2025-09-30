@@ -6,11 +6,11 @@ parameters:
   optimizer: 
     value: "apts_ip" 
   batch_size:
-    value: 200
+    value: 64
   effective_batch_size:
-    value: 200
+    value: 64
   num_stages:
-    value: 2
+    value: 8
   num_subdomains:
     value: 1
   num_replicas_per_subdomain:
@@ -44,11 +44,13 @@ parameters:
   max_delta:
     value: 0.5
   dataset_name: 
-    value: "cifar10" 
+    value: "tinyshakespeare" 
   model_name: 
-    value: "simple_resnet"
+  width:
+    value: None
+    value: "minigpt"
   criterion:
-    value: "cross_entropy"
+    value: "cross_entropy_transformers"
   gradient_accumulation:
     value: False
   accumulation_steps:

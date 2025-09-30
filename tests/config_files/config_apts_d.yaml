@@ -45,8 +45,10 @@ parameters:
     value: 1.0
   dataset_name: 
     value: "mnist" 
-  model_name: 
+  model_name:
     value: "medium_ffnn"
+  width:
+    value: None
   criterion:
     value: "cross_entropy"
   gradient_accumulation:

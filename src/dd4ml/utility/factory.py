@@ -82,6 +82,8 @@ DATASET_MAP = {
 MODEL_MAP = {
     "ffnn": ("dd4ml.models.ffnn.simple_ffnn", "SimpleFFNN"),
     "medium_ffnn": ("dd4ml.models.ffnn.medium_ffnn", "MediumFFNN"),
+    "large_ffnn": ("dd4ml.models.ffnn.large_ffnn", "LargeFFNN"),
+    "xl_ffnn": ("dd4ml.models.ffnn.xl_ffnn", "XLFFNN"),
     "simple_cnn": ("dd4ml.models.cnn.simple_cnn", "SimpleCNN"),
     "medium_cnn": ("dd4ml.models.cnn.medium_cnn", "MediumCNN"),
     "big_cnn": ("dd4ml.models.cnn.big_cnn", "BigCNN"),

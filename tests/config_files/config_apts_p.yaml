@@ -46,6 +46,8 @@ parameters:
   dataset_name: 
     value: "mnist" 
   model_name: 
+  width:
+    value: None
     value: "medium_ffnn"
   criterion:
     value: "cross_entropy"
