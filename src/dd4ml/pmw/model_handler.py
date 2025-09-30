@@ -154,7 +154,7 @@ class ModelHandler:
 
         lst = [[]]
         consecutive_layer = True
-        for layer_name in self._stage_data["layers"]:
+        for layer_name in self._stage_data_cache["layers"]:
             if consecutive_layer:
                 lst[-1].append(layer_name)
             else:

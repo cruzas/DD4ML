@@ -18,11 +18,19 @@ class BasePMWModel(nn.Module):
         self.backend = dist.get_backend()
 
         # Single device computation to avoid redundancy
-        self.device = (
-            torch.device(f"cuda:{self.local_rank}")
-            if torch.cuda.is_available()
-            else torch.device("cpu")
-        )
+        # Add safety guard for CUDA device initialization in multiprocessing
+        try:
+            self.device = (
+                torch.device(f"cuda:{self.local_rank}")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
+            # Test device accessibility
+            if self.device.type == "cuda":
+                torch.tensor([0.0], device=self.device)
+        except (RuntimeError, AssertionError) as e:
+            print(f"Warning: CUDA device initialization failed, falling back to CPU: {e}")
+            self.device = torch.device("cpu")
         # Maintain backward compatibility
         self.tensor_device = self.device
         self.default_device = self.device

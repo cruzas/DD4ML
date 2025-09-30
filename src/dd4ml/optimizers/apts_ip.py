@@ -83,6 +83,9 @@ class APTS_IP(APTS_Base):
             nu_inc=nu_inc,
             inc_factor=inc_factor,
             dec_factor=dec_factor,
+            criterion=None,  # APTS_IP doesn't use criterion like other APTS variants
+            device=None,     # Will auto-detect device
+            nr_models=1,     # Default for APTS_IP
             glob_opt=glob_opt,
             glob_opt_hparams=glob_opt_hparams,
             loc_opt=loc_opt,
@@ -97,6 +100,13 @@ class APTS_IP(APTS_Base):
         # Synchronize non-parameter attributes from the first param group.
         self._sync_attributes_from_param_group()
         self.APTS_in_data_sync_strategy = APTS_in_data_sync_strategy.lower()
+
+        # Override parent's buffer initialization to avoid PMW multiprocessing issues
+        # Set buffers to None since APTS_IP doesn't use the same buffer-based approach
+        self._flat_params_buffer = None
+        self._loc_flat_buffer = None
+        if hasattr(self, '_diff_cache'):
+            self._diff_cache = None
         self.step_strategy = step_strategy
 
         # Use set lookup for faster validation
@@ -114,8 +124,13 @@ class APTS_IP(APTS_Base):
 
         self.loc_opt = loc_opt(params=model.subdomain_params(), **loc_opt_hparams)
 
+        # Configure the global optimizer created by parent class
+        # Add safety check for model methods
+        if not hasattr(self.model, 'grad') or not hasattr(self.model, 'parameters'):
+            raise AttributeError("Model must have 'grad' and 'parameters' methods for APTS_IP")
+
         glob_opt_hparams["flat_params"] = self.model.parameters()
-        self.glob_opt = glob_opt(params=list(model.parameters()), **glob_opt_hparams)
+        # Parent class already created self.glob_opt, just update its custom functions
         self.glob_opt._flat_grads_fn = self.model.grad
         self.glob_opt._flat_params_fn = self.model.parameters
 

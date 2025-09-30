@@ -21,6 +21,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
             model_handler.sh,
         )
         self.setup_phase = False
+        self.DEBUG = False  # Set to True for debugging output
         self.inputs, self.outputs, self.grad_outputs = {}, {}, {}
         self.shapes, self.backward_shapes = {}, {}
         self.stage_data = model_handler.stage_data()
@@ -94,7 +95,6 @@ class WeightParallelizedSubdomain(BasePMWModel):
         return self._forward_pipeline(x, num_chunks, num_samples_in_chunk, chunk_id)
 
     def _forward_non_pipeline(self):
-        # self.DEBUG = False
         empty_at_the_end = []
         num_chunks_local = len(self.outputs[next(iter(self.outputs))])
         for chunk in range(num_chunks_local):
@@ -142,7 +142,6 @@ class WeightParallelizedSubdomain(BasePMWModel):
         num_samples_in_chunk=None,
         chunk_id=None,
     ):
-        # self.DEBUG = False
         empty_at_the_end = []
 
         # Cache device references to avoid repeated calls

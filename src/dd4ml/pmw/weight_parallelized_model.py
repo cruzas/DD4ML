@@ -29,16 +29,37 @@ class WeightParallelizedModel(BasePMWModel):
         self.do_setup_phase(sample)
 
     def do_setup_phase(self, sample):
+        print(f"Rank {self.rank}: Starting setup phase")
         loss = None
         self.subdomain.setup_phase = True
-        if sample.device != self.tensor_device:
-            sample = sample.to(self.tensor_device)
-        out = self.forward(sample, chunks_amount=1, reset_grad=True, compute_grad=True)
-        if self.model_handler.is_last_stage():
-            loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
-        self.backward(losses=[loss])
+
+        # Add safety guards for device operations
+        try:
+            if sample.device != self.tensor_device:
+                sample = sample.to(self.tensor_device)
+            print(f"Rank {self.rank}: About to do forward pass in setup phase")
+            out = self.forward(sample, chunks_amount=1, reset_grad=True, compute_grad=True)
+            print(f"Rank {self.rank}: Forward pass completed in setup phase")
+            if self.model_handler.is_last_stage():
+                loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
+            print(f"Rank {self.rank}: About to do backward pass in setup phase")
+            self.backward(losses=[loss])
+            print(f"Rank {self.rank}: Backward pass completed in setup phase")
+        except RuntimeError as e:
+            if "CUDA" in str(e) or "device" in str(e).lower():
+                # CUDA/device error during setup - try CPU fallback
+                print(f"Warning: CUDA error during setup phase, attempting CPU fallback: {e}")
+                sample = sample.cpu()
+                self.tensor_device = torch.device("cpu")
+                out = self.forward(sample, chunks_amount=1, reset_grad=True, compute_grad=True)
+                if self.model_handler.is_last_stage():
+                    loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
+                self.backward(losses=[loss])
+            else:
+                raise
         self.zero_grad()
         self.subdomain.setup_phase = False
+        print(f"Rank {self.rank}: Setup phase completed")
 
     def zero_grad(self):
         self.subdomain.zero_grad()
@@ -99,24 +120,30 @@ class WeightParallelizedModel(BasePMWModel):
                     chunk_shapes[i] = chunk.shape[0]
 
             # Broadcast chunk_shapes to all ranks
+            print(f"Rank {self.rank}: About to broadcast chunk_shapes, src={self.first_stage_ranks[0]}, group={self.model_handler.get_replica_group()}, chunk_shapes={chunk_shapes}")
             dist.broadcast(
                 tensor=chunk_shapes,
                 src=self.first_stage_ranks[0],
                 group=self.model_handler.get_replica_group(),
                 async_op=False,
             )
+            print(f"Rank {self.rank}: Broadcast completed")
 
             # Iterate through pipeline
             for c in range(chunks_amount):
+                print(f"Rank {self.rank}: Pipeline iteration {c}/{chunks_amount}, chunk_shape={chunk_shapes[c].item()}")
                 if self.model_handler.is_first_stage():
                     temp = (
                         chunks[c].to(self.tensor_device)
                         if chunks[c].device != self.tensor_device
                         else chunks[c]
                     )
+                    print(f"Rank {self.rank}: First stage, temp.shape={temp.shape}")
                 else:
                     temp = None
+                    print(f"Rank {self.rank}: Not first stage, temp=None")
 
+                print(f"Rank {self.rank}: Calling subdomain.forward")
                 self.subdomain.forward(
                     num_chunks=chunks_amount,
                     num_samples_in_chunk=chunk_shapes[c].item(),
@@ -124,6 +151,7 @@ class WeightParallelizedModel(BasePMWModel):
                     x=temp,
                     is_in_pipeline=True,
                 )
+                print(f"Rank {self.rank}: subdomain.forward completed for chunk {c}")
 
         if self.model_handler.is_last_stage():
             return self.subdomain.outputs["finish"]
