@@ -17,7 +17,6 @@ set_optimizer_params() {
   if [[ "$opt" == "apts_ip" ]]; then
     USE_PMW=true
     NUM_SUBD=(1)
-    NUM_STAGES=(2)
     NUM_REP=(1)
   fi
 }
