@@ -49,6 +49,8 @@ parameters:
     value: "medium_ffnn"
   width:
     value: None
+  num_layers:
+    value: None
   criterion:
     value: "cross_entropy"
   gradient_accumulation:
@@ -62,7 +64,7 @@ parameters:
   shuffle:
     value: False
   precision:
-    value: "float64"  # Options: "float32", "float64"
+    value: "float32"  # Options: "float32", "float64"
   batch_inc_factor:
     value: 1.5
   overlap:

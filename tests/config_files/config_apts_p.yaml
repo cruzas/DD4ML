@@ -45,10 +45,12 @@ parameters:
     value: 0.5
   dataset_name: 
     value: "mnist" 
-  model_name: 
+  model_name:
+    value: "medium_ffnn"
   width:
     value: None
-    value: "medium_ffnn"
+  num_layers:
+    value: None
   criterion:
     value: "cross_entropy"
   gradient_accumulation:
@@ -62,7 +64,7 @@ parameters:
   shuffle:
     value: False
   precision:
-    value: "float64"  # Options: "float32", "float64"
+    value: "float32"  # Options: "float32", "float64"
   batch_inc_factor:
     value: 1.5
   overlap:

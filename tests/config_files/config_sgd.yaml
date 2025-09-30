@@ -22,6 +22,8 @@ parameters:
     value: "ffnn"
   width:
     value: None
+  num_layers:
+    value: None
   criterion:
     value: "cross_entropy"
   seed:
@@ -31,7 +33,7 @@ parameters:
   shuffle:
     value: False
   precision:
-    value: "float64"
+    value: "float32"
   num_subdomains:
     value: 1
   num_stages:

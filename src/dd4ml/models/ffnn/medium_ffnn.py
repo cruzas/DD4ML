@@ -10,12 +10,17 @@ class MediumFFNN(BaseFFNN):
         C.input_features  = 1 * 28 * 28
         C.output_classes  = 10
         C.fc_layers       = [128] * 8
+        C.num_layers      = None  # if set, overrides fc_layers length
         C.dropout_p       = 0.0
         return C
 
     def __init__(self, config):
         super().__init__(config)
-        # build 8 hidden stages
+        # If num_layers is specified, override fc_layers
+        if config.num_layers is not None:
+            width = config.fc_layers[0] if config.fc_layers else 128
+            config.fc_layers = [width] * config.num_layers
+        # build hidden stages
         in_feats = config.input_features
         for i, h in enumerate(config.fc_layers, start=1):
             setattr(self, f"stage{i}", nn.Sequential(
