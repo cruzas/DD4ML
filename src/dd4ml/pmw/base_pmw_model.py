@@ -13,32 +13,27 @@ class BasePMWModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.rank = dist.get_rank()
-        self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        self.local_rank = os.environ.get("LOCAL_RANK", 0)
         self.world_size = dist.get_world_size()
         self.backend = dist.get_backend()
+        self.tensor_device = (
+            torch.device(f"cuda:{self.local_rank}")
+            if torch.cuda.is_available()
+            else torch.device("cpu")
+        )
+        # Default device to store scalars
+        self.default_device = (
+            torch.device(f"cuda:{self.local_rank}")
+            if torch.cuda.is_available()
+            else torch.device("cpu")
+        )
 
-        # Single device computation to avoid redundancy
-        # Add safety guard for CUDA device initialization in multiprocessing
-        try:
-            self.device = (
-                torch.device(f"cuda:{self.local_rank}")
-                if torch.cuda.is_available()
-                else torch.device("cpu")
-            )
-            # Test device accessibility
-            if self.device.type == "cuda":
-                torch.tensor([0.0], device=self.device)
-        except (RuntimeError, AssertionError) as e:
-            print(f"Warning: CUDA device initialization failed, falling back to CPU: {e}")
-            self.device = torch.device("cpu")
-        # Maintain backward compatibility
-        self.tensor_device = self.device
-        self.default_device = self.device
+        # TODO: Study the following. Would be nice, but there's a lot of CPU-GPU movement when using pmw and it makes the code slow.
+        # if self.tensor_device == 'cpu' and torch.backends.mps.is_available() and torch.backends.mps.is_built() and ((dist.is_initialized() and dist.get_world_size() == 1) or not dist.is_initialized()):
+        #     self.tensor_device = torch.device("mps")
+        #     self.default_device = torch.device("mps")
 
-        # Cache for efficiency
-        self._rank_lookup_cache = {}
-        self._layer_stage_cache = {}
-        self._is_cache_valid = False
+        self.DEBUG = True
 
     def backend_device(self, tensor=torch.tensor([0])):
         backend_device = torch.device("cpu")
@@ -50,20 +45,6 @@ class BasePMWModel(nn.Module):
             )
         return backend_device
 
-    def _setup_single_rank_structure(self):
-        """Simplified setup for single rank case."""
-        self.all_model_ranks = [[[0]]]
-        self.all_model_ranks_flat = [0]
-        self.layer_copies = {"stage0_shard0": [0]}
-        self.last_layers_main_shard = [0]
-        self.subdomain_ranks = [0]
-        self.all_final_stages_main_rank = [0]
-        self._rank_lookup_cache = {0: {
-            "subdomain_idx": 0, "replica_idx": 0, "stage_idx": 0,
-            "subdomain_ranks": [[0]], "replica_ranks": [[0]], "stage_ranks": [0]
-        }}
-        self._is_cache_valid = True
-
     def distributed_model_rank_structure(
         self,
         subdomains,
@@ -72,11 +53,6 @@ class BasePMWModel(nn.Module):
         gpus_per_sharded_layer,
         node_rank_dict,
     ):
-        # Early return for single process case
-        if self.world_size == 1:
-            simple_ranks = [[[0]]]
-            self._setup_single_rank_structure()
-            return simple_ranks
         """
         Outputs a list e.g., if we have
             - 2 subdomains in data (Domain Decomposition in data)
@@ -146,41 +122,25 @@ class BasePMWModel(nn.Module):
         ranks = []
         c = -1
         layer_copies = {}
-        subdomain_final_stages_main_rank = [
-            [] for _ in range(subdomains)
-        ]  # Fix mutable default
+        subdomain_final_stages_main_rank = [[]] * subdomains
         all_final_stages_main_rank = []
-
-        # Pre-compute stage strings for efficiency
-        stage_strings = {
-            (i, j): f"stage{i}_shard{j}"
-            for i in range(stages_amount)
-            for j in range(gpus_per_sharded_layer)
-        }
-        final_stage_key = f"stage{stages_amount - 1}_shard0"
         for sd in range(subdomains):
             subdomain_ranks = []
             for r in range(replicas_per_subdomain):
                 replica_ranks = []
                 for i in range(stages_amount):
-                    # Pre-allocate list with known size for better memory efficiency
-                    stage = [None] * gpus_per_sharded_layer
+                    stage = []
                     for j in range(gpus_per_sharded_layer):
                         c += 1
-                        current_rank = rank_list[c]
-                        stage[j] = current_rank
-
-                        # Use pre-computed string
-                        stage_key = stage_strings[(i, j)]
-                        if stage_key not in layer_copies:
-                            layer_copies[stage_key] = [current_rank]
+                        stage.append(rank_list[c])
+                        if f"stage{i}_shard{j}" not in layer_copies:
+                            layer_copies[f"stage{i}_shard{j}"] = [rank_list[c]]
                         else:
-                            layer_copies[stage_key].append(current_rank)
-
-                        # Only check once for final stage main shard
+                            layer_copies[f"stage{i}_shard{j}"].append(rank_list[c])
                         if i == stages_amount - 1 and j == 0:
-                            subdomain_final_stages_main_rank[sd].append(current_rank)
-                            all_final_stages_main_rank.append(current_rank)
+                            subdomain_final_stages_main_rank[sd].append(rank_list[c])
+                        if i == stages_amount - 1 and j == 0:
+                            all_final_stages_main_rank.append(rank_list[c])
                     replica_ranks.append(stage)
                 subdomain_ranks.append(replica_ranks)
             ranks.append(subdomain_ranks)
@@ -193,11 +153,13 @@ class BasePMWModel(nn.Module):
 
         # Store in each rank the correct layer_copies field - this will be needed to synchronize the parameters across the replicas
         # list of last layers main shards
-        self.last_layers_main_shard = layer_copies[final_stage_key]
+        self.last_layers_main_shard = layer_copies[
+            "stage" + str(stages_amount - 1) + "_shard0"
+        ]
         self.all_layer_copies_group = None
         for layer in layer_copies:
             # last layers and main shard (0) are responsible for the computation of the loss
-            if final_stage_key == layer:
+            if "stage" + str(stages_amount - 1) + "_shard0" == layer:
                 self.last_layers_main_shard_group = dist.new_group(
                     ranks=self.last_layers_main_shard, use_local_synchronization=True
                 )
@@ -242,37 +204,12 @@ class BasePMWModel(nn.Module):
         self.all_final_stages_main_rank_group = dist.new_group(
             ranks=self.all_final_stages_main_rank, use_local_synchronization=True
         )
-
-        # Build lookup table for efficient rank structure queries
-        self._build_rank_lookup_table()
         return ranks
-
-    def _build_rank_lookup_table(self):
-        """Build a lookup table to optimize rank structure queries."""
-        for sd_idx, subdomain_ranks in enumerate(self.all_model_ranks):
-            for r_idx, replica_ranks in enumerate(subdomain_ranks):
-                for s_idx, stage_ranks in enumerate(replica_ranks):
-                    for rank in stage_ranks:
-                        self._rank_lookup_cache[rank] = {
-                            "subdomain_idx": sd_idx,
-                            "replica_idx": r_idx,
-                            "stage_idx": s_idx,
-                            "subdomain_ranks": subdomain_ranks,
-                            "replica_ranks": replica_ranks,
-                            "stage_ranks": stage_ranks,
-                        }
-        self._is_cache_valid = True
 
     def from_rank_structure_to_layer_number(self):
         """
         This function uses "self.all_model_ranks" and "self.rank" to return the layer number corresponding to the current rank.
         """
-        if self._is_cache_valid:
-            cached_info = self._rank_lookup_cache.get(self.rank)
-            if cached_info:
-                return cached_info["stage_idx"]
-
-        # Fallback to original method if cache not available
         for subdomain_ranks in self.all_model_ranks:
             for replica_ranks in subdomain_ranks:
                 # replica_ranks = [[0, 1], [2, 3], [4, 5], [6, 7]], e.g. stage_ranks = [0, 1]
@@ -284,13 +221,6 @@ class BasePMWModel(nn.Module):
         """
         This function returns the rank structure of the subdomains which contains the current self.rank.
         """
-        if self._is_cache_valid:
-            cached_info = self._rank_lookup_cache.get(self.rank)
-            if cached_info:
-                subdomain_ranks = cached_info["subdomain_ranks"]
-                return utils.list_flattener(subdomain_ranks) if flatten else subdomain_ranks
-
-        # Fallback to original method
         for subdomain_ranks in self.all_model_ranks:
             for replica_ranks in subdomain_ranks:
                 for stage_ranks in replica_ranks:
@@ -305,12 +235,6 @@ class BasePMWModel(nn.Module):
         """
         This function returns the rank structure of the replicas which contains the current self.rank.
         """
-        if self._is_cache_valid:
-            cached_info = self._rank_lookup_cache.get(self.rank)
-            if cached_info:
-                return cached_info["replica_ranks"]
-
-        # Fallback to original method
         for subdomain_ranks in self.all_model_ranks:
             for replica_ranks in subdomain_ranks:
                 for stage_ranks in replica_ranks:
@@ -322,12 +246,6 @@ class BasePMWModel(nn.Module):
         """
         This function returns the rank structure of the stages which contains the current self.rank.
         """
-        if self._is_cache_valid:
-            cached_info = self._rank_lookup_cache.get(self.rank)
-            if cached_info:
-                return cached_info["stage_ranks"]
-
-        # Fallback to original method
         for subdomain_ranks in self.all_model_ranks:
             for replica_ranks in subdomain_ranks:
                 for stage_ranks in replica_ranks:

@@ -12,12 +12,22 @@ import torch.nn.functional as F
 def get_device(device=None):
     if device is not None:
         return device
-    else:
+
+    # If distributed is initialised, respect its backend.
+    if dist.is_initialized():
+        backend = dist.get_backend()
+        if backend == "gloo":
+            # Gloo => force CPU
+            return "cpu"
+        # Non-gloo backend (e.g. NCCL) -> prefer CUDA if available
         return (
             f"cuda:{torch.cuda.current_device()}"
-            if dist.is_initialized() and dist.get_backend() != "gloo"
+            if torch.cuda.is_available()
             else "cpu"
         )
+
+    # Dist not initialised -> prefer CUDA if available
+    return f"cuda:{torch.cuda.current_device()}" if torch.cuda.is_available() else "cpu"
 
 
 def cross_entropy_transformers(logits, targets):
@@ -206,20 +216,21 @@ def closure(
 
 
 def decide_tensor_device(ws, backend, gpu_id):
+    # Safe retrieval of local rank (default 0)
     loc_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    if torch.cuda.is_available():
-        if backend == "gloo":
-            if torch.cuda.device_count() < ws:
-                return f"cuda:{gpu_id}"
-            else:
-                # Local rank
-                return f"cuda:{loc_rank}"
-        else:
-            if gpu_id is None:
-                gpu_id = loc_rank
-            return f"cuda:{gpu_id}"
-    else:
+
+    # If using Gloo, always use CPU (do not return a CUDA device).
+    if backend == "gloo":
         return "cpu"
+
+    # For non-gloo backends, require CUDA availability.
+    if not torch.cuda.is_available():
+        return "cpu"
+
+    # Choose GPU id safely. If none given, use local rank modulo device count.
+    if gpu_id is None:
+        gpu_id = loc_rank % max(1, torch.cuda.device_count())
+    return f"cuda:{int(gpu_id)}"
 
 
 def list_flattener(l):

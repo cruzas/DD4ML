@@ -29,37 +29,16 @@ class WeightParallelizedModel(BasePMWModel):
         self.do_setup_phase(sample)
 
     def do_setup_phase(self, sample):
-        print(f"Rank {self.rank}: Starting setup phase")
         loss = None
         self.subdomain.setup_phase = True
-
-        # Add safety guards for device operations
-        try:
-            if sample.device != self.tensor_device:
-                sample = sample.to(self.tensor_device)
-            print(f"Rank {self.rank}: About to do forward pass in setup phase")
-            out = self.forward(sample, chunks_amount=1, reset_grad=True, compute_grad=True)
-            print(f"Rank {self.rank}: Forward pass completed in setup phase")
-            if self.model_handler.is_last_stage():
-                loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
-            print(f"Rank {self.rank}: About to do backward pass in setup phase")
-            self.backward(losses=[loss])
-            print(f"Rank {self.rank}: Backward pass completed in setup phase")
-        except RuntimeError as e:
-            if "CUDA" in str(e) or "device" in str(e).lower():
-                # CUDA/device error during setup - try CPU fallback
-                print(f"Warning: CUDA error during setup phase, attempting CPU fallback: {e}")
-                sample = sample.cpu()
-                self.tensor_device = torch.device("cpu")
-                out = self.forward(sample, chunks_amount=1, reset_grad=True, compute_grad=True)
-                if self.model_handler.is_last_stage():
-                    loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
-                self.backward(losses=[loss])
-            else:
-                raise
+        if sample.device != self.tensor_device:
+            sample = sample.to(self.tensor_device)
+        out = self.forward(sample, chunks_amount=1, reset_grad=True, compute_grad=True)
+        if self.model_handler.is_last_stage():
+            loss = nn.MSELoss()(out[0], torch.rand_like(out[0]))
+        self.backward(losses=[loss])
         self.zero_grad()
         self.subdomain.setup_phase = False
-        print(f"Rank {self.rank}: Setup phase completed")
 
     def zero_grad(self):
         self.subdomain.zero_grad()
@@ -85,18 +64,9 @@ class WeightParallelizedModel(BasePMWModel):
 
     # Returns the subdomain gradient norm of the model
     def subdomain_grad_norm(self, p=2):
-        # Mathematically correct gradient norm computation
-        grad_tensors = [
-            param.grad.flatten()
-            for param in self.parameters()
-            if param.grad is not None
-        ]
-
-        if not grad_tensors:
-            return torch.tensor(0.0, device=self.tensor_device)
-
-        # Concatenate and compute norm - this is the mathematically correct approach
-        return torch.cat(grad_tensors, dim=0).norm(p=p)
+        return torch.norm(
+            torch.cat([param.grad.flatten() for param in self.parameters()], dim=0), p=p
+        )
 
     def forward(self, x, chunks_amount=1, reset_grad=False, compute_grad=True):
         # flag to avoid storing the tensors needed to compute the gradients
@@ -113,37 +83,32 @@ class WeightParallelizedModel(BasePMWModel):
             # If the rank is in the first stage, process the input
             if self.model_handler.is_first_stage():
                 # Chunkenize the input tensor
-                chunks = x.chunk(chunks_amount)
+                chunks = x.chunk(
+                    chunks_amount
+                )  # Direct tuple unpacking instead of list()
 
-                # Store batch sizes efficiently - avoid intermediate tensor creation
-                for i, chunk in enumerate(chunks):
-                    chunk_shapes[i] = chunk.shape[0]
+                # Store batch sizes efficiently
+                chunk_shapes[: len(chunks)] = torch.tensor(
+                    [chunk.shape[0] for chunk in chunks],
+                    dtype=torch.int32,
+                    device=chunk_shapes.device,
+                )
 
             # Broadcast chunk_shapes to all ranks
-            print(f"Rank {self.rank}: About to broadcast chunk_shapes, src={self.first_stage_ranks[0]}, group={self.model_handler.get_replica_group()}, chunk_shapes={chunk_shapes}")
             dist.broadcast(
                 tensor=chunk_shapes,
                 src=self.first_stage_ranks[0],
                 group=self.model_handler.get_replica_group(),
                 async_op=False,
             )
-            print(f"Rank {self.rank}: Broadcast completed")
 
             # Iterate through pipeline
             for c in range(chunks_amount):
-                print(f"Rank {self.rank}: Pipeline iteration {c}/{chunks_amount}, chunk_shape={chunk_shapes[c].item()}")
-                if self.model_handler.is_first_stage():
-                    temp = (
-                        chunks[c].to(self.tensor_device)
-                        if chunks[c].device != self.tensor_device
-                        else chunks[c]
-                    )
-                    print(f"Rank {self.rank}: First stage, temp.shape={temp.shape}")
-                else:
-                    temp = None
-                    print(f"Rank {self.rank}: Not first stage, temp=None")
-
-                print(f"Rank {self.rank}: Calling subdomain.forward")
+                temp = (
+                    chunks[c].to(self.tensor_device)
+                    if self.model_handler.is_first_stage()
+                    else None
+                )
                 self.subdomain.forward(
                     num_chunks=chunks_amount,
                     num_samples_in_chunk=chunk_shapes[c].item(),
@@ -151,21 +116,20 @@ class WeightParallelizedModel(BasePMWModel):
                     x=temp,
                     is_in_pipeline=True,
                 )
-                print(f"Rank {self.rank}: subdomain.forward completed for chunk {c}")
 
         if self.model_handler.is_last_stage():
             return self.subdomain.outputs["finish"]
         else:
             return [True]
 
+        # return self.subdomain.outputs['finish'] if self.model_handler.is_last_stage() else [True]
+
     def backward(self, losses):
         num_chunks = len(losses)
         for i, loss in enumerate(losses):  # Chunked loss
             self.subdomain.backward(loss, chunk_id=i, is_in_pipeline=True)
 
-        # Rescale the gradients by the number of chunks - filter parameters with gradients first
-        params_with_grads = [
-            param for param in self.parameters(clone=False) if param.grad is not None
-        ]
-        for param in params_with_grads:
-            param.grad /= num_chunks
+        # Rescale the gradients by the number of chunks
+        for param in self.parameters(clone=False):
+            if param.grad is not None:
+                param.grad /= num_chunks

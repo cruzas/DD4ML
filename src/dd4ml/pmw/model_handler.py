@@ -1,6 +1,5 @@
 import copy
 import pprint
-from typing import Any, Dict, List, Optional, Tuple
 
 import torch.distributed as dist
 import torch.nn as nn
@@ -8,9 +7,7 @@ import torch.nn as nn
 from dd4ml.utility import broadcast_dict, dprint
 
 
-def max_path_length(
-    model: Dict[str, Any], layer: str, cache: Optional[Dict[str, int]] = None
-) -> int:
+def max_path_length(model, layer, cache=None):
     """
     Compute the maximum distance between `layer` and 'finish', using an explicit cache.
     """
@@ -28,7 +25,7 @@ def max_path_length(
     return value
 
 
-def resolve_backward_dependencies(model: Dict[str, Any]) -> Dict[str, Any]:
+def resolve_backward_dependencies(model):
     cache = {}
     start = "finish"
     max_distances = {
@@ -57,7 +54,7 @@ def resolve_backward_dependencies(model: Dict[str, Any]) -> Dict[str, Any]:
     return model
 
 
-def resolve_layer_dependencies(model: Dict[str, Any]) -> Dict[str, Any]:
+def resolve_layer_dependencies(model):
     dependencies = {layer: set(info["rcv"]["src"]) for layer, info in model.items()}
     dependents = {layer: set(info["dst"]["to"]) for layer, info in model.items()}
     incoming_edges_count = {layer: len(srcs) for layer, srcs in dependencies.items()}
@@ -84,14 +81,19 @@ def resolve_layer_dependencies(model: Dict[str, Any]) -> Dict[str, Any]:
     return model
 
 
+def preprocessing(batch):
+    batch = nn.flatten(batch)
+    return batch[:, :700], batch[:, 700:]
+
+
+def average_fun(input1, input2):
+    return (input1 + input2) / 2
+
+
 class ModelHandler:
     def __init__(
-        self,
-        net_dict: Dict[str, Any],
-        num_subdomains: int,
-        num_replicas_per_subdomain: int,
-        available_ranks: Optional[List[int]] = None,
-    ) -> None:
+        self, net_dict, num_subdomains, num_replicas_per_subdomain, available_ranks=None
+    ):
         self.available_ranks = (
             sorted(available_ranks)
             if available_ranks is not None
@@ -131,12 +133,12 @@ class ModelHandler:
             print(
                 f"Rank {self.rank}/{dist.get_world_size() - 1} is assigned to SD {self.sd}, Rep {self.rep}, S {self.s}, SH {self.sh}."
             )
-        except KeyError:
+        except:
             raise ValueError(
                 f"Rank {self.rank}/{dist.get_world_size() - 1} is not assigned to any subdomain, replica, stage, or shard."
             )
         self._ = self.rank_to_position()  # Ensures caching within rank_to_position.
-        self._stage_data_cache = self.stage_data()
+        self._stage_data = self.stage_data()
         self.get_list_of_consecutive_layers()  # Caches the consecutive layers.
         self.net_dict = resolve_backward_dependencies(self.net_dict)
 
@@ -154,7 +156,7 @@ class ModelHandler:
 
         lst = [[]]
         consecutive_layer = True
-        for layer_name in self._stage_data_cache["layers"]:
+        for layer_name in self._stage_data["layers"]:
             if consecutive_layer:
                 lst[-1].append(layer_name)
             else:
@@ -199,38 +201,24 @@ class ModelHandler:
         return getattr(self, attr_name)
 
     def is_first_stage(self):
-        if not hasattr(self, "_is_first_stage"):
-            sd, rep, _, _ = self.rank_to_position()
-            self._is_first_stage = (
-                self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"]["s0"]["ranks"]
-            )
-        return self._is_first_stage
+        sd, rep, _, _ = self.rank_to_position()
+        return self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"]["s0"]["ranks"]
 
     def is_last_stage(self):
-        if not hasattr(self, "_is_last_stage"):
-            sd, rep, _, _ = self.rank_to_position()
-            s_final = self.num_stages - 1
-            self._is_last_stage = (
-                self.rank
-                in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s_final}"]["ranks"]
-            )
-        return self._is_last_stage
+        sd, rep, _, _ = self.rank_to_position()
+        s_final = self.num_stages - 1
+        return (
+            self.rank in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s_final}"]["ranks"]
+        )
 
     def subdomain_ranks(self):
-        if not hasattr(self, "_subdomain_ranks"):
-            for sd in range(self.num_subdomains):
-                if self.rank in self.nn_structure[f"sd{sd}"]["ranks"]:
-                    self._subdomain_ranks = self.nn_structure[f"sd{sd}"]["ranks"]
-                    break
-            else:
-                self._subdomain_ranks = None
-        return self._subdomain_ranks
+        for sd in range(self.num_subdomains):
+            if self.rank in self.nn_structure[f"sd{sd}"]["ranks"]:
+                return self.nn_structure[f"sd{sd}"]["ranks"]
 
     def replica_ranks(self):
-        if not hasattr(self, "_replica_ranks"):
-            sd, rep, _, _ = self.rank_to_position()
-            self._replica_ranks = self.nn_structure[f"sd{sd}"][f"r{rep}"]["ranks"]
-        return self._replica_ranks
+        sd, rep, _, _ = self.rank_to_position()
+        return self.nn_structure[f"sd{sd}"][f"r{rep}"]["ranks"]
 
     def get_sd_group(self):
         sd, _, _, _ = self.rank_to_position()
@@ -249,19 +237,14 @@ class ModelHandler:
         ]
 
     def stage_data(self):
-        if not hasattr(self, "_stage_data_cache"):
-            for sd in range(self.num_subdomains):
-                for rep in range(self.num_replicas_per_subdomain):
-                    for s in range(len(self.stage_list)):
-                        if (
-                            self.rank
-                            in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]
-                        ):
-                            self._stage_data_cache = self.nn_structure[f"sd{sd}"][
-                                f"r{rep}"
-                            ][f"s{s}"]
-                            return self._stage_data_cache
-        return getattr(self, "_stage_data_cache", None)
+        for sd in range(self.num_subdomains):
+            for rep in range(self.num_replicas_per_subdomain):
+                for s in range(len(self.stage_list)):
+                    if (
+                        self.rank
+                        in self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]["ranks"]
+                    ):
+                        return self.nn_structure[f"sd{sd}"][f"r{rep}"][f"s{s}"]
 
     def _build_rank_position_cache(self):
         self._rank_position_cache = {}

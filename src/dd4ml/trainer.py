@@ -840,12 +840,9 @@ class Trainer:
 
     def _train_one_batch(self, x, y, first_grad: bool):
         """Runs forward/backward/step on a single (x,y). Returns (batch_loss, batch_grad, bs)."""
-        rank = dist.get_rank() if dist.is_initialized() else 0
-        print(f"Rank {rank}: _train_one_batch called, first_grad={first_grad}")
         x = self._move_to_device(x)
         y = self._move_to_device(y)
         bs = y.size(0)
-        print(f"Rank {rank}: Data moved to device, bs={bs}")
 
         # Special handling for PINN datasets
         if isinstance(
@@ -868,7 +865,6 @@ class Trainer:
 
         # warm-up closure if needed
         if first_grad:
-            print(f"Rank {rank}: Creating warm-up closure")
             c = closure(
                 x,
                 y,
@@ -880,16 +876,10 @@ class Trainer:
             )
             # Add barrier to ensure all processes are synchronized before calling closure
             if dist.is_initialized():
-                print(f"Rank {rank}: Waiting at barrier before calling closure")
                 dist.barrier()
-                print(f"Rank {rank}: Barrier passed, calling warm-up closure")
-            else:
-                print(f"Rank {rank}: Calling warm-up closure")
             batch_loss = c()
-            print(f"Rank {rank}: Warm-up closure completed, batch_loss={batch_loss}")
             batch_grad = None
         else:
-            print(f"Rank {rank}: Creating full-gradient closure")
             # full-gradient closure
             general = closure(
                 x,
@@ -1141,16 +1131,11 @@ class Trainer:
         dprint(
             f"Total number of training samples per process: {self.num_training_samples_per_process}"
         )
-        rank = dist.get_rank() if dist.is_initialized() else 0
-        print(f"Rank {rank}: About to enter training loop")
 
         while self.epoch_num <= self.config.epochs:
-            print(f"Rank {rank}: Starting epoch {self.epoch_num}")
             epoch_loss = 0.0
             total_samples = 0
-            print(f"Rank {rank}: Creating iterator from train_loader")
             it = iter(self.train_loader)
-            print(f"Rank {rank}: Iterator created successfully")
             first = self.epoch_num == 0
 
             if hasattr(self.train_loader.sampler, "set_epoch"):
@@ -1159,10 +1144,8 @@ class Trainer:
 
             # loop until this rank has seen its shard (plus any overlap)
             while total_samples < self.num_training_samples_per_process:
-                print(f"Rank {rank}: Getting next batch (total_samples={total_samples})")
                 try:
                     batch = next(it)
-                    print(f"Rank {rank}: Got batch successfully, batch type: {type(batch)}, len: {len(batch) if hasattr(batch, '__len__') else 'N/A'}")
                 except StopIteration:
                     it = iter(self.train_loader)
                     batch = next(it)
@@ -1172,7 +1155,6 @@ class Trainer:
                     x = torch.cat([x, t], dim=1)
                 else:
                     x, y = batch
-                print(f"Rank {rank}: x.shape={x.shape}, y.shape={y.shape if hasattr(y, 'shape') else len(y)}")
 
                 batch_loss, batch_grad, bs = self._train_one_batch(x, y, first)
                 total_samples += bs
