@@ -6,9 +6,9 @@ parameters:
   optimizer: 
     value: "apts_ip" 
   batch_size:
-    value: 10000
+    value: 200
   effective_batch_size:
-    value: 10000
+    value: 200
   num_stages:
     value: 2
   num_subdomains:
@@ -44,9 +44,9 @@ parameters:
   max_delta:
     value: 0.5
   dataset_name: 
-    value: "mnist" 
+    value: "cifar10" 
   model_name: 
-    value: "medium_ffnn"
+    value: "simple_resnet"
   criterion:
     value: "cross_entropy"
   gradient_accumulation:

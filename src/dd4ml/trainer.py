@@ -748,9 +748,13 @@ class Trainer:
     def _move_to_device(self, data):
         if isinstance(data, (list, tuple)):
             return type(data)(
-                d.to(self.device, dtype=self.precision_dtype) for d in data
+                d.to(self.device, dtype=self.precision_dtype) if d.is_floating_point() else d.to(self.device) for d in data
             )
-        return data.to(self.device, dtype=self.precision_dtype)
+        # Only convert to precision_dtype if the tensor is a floating-point type
+        # Integer tensors (e.g., token indices) should preserve their dtype
+        if data.is_floating_point():
+            return data.to(self.device, dtype=self.precision_dtype)
+        return data.to(self.device)
 
     def compute_accuracy(self):
         """Compute test accuracy across all processes (and pipeline stages)."""
