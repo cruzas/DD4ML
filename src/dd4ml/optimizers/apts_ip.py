@@ -83,9 +83,6 @@ class APTS_IP(APTS_Base):
             nu_inc=nu_inc,
             inc_factor=inc_factor,
             dec_factor=dec_factor,
-            criterion=None,  # APTS_IP doesn't use criterion like other APTS variants
-            device=None,     # Will auto-detect device
-            nr_models=1,     # Default for APTS_IP
             glob_opt=glob_opt,
             glob_opt_hparams=glob_opt_hparams,
             loc_opt=loc_opt,
@@ -100,37 +97,29 @@ class APTS_IP(APTS_Base):
         # Synchronize non-parameter attributes from the first param group.
         self._sync_attributes_from_param_group()
         self.APTS_in_data_sync_strategy = APTS_in_data_sync_strategy.lower()
-
-        # Override parent's buffer initialization to avoid PMW multiprocessing issues
-        # Set buffers to None since APTS_IP doesn't use the same buffer-based approach
-        self._flat_params_buffer = None
-        self._loc_flat_buffer = None
-        if hasattr(self, '_diff_cache'):
-            self._diff_cache = None
         self.step_strategy = step_strategy
 
-        # Use set lookup for faster validation
-        valid_step_strategies = {"weighted_mean", "mean"}
-        valid_sync_strategies = {"average", "sum"}
-        
-        if self.step_strategy not in valid_step_strategies:
+        if self.step_strategy not in ["weighted_mean", "mean"]:
             raise ValueError(
                 'The step strategy must be either "weighted_mean" or "mean".'
             )
-        if self.APTS_in_data_sync_strategy not in valid_sync_strategies:
+        if self.APTS_in_data_sync_strategy not in ["average", "sum"]:
             raise ValueError(
                 'The APTS in data synchronization strategy must be either "average" or "sum".'
+            )
+        if (
+            self.APTS_in_data_sync_strategy == "sum"
+            and dist.is_initialized()
+            and dist.get_rank() == 0
+        ):
+            print(
+                '(WARNING) APTS in data "sum" synchronization strategy still has to be tested/verified.'
             )
 
         self.loc_opt = loc_opt(params=model.subdomain_params(), **loc_opt_hparams)
 
-        # Configure the global optimizer created by parent class
-        # Add safety check for model methods
-        if not hasattr(self.model, 'grad') or not hasattr(self.model, 'parameters'):
-            raise AttributeError("Model must have 'grad' and 'parameters' methods for APTS_IP")
-
         glob_opt_hparams["flat_params"] = self.model.parameters()
-        # Parent class already created self.glob_opt, just update its custom functions
+        self.glob_opt = glob_opt(params=list(model.parameters()), **glob_opt_hparams)
         self.glob_opt._flat_grads_fn = self.model.grad
         self.glob_opt._flat_params_fn = self.model.parameters
 
@@ -138,32 +127,16 @@ class APTS_IP(APTS_Base):
             f"{self.__name__} global optimizer: {type(self.glob_opt).__name__}; local optimizer: {type(self.loc_opt).__name__}"
         )
 
-        # Cache for efficiency
-        self._cached_loc_lr = None
-        self._cached_max_loc_iters = None
-        self._param_buffer = None  # Buffer for parameter operations
-
     def loc_steps(self, final_subdomain_closure=None):
-        # Cache learning rate computation to avoid repeated division
-        if (self._cached_loc_lr is None or 
-            self._cached_max_loc_iters != self.max_loc_iters):
-            self._cached_loc_lr = self.delta / self.max_loc_iters
-            self._cached_max_loc_iters = self.max_loc_iters
-        
-        self.loc_opt.lr = self._cached_loc_lr
-        
-        # Optimize loop by pre-computing loop bounds
-        max_iter_minus_one = self.max_loc_iters - 1
-        is_last_stage = self.model.model_handler.is_last_stage()
-        
+        self.loc_opt.lr = self.delta / self.max_loc_iters
         for i in range(self.max_loc_iters):
             self.loc_opt.zero_grad()
             self.loc_opt.step()
-            if i != max_iter_minus_one:
+            if i != self.max_loc_iters - 1:
                 outputs = self.model.subdomain_forward()
                 losses = (
                     final_subdomain_closure(outputs)
-                    if is_last_stage
+                    if self.model.model_handler.is_last_stage()
                     else []
                 )
                 self.model.subdomain_backward(losses)
@@ -185,9 +158,8 @@ class APTS_IP(APTS_Base):
         # Perform local steps
         self.loc_steps(final_subdomain_closure)
 
-        # Compute global trial step with buffer reuse when possible
-        current_params = self.model.parameters(clone=True)
-        step = current_params - self.init_glob_flat
+        # Compute global trial step
+        step = self.model.parameters(clone=True) - self.init_glob_flat
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
         loss, grad, self.glob_opt.delta = self.control_step(step, closure=closure)
@@ -197,11 +169,7 @@ class APTS_IP(APTS_Base):
             loss, grad = self.glob_steps(loss, grad, closure=closure)
             self.grad_evals += 1
 
-        # Invalidate cached learning rate if delta changed
-        if self.delta != self.glob_opt.delta:
-            self.delta = self.glob_opt.delta
-            self._cached_loc_lr = None  # Force recalculation next time
-            
+        self.delta = self.glob_opt.delta
         self._update_param_group()
 
         return loss

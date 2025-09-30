@@ -227,7 +227,9 @@ class MicroBatchFlattenSampler(BatchSampler):
 
 from torch.utils.data import RandomSampler, SequentialSampler
 
+
 class GeneralizedDistributedDataLoader(DataLoader):
+
     def __init__(
         self,
         model_handler,
@@ -235,7 +237,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
         batch_size,
         shuffle,
         overlap: float | int = 0.0,
-        device=None,
+        device="cpu" if not torch.cuda.is_available() else "cuda",
         num_workers=0,
         pin_memory=False,
         seed=0,
@@ -244,25 +246,30 @@ class GeneralizedDistributedDataLoader(DataLoader):
         # Set default device if not provided
         if device is None:
             from .utility.utils import get_default_device
+
             device = str(get_default_device())
 
         if "drop_last" in kwargs:
-            print("(WARNING) drop_last will always be True in GeneralizedDistributedDataLoader.")
+            print(
+                "(WARNING) drop_last will always be True in GeneralizedDistributedDataLoader."
+            )
             kwargs.pop("drop_last")
         if batch_size > len(dataset):
-            print(f"(WARNING) Batch size {batch_size} > dataset size {len(dataset)}; reducing.")
+            print(
+                f"(WARNING) Batch size {batch_size} > dataset size {len(dataset)}; reducing."
+            )
             batch_size = len(dataset)
 
         tot_replicas = model_handler.tot_replicas
-        distributed = (tot_replicas > 1)
+        distributed = tot_replicas > 1
         per_replica_bs = batch_size // max(tot_replicas, 1)
 
         world_size = dist.get_world_size()
-        rank       = dist.get_rank()
+        rank = dist.get_rank()
 
         first_ranks = model_handler.get_stage_ranks("first", mode="global")
-        last_ranks  = model_handler.get_stage_ranks("last",  mode="global")
-        all_ranks   = list(range(world_size))
+        last_ranks = model_handler.get_stage_ranks("last", mode="global")
+        all_ranks = list(range(world_size))
         middle_ranks = [r for r in all_ranks if r not in first_ranks + last_ranks]
 
         def make_sampler(layer_ranks, ds, do_shuffle):
@@ -457,6 +464,7 @@ class Power_DL:
         # Set default device if not provided
         if device is None:
             from .utility.utils import get_default_device
+
             device = get_default_device()
 
         self.dataset = dataset
@@ -521,7 +529,11 @@ class Power_DL:
             if "MNIST" in dataset_class_name or "CIFAR" in dataset_class_name:
                 dtype = torch.LongTensor
             elif "Sine" in dataset_class_name:
-                precision_map = {32: torch.float32, 64: torch.float64, 16: torch.float16}
+                precision_map = {
+                    32: torch.float32,
+                    64: torch.float64,
+                    16: torch.float16,
+                }
                 dtype = precision_map.get(self.precision, torch.float32)
             else:
                 dtype = torch.LongTensor
