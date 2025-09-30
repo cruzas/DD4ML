@@ -183,7 +183,7 @@ class APTS_D(APTS_Base):
 
         # Calculate residual between global and local gradients
         if self.foc:
-            self.resid = self.init_glob_grad - self.init_loc_grad
+            self.resid = (self.init_glob_grad - self.init_loc_grad).to(dtype=self.init_glob_grad.dtype)
 
         # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)

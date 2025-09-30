@@ -131,6 +131,9 @@ class APTS_P(APTS_Base):
                     if pl.requires_grad:  # this rank owns it
                         pg.copy_(pl.data)
             self.loc_model.load_state_dict(self.model.state_dict())
+            # Preserve dtype after loading state dict
+            original_param = next(self.model.parameters())
+            self.loc_model = self.loc_model.to(dtype=original_param.dtype)
             return
 
         # Multi-process merge
@@ -172,6 +175,9 @@ class APTS_P(APTS_Base):
 
         # Ensure local model matches global model for the next iteration
         self.loc_model.load_state_dict(get_state_dict(self.model))
+        # Preserve dtype after loading state dict
+        original_param = next(self.model.parameters())
+        self.loc_model = self.loc_model.to(dtype=original_param.dtype)
 
     def step(self, inputs, labels, inputs_d=None, labels_d=None, hNk=None):
         """

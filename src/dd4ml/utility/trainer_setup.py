@@ -80,9 +80,7 @@ def get_config_model_and_trainer(args, wandb_config):
     ):
         all_config.trainer.loc_opt = all_config.trainer.subdomain_opt
         delattr(all_config.trainer, "subdomain_opt")
-    all_config.merge_and_cleanup(
-        keys_to_look=["system", "data", "model", "trainer"]
-    )
+    all_config.merge_and_cleanup(keys_to_look=["system", "data", "model", "trainer"])
 
     # Instantiate dataset.
     dataset = dataset_factory.create(all_config.dataset_name, all_config.data)
@@ -153,8 +151,22 @@ def get_config_model_and_trainer(args, wandb_config):
         model_config.model_class, "as_model_dict"
     ):
         dprint("Using Parallel Model Wrapper and Model Handler")
+
+        # Ensure num_stages is set in model_config
+        if model_config.num_stages is None:
+            raise ValueError(
+                "model_config.num_stages is None. Please specify num_stages in your configuration."
+            )
+
+        print(f"Model config num_stages: {model_config.num_stages}")
         model_instance = model_config.model_class(model_config)
         model_dict = model_instance.as_model_dict()
+        print(
+            f"Creating ModelHandler with: num_subdomains={model_config.num_subdomains}, num_replicas_per_subdomain={model_config.num_replicas_per_subdomain}, num_stages={model_config.num_stages}"
+        )
+        print(
+            f"Expected world_size should be: {model_config.num_subdomains * model_config.num_replicas_per_subdomain * model_config.num_stages}"
+        )
         model_handler = ModelHandler(
             model_dict,
             model_config.num_subdomains,
@@ -172,9 +184,7 @@ def get_config_model_and_trainer(args, wandb_config):
         model = model_config.model_class(model_config)
         model.to(device)
 
-        if (
-            dist.is_initialized() and dist.get_world_size() > 1
-        ):
+        if dist.is_initialized() and dist.get_world_size() > 1:
             loc_rank = int(os.environ.get("LOCAL_RANK", 0))
             print(
                 f"Rank {dist.get_rank()}, local rank {loc_rank}, cuda available: {torch.cuda.is_available()}"
@@ -234,6 +244,8 @@ def get_config_model_and_trainer(args, wandb_config):
         from dd4ml.optimizers.apts_ip import APTS_IP
 
         all_config.trainer = APTS_IP.setup_APTS_hparams(all_config.trainer)
+
+        # print(f"APTS_IP got model: {model}")
 
         optimizer_obj = APTS_IP(
             params=model.parameters(),
@@ -447,6 +459,11 @@ def generic_run(
     ):
         args["use_pmw"] = False
         args["num_subdomains"] = dist.get_world_size() if dist.is_initialized() else 1
+
+    # Enable PMW for APTS_IP optimizer
+    if wandb_config.get("optimizer", "").lower() == "apts_ip":
+        args["use_pmw"] = True
+        dprint(f"APTS_IP detected, setting use_pmw=True")
 
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)

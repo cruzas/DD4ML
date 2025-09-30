@@ -82,7 +82,9 @@ class OBS:
         RinvU = torch.linalg.solve(R, U)
 
         P_parallel = torch.matmul(Psi, RinvU)
-        PsiTg = torch.matmul(Psi.transpose(0, 1), g)
+        # Ensure Psi and g have compatible dtypes for matrix multiplication
+        g_compatible = g.to(dtype=Psi.dtype)
+        PsiTg = torch.matmul(Psi.transpose(0, 1), g_compatible)
         g_parallel = torch.matmul(RinvU.transpose(0, 1), PsiTg)
 
         gg = g.dot(g)
@@ -95,7 +97,7 @@ class OBS:
         helpp = a_j / Lambda
 
         if lambda_min > 0 and torch.norm(helpp) <= delta:
-            pStar = self.ComputeSBySMW(gamma, g, PsiTg, Psi, Minv, PsiPsi)
+            pStar = self.ComputeSBySMW(gamma, g_compatible, PsiTg, Psi, Minv, PsiPsi)
             return pStar
         elif lambda_min <= 0 and self.phiBar_f(-lambda_min, Lambda, a_j, delta) >= 0:
             sigmaStar = -lambda_min
@@ -167,7 +169,7 @@ class OBS:
             if torch.isnan(sigmaStar) or torch.isinf(sigmaStar):
                 sigmaStar = self.Newton(0, Lambda, a_j, delta)
 
-            pStar = self.ComputeSBySMW(gamma + sigmaStar, g, PsiTg, Psi, Minv, PsiPsi)
+            pStar = self.ComputeSBySMW(gamma + sigmaStar, g_compatible, PsiTg, Psi, Minv, PsiPsi)
             return pStar
 
     def ComputeSBySMW(self, tauStar, g, PsiTg, Psi, Minv, PsiPsi):

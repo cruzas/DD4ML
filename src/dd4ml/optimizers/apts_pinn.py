@@ -112,7 +112,7 @@ class APTS_PINN(APTS_D):
 
         # Compute the residual if foc is enabled
         if self.foc:
-            self.resid = self.init_glob_grad - self.init_loc_grad
+            self.resid = (self.init_glob_grad - self.init_loc_grad).to(dtype=self.init_glob_grad.dtype)
 
         # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)

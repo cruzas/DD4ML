@@ -259,7 +259,9 @@ def solve_tr_second_order(
 
     # Cauchy point along -g
     Bg = lsr1_hessian.B(gradient)
-    gBg = gradient.dot(Bg)
+    # Ensure gradient and Bg have compatible dtypes for dot product
+    Bg_compatible = Bg.to(dtype=gradient.dtype)
+    gBg = gradient.dot(Bg_compatible)
     # Safe guard it if g^T*B*g <= 0
     alpha = grad_norm**2 / gBg if gBg > 0 else 0.0
     p_cand = -gradient * alpha
@@ -294,8 +296,12 @@ def solve_tr_second_order(
         p = p_b
 
     # Compute the predicted reduction
-    g_dot_p = gradient.dot(p)
-    p_B_p = p.dot(lsr1_hessian.B(p))
+    # Ensure compatible dtypes for dot products
+    p_compatible = p.to(dtype=gradient.dtype)
+    g_dot_p = gradient.dot(p_compatible)
+    Bp = lsr1_hessian.B(p)
+    Bp_compatible = Bp.to(dtype=p.dtype)
+    p_B_p = p.dot(Bp_compatible)
     predicted = -(g_dot_p + 0.5 * p_B_p)
 
     return p, predicted

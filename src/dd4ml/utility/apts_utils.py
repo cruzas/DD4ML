@@ -73,8 +73,11 @@ def clone_model(model):
     config_copy = copy.deepcopy(base_model.config)
     config_copy.model_type = None
     new_model = type(base_model)(config_copy)
+    # Preserve both device and dtype from original model
+    original_param = next(model.parameters())
+    new_model = new_model.to(device=original_param.device, dtype=original_param.dtype)
     new_model.load_state_dict(get_state_dict(base_model))
-    return new_model.to(next(model.parameters()).device)
+    return new_model
 
 
 def broadcast_shuffle(num_layers: int, rank: int, world_size: int) -> torch.Tensor:

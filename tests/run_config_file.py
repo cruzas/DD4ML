@@ -11,9 +11,16 @@ from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
-from dd4ml.utility import (broadcast_dict, detect_environment, dprint,
-                           find_free_port, generic_run, is_main_process,
-                           prepare_distributed_environment, set_seed)
+from dd4ml.utility import (
+    broadcast_dict,
+    detect_environment,
+    dprint,
+    find_free_port,
+    generic_run,
+    is_main_process,
+    prepare_distributed_environment,
+    set_seed,
+)
 
 # torch.autograd.set_detect_anomaly(True)
 # import warnings
@@ -305,21 +312,44 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 1
+
+    # Extract config values from sweep_config if available and merge into args
+    # This ensures world_size is calculated using config file values, not command-line defaults
+    if sweep_config and "parameters" in sweep_config:
+        for key, value_dict in sweep_config["parameters"].items():
+            if "value" in value_dict:
+                # Update args with config file values
+                args[key] = value_dict["value"]
+
+    world_size = 2
     if args["use_pmw"]:
-        world_size = (
+        calculated_world_size = (
             args["num_subdomains"]
             * args["num_replicas_per_subdomain"]
             * args["num_stages"]
         )
+        # Use the calculated world_size, don't force minimum of 1
+        world_size = calculated_world_size
+        print(
+            f"PMW enabled: world_size = {args['num_subdomains']} * {args['num_replicas_per_subdomain']} * {args['num_stages']} = {world_size}"
+        )
+    else:
+        print(f"PMW disabled: using default world_size = {world_size}")
 
     def spawn_training() -> None:
-        mp.spawn(
-            main,
-            args=(master_addr, master_port, world_size, args),
-            nprocs=world_size,
-            join=True,
-        )
+        if world_size == 1:
+            # For single process, run directly without multiprocessing
+            print("Running single process without multiprocessing")
+            main(0, master_addr, master_port, world_size, args)
+        else:
+            # Use multiprocessing for multiple processes
+            print(f"Running {world_size} processes with multiprocessing")
+            mp.spawn(
+                main,
+                args=(master_addr, master_port, world_size, args),
+                nprocs=world_size,
+                join=True,
+            )
 
     if WANDB_AVAILABLE:
         sweep_id = wandb.sweep(sweep=sweep_config, project=args["project"])

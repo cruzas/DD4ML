@@ -264,7 +264,9 @@ class LSSR1_TR(Optimizer):
         grad = self._flat_grads_fn()
 
         # Compute directional derivative along p
-        deriv = grad.dot(p)
+        # Ensure grad and p have the same dtype for dot product
+        p_compatible = p.to(dtype=grad.dtype)
+        deriv = grad.dot(p_compatible)
 
         # Synchronize loss and gradient if needed
         if self.sync and self.world_size > 1:
@@ -574,6 +576,8 @@ class LSSR1_TR(Optimizer):
 
         # Prepare line search with initial loss and directional derivative
         phi_0 = loss
+        # Ensure g and p_comb have the same dtype for dot product
+        p_comb = p_comb.to(dtype=g.dtype)
         dphi_0 = g.dot(p_comb)
 
         # Assumption 3 in paper

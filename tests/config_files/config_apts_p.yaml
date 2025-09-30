@@ -6,9 +6,9 @@ parameters:
   optimizer: 
     value: "apts_p" 
   batch_size:
-    value: 128
+    value: 10000
   effective_batch_size:
-    value: 128
+    value: 10000
   num_stages:
     value: 1
   num_subdomains:
@@ -18,7 +18,7 @@ parameters:
   glob_pass:
     value: True
   foc:
-    value: False
+    value: True
   glob_second_order:
     value: False
   glob_dogleg:
@@ -44,11 +44,11 @@ parameters:
   max_delta:
     value: 0.5
   dataset_name: 
-    value: "tinyshakespeare" 
+    value: "mnist" 
   model_name: 
-    value: "minigpt"
+    value: "medium_ffnn"
   criterion:
-    value: "cross_entropy_transformers"
+    value: "cross_entropy"
   gradient_accumulation:
     value: True
   accumulation_steps:
@@ -60,7 +60,7 @@ parameters:
   shuffle:
     value: False
   precision:
-    value: "float32"  # Options: "float32", "float64"
+    value: "float64"  # Options: "float32", "float64"
   batch_inc_factor:
     value: 1.5
   overlap:
@@ -72,8 +72,8 @@ parameters:
   max_zoom_iters:
     value: 5
   glob_opt:
-    value: "TR"
+    value: "lssr1_tr"
   loc_opt:
-    value: "TRAdam"
+    value: "lssr1_tr"
   paper_tr_update:
     value: True
