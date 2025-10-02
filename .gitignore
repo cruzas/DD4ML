@@ -52,3 +52,4 @@ tests/config_files/config_files/*trial*
 /tests/MNIST
 /tests/config_files/*trial*
 
+*.pdf

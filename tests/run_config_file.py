@@ -40,7 +40,7 @@ except ImportError:
 DEFAULT_SEED = 3407
 LOG_FREQUENCY = 5
 SAVE_FREQUENCY_EPOCH = 5
-SAVE_FREQUENCY_BATCH = 2000
+SAVE_FREQUENCY_BATCH = 500
 BARRIER_TIMEOUT = 30
 
 
@@ -67,7 +67,7 @@ def parse_cmd_args() -> argparse.Namespace:
     default_use_pmw = temp_args.optimizer == "apts_ip"
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
-    default_project = "debugging"
+    default_project = "ohtests"
 
     parser.add_argument(
         "--use_pmw",
@@ -323,16 +323,16 @@ def run_local(args: dict, sweep_config: dict) -> None:
 
     # Always calculate world_size based on config values
     world_size = (
-        args["num_subdomains"]
-        * args["num_replicas_per_subdomain"]
-        * args["num_stages"]
+        args["num_subdomains"] * args["num_replicas_per_subdomain"] * args["num_stages"]
     )
     if args["use_pmw"]:
         print(
             f"PMW enabled: world_size = {args['num_subdomains']} * {args['num_replicas_per_subdomain']} * {args['num_stages']} = {world_size}"
         )
     else:
-        print(f"PMW disabled: world_size = {args['num_subdomains']} * {args['num_replicas_per_subdomain']} * {args['num_stages']} = {world_size}")
+        print(
+            f"PMW disabled: world_size = {args['num_subdomains']} * {args['num_replicas_per_subdomain']} * {args['num_stages']} = {world_size}"
+        )
 
     def spawn_training() -> None:
         if world_size == 1:

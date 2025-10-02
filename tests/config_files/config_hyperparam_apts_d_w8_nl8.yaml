@@ -1,0 +1,83 @@
+method: grid
+metric:
+  name: train_loss
+  goal: minimize
+parameters:
+  optimizer:
+    value: apts_d
+  batch_size:
+    value: 10000
+  effective_batch_size:
+    value: 10000
+  num_stages:
+    value: 1
+  num_subdomains:
+    value: 2
+  num_replicas_per_subdomain:
+    value: 1
+  glob_pass:
+    value: true
+  foc:
+    value: true
+  glob_second_order:
+    value: false
+  glob_dogleg:
+    value: false
+  loc_second_order:
+    value: false
+  loc_dogleg:
+    value: false
+  norm_type:
+    value: 2
+  max_loc_iters:
+    value: 2
+  max_glob_iters:
+    value: 1
+  max_iters:
+    value: 0
+  epochs:
+    value: 10
+  delta:
+    value: 0.1
+  min_delta:
+    value: 0.01
+  max_delta:
+    value: 1.0
+  dataset_name:
+    value: mnist
+  model_name:
+    value: medium_ffnn
+  width:
+    value: 8
+  num_layers:
+    value: 8
+  criterion:
+    value: cross_entropy
+  gradient_accumulation:
+    value: true
+  accumulation_steps:
+    value: 1
+  seed:
+    value: 42
+  tol:
+    value: 1e-6
+  shuffle:
+    value: false
+  precision:
+    value: float32
+  batch_inc_factor:
+    value: 1.5
+  overlap:
+    value: 0.33
+  mem_length:
+    value: 3
+  max_wolfe_iters:
+    value: 3
+  max_zoom_iters:
+    value: 3
+  glob_opt:
+    value: lssr1_tr
+  loc_opt:
+    value: lssr1_tr
+  paper_tr_update:
+    value: false
