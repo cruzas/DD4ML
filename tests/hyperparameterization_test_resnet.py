@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
-Hyperparameterization Test: SGD vs APTS_D for CNNs
+Hyperparameterization Test: SGD vs APTS_D for ResNet
 
 This script tests the hypothesis that SGD performs worse than APTS_D on
-overhyperparameterized networks. It runs both optimizers on MNIST with
-increasingly complex CNN architectures to demonstrate where SGD struggles.
+overhyperparameterized networks. It runs both optimizers on CIFAR-10 with
+increasingly complex ResNet architectures to demonstrate where SGD struggles.
 
 Usage:
-    python hyperparameterization_test_cnn.py
-    python hyperparameterization_test_cnn.py --num-conv-layers 2 4 8
-    python hyperparameterization_test_cnn.py --filters 32 64 128
+    python hyperparameterization_test_resnet.py
+    python hyperparameterization_test_resnet.py --depths 18 34 50
+    python hyperparameterization_test_resnet.py --base-widths 64 128
 """
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -23,14 +22,23 @@ from typing import List, Tuple
 import yaml
 from experiment_tracker import ExperimentTracker
 
+# Standard ResNet configurations
+RESNET_CONFIGS = {
+    18: [2, 2, 2, 2],
+    34: [3, 4, 6, 3],
+    50: [3, 4, 6, 3],  # Note: ResNet-50+ typically use Bottleneck, this is simplified
+    101: [3, 4, 23, 3],
+    152: [3, 8, 36, 3],
+}
+
 
 def create_config(
     optimizer: str,
-    filters: int,
-    num_conv_layers: int,
+    resnet_depth: int,
+    base_width: int,
     base_dir: Path,
     epochs: int = 2,
-    batch_size: int = 10000,
+    batch_size: int = 128,
     overlap: float = 0.0,
     batch_inc_factor: float = 1.0,
     max_wolfe_iters: int = None,
@@ -39,10 +47,9 @@ def create_config(
     num_subdomains: int = None,
     num_replicas_per_subdomain: int = None,
     num_stages: int = None,
-    fc_width: int = 128,
-    pool_every: int = 2,
+    dataset: str = "mnist",
 ) -> Path:
-    """Create a configuration file for the given optimizer and network size."""
+    """Create a configuration file for the given optimizer and ResNet architecture."""
 
     # Select base config template
     base_config = base_dir / "config_files" / f"config_{optimizer}.yaml"
@@ -54,26 +61,37 @@ def create_config(
     with open(base_config, "r") as f:
         config = yaml.safe_load(f)
 
+    # Get layers configuration for this depth
+    if resnet_depth not in RESNET_CONFIGS:
+        raise ValueError(
+            f"ResNet depth {resnet_depth} not supported. "
+            f"Supported depths: {list(RESNET_CONFIGS.keys())}"
+        )
+
+    layers_config = RESNET_CONFIGS[resnet_depth]
+
     # Update parameters
-    config["parameters"]["dataset_name"]["value"] = "mnist"
-    config["parameters"]["model_name"]["value"] = "medium_cnn"
+    config["parameters"]["dataset_name"]["value"] = dataset
+    config["parameters"]["model_name"]["value"] = "simple_resnet"
 
-    # CNN-specific parameters
-    if "num_conv_layers" not in config["parameters"]:
-        config["parameters"]["num_conv_layers"] = {}
-    config["parameters"]["num_conv_layers"]["value"] = num_conv_layers
+    # ResNet-specific parameters
+    if "layers_config" not in config["parameters"]:
+        config["parameters"]["layers_config"] = {}
+    config["parameters"]["layers_config"]["value"] = str(layers_config)
 
-    if "filters_per_layer" not in config["parameters"]:
-        config["parameters"]["filters_per_layer"] = {}
-    config["parameters"]["filters_per_layer"]["value"] = filters
+    if "resnet_depth" not in config["parameters"]:
+        config["parameters"]["resnet_depth"] = {}
+    config["parameters"]["resnet_depth"]["value"] = resnet_depth
 
-    if "fc_width" not in config["parameters"]:
-        config["parameters"]["fc_width"] = {}
-    config["parameters"]["fc_width"]["value"] = fc_width
+    if "base_width" not in config["parameters"]:
+        config["parameters"]["base_width"] = {}
+    config["parameters"]["base_width"]["value"] = base_width
 
-    if "pool_every" not in config["parameters"]:
-        config["parameters"]["pool_every"] = {}
-    config["parameters"]["pool_every"]["value"] = pool_every
+    # Set input_channels based on dataset
+    if "input_channels" not in config["parameters"]:
+        config["parameters"]["input_channels"] = {}
+    # CIFAR-10 = 3 channels (RGB), MNIST = 1 channel (grayscale)
+    config["parameters"]["input_channels"]["value"] = 3 if dataset == "cifar10" else 1
 
     # Common parameters
     config["parameters"]["batch_size"]["value"] = batch_size
@@ -135,7 +153,7 @@ def create_config(
         ] = num_replicas_per_subdomain
 
     # Create output config file
-    config_name = f"config_hyperparam_cnn_{optimizer}_f{filters}_cl{num_conv_layers}_trial{trial}.yaml"
+    config_name = f"config_hyperparam_resnet_{optimizer}_d{resnet_depth}_w{base_width}_trial{trial}.yaml"
     output_path = base_dir / "config_files" / config_name
 
     with open(output_path, "w") as f:
@@ -178,7 +196,7 @@ def run_experiment(
             [sys.executable, "run_config_file.py", "--sweep_config", str(config_path)],
             capture_output=False,
             text=True,
-            timeout=2400,  # 10 minute timeout
+            timeout=3600,  # 1 hour timeout (ResNet can be slower)
         )
 
         if result.returncode == 0:
@@ -206,33 +224,22 @@ def run_experiment(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Test hyperparameterization effects on SGD vs APTS_D for CNNs"
+        description="Test hyperparameterization effects on SGD vs APTS_D for ResNet"
     )
     parser.add_argument(
-        "--filters",
+        "--depths",
         nargs="+",
         type=int,
-        default=[32],
-        help="Number of filters per layer (default: 32)",
+        default=[18],
+        choices=[18, 34, 50, 101, 152],
+        help="ResNet depths to test (default: 18)",
     )
     parser.add_argument(
-        "--num-conv-layers",
+        "--base-widths",
         nargs="+",
         type=int,
-        default=[2],
-        help="Number of convolutional layers to test (default: 2 4 8)",
-    )
-    parser.add_argument(
-        "--fc-width",
-        type=int,
-        default=128,
-        help="Width of fully connected layer (default: 128)",
-    )
-    parser.add_argument(
-        "--pool-every",
-        type=int,
-        default=2,
-        help="Apply pooling every N layers (default: 2)",
+        default=[64],
+        help="Base widths to test (default: 64)",
     )
     parser.add_argument(
         "--optimizers",
@@ -245,13 +252,20 @@ def main():
         "--epochs",
         type=int,
         default=2,
-        help="Number of epochs to train (default: 2)",
+        help="Number of epochs to train (default: 10)",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=10000,
-        help="Batch size (default: 10000)",
+        default=128,
+        help="Batch size (default: 128)",
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="mnist",
+        choices=["mnist", "mnist"],
+        help="Dataset to use (default: mnist)",
     )
     parser.add_argument(
         "--overlap",
@@ -269,13 +283,13 @@ def main():
         "--max-wolfe-iters",
         type=int,
         default=None,
-        help="Maximum Wolfe line search iterations (optional, uses config default if not set)",
+        help="Maximum Wolfe line search iterations (optional)",
     )
     parser.add_argument(
         "--max-zoom-iters",
         type=int,
         default=None,
-        help="Maximum zoom iterations for line search (optional, uses config default if not set)",
+        help="Maximum zoom iterations for line search (optional)",
     )
     parser.add_argument(
         "--num-trials",
@@ -287,13 +301,13 @@ def main():
         "--num-subdomains",
         type=int,
         default=None,
-        help="Number of subdomains (optional, uses optimizer defaults if not set: SGD=1, APTS_D/P=2)",
+        help="Number of subdomains (optional, uses optimizer defaults if not set)",
     )
     parser.add_argument(
         "--num-replicas-per-subdomain",
         type=int,
         default=None,
-        help="Number of replicas per subdomain (optional, uses config default if not set)",
+        help="Number of replicas per subdomain (optional)",
     )
     parser.add_argument(
         "--num-stages",
@@ -323,17 +337,16 @@ def main():
     script_dir = Path(__file__).parent
 
     # Initialize experiment tracker
-    tracker = ExperimentTracker(script_dir / ".experiment_tracker_cnn.json")
+    tracker = ExperimentTracker(script_dir / ".experiment_tracker_resnet.json")
 
     print("=" * 80)
-    print("HYPERPARAMETERIZATION TEST: SGD vs APTS_D for CNNs")
+    print("HYPERPARAMETERIZATION TEST: SGD vs APTS_D for ResNet")
     print("=" * 80)
     print(f"\nTest configuration:")
     print(f"  Optimizers: {args.optimizers}")
-    print(f"  Filters per layer: {args.filters}")
-    print(f"  Number of conv layers: {args.num_conv_layers}")
-    print(f"  FC width: {args.fc_width}")
-    print(f"  Pool every: {args.pool_every} layers")
+    print(f"  ResNet depths: {args.depths}")
+    print(f"  Base widths: {args.base_widths}")
+    print(f"  Dataset: {args.dataset}")
     print(f"  Epochs: {args.epochs}")
     print(f"  Batch size: {args.batch_size}")
     print(f"  Overlap: {args.overlap}")
@@ -358,7 +371,7 @@ def main():
     if args.clean:
         print("Cleaning old config files...")
         config_dir = script_dir / "config_files"
-        for config_file in config_dir.glob("config_hyperparam_cnn_*.yaml"):
+        for config_file in config_dir.glob("config_hyperparam_resnet_*.yaml"):
             config_file.unlink()
             print(f"  Removed: {config_file.name}")
         print()
@@ -367,21 +380,21 @@ def main():
     configs = []
     total_experiments = (
         len(args.optimizers)
-        * len(args.filters)
-        * len(args.num_conv_layers)
+        * len(args.depths)
+        * len(args.base_widths)
         * args.num_trials
     )
 
     print(f"Generating {total_experiments} configurations...")
     for optimizer in args.optimizers:
-        for filters in args.filters:
-            for num_conv_layers in args.num_conv_layers:
+        for depth in args.depths:
+            for base_width in args.base_widths:
                 for trial in range(1, args.num_trials + 1):
                     try:
                         config_path = create_config(
                             optimizer=optimizer,
-                            filters=filters,
-                            num_conv_layers=num_conv_layers,
+                            resnet_depth=depth,
+                            base_width=base_width,
                             base_dir=script_dir,
                             epochs=args.epochs,
                             batch_size=args.batch_size,
@@ -393,16 +406,15 @@ def main():
                             num_subdomains=args.num_subdomains,
                             num_replicas_per_subdomain=args.num_replicas_per_subdomain,
                             num_stages=args.num_stages,
-                            fc_width=args.fc_width,
-                            pool_every=args.pool_every,
+                            dataset=args.dataset,
                         )
                         configs.append(
-                            (optimizer, filters, num_conv_layers, trial, config_path)
+                            (optimizer, depth, base_width, trial, config_path)
                         )
                         print(f"  ✓ Created: {config_path.name}")
                     except Exception as e:
                         print(
-                            f"  ✗ Failed to create config for {optimizer} f={filters} cl={num_conv_layers} trial={trial}: {e}"
+                            f"  ✗ Failed to create config for {optimizer} depth={depth} width={base_width} trial={trial}: {e}"
                         )
 
     print(f"\nGenerated {len(configs)} configurations")
@@ -417,21 +429,18 @@ def main():
     print("=" * 80 + "\n")
 
     results = []
-    for i, (optimizer, filters, num_conv_layers, trial, config_path) in enumerate(
-        configs, 1
-    ):
+    for i, (optimizer, depth, base_width, trial, config_path) in enumerate(configs, 1):
         print(
-            f"[{i}/{len(configs)}] {optimizer} - Filters: {filters}, Conv Layers: {num_conv_layers}, Trial: {trial}"
+            f"[{i}/{len(configs)}] {optimizer} - ResNet-{depth}, Width: {base_width}, Trial: {trial}"
         )
         metadata = {
             "optimizer": optimizer,
-            "filters": filters,
-            "num_conv_layers": num_conv_layers,
+            "resnet_depth": depth,
+            "base_width": base_width,
             "trial": trial,
-            "fc_width": args.fc_width,
-            "pool_every": args.pool_every,
             "epochs": args.epochs,
             "batch_size": args.batch_size,
+            "dataset": args.dataset,
         }
         success, output = run_experiment(
             config_path,
@@ -443,8 +452,8 @@ def main():
         results.append(
             {
                 "optimizer": optimizer,
-                "filters": filters,
-                "num_conv_layers": num_conv_layers,
+                "depth": depth,
+                "base_width": base_width,
                 "trial": trial,
                 "success": success,
                 "skipped": output == "skipped",
@@ -475,7 +484,7 @@ def main():
         print(f"  {optimizer}: {opt_success}/{len(opt_results)} successful")
 
     print("\nCheck wandb for detailed results and loss curves.")
-    print("Expected outcome: SGD should struggle more with deeper/wider CNNs")
+    print("Expected outcome: SGD should struggle more with deeper ResNets")
     print("compared to APTS_D, showing slower convergence or worse final loss.")
 
 
