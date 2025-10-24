@@ -8,14 +8,25 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim.optimizer import Optimizer
 
-from dd4ml.utility import (apts_ip_restore_params, clone_model, dprint,
-                           ensure_tensor, flatten_params, get_apts_hparams,
-                           get_device, get_loc_tr_hparams,
-                           get_loc_tradam_hparams, get_lssr1_loc_tr_hparams,
-                           get_lssr1_tr_hparams, get_state_dict,
-                           get_tr_hparams, mark_trainable, restore_params,
-                           trainable_grads_to_vector,
-                           trainable_params_to_vector)
+from dd4ml.utility import (
+    apts_ip_restore_params,
+    clone_model,
+    dprint,
+    ensure_tensor,
+    flatten_params,
+    get_apts_hparams,
+    get_device,
+    get_loc_tr_hparams,
+    get_loc_tradam_hparams,
+    get_lssr1_loc_tr_hparams,
+    get_lssr1_tr_hparams,
+    get_state_dict,
+    get_tr_hparams,
+    mark_trainable,
+    restore_params,
+    trainable_grads_to_vector,
+    trainable_params_to_vector,
+)
 
 from .asntr import ASNTR
 from .lssr1_tr import LSSR1_TR
@@ -39,7 +50,7 @@ class APTS_Base(Optimizer):
         loc_map = {
             "tr": (TR, get_loc_tr_hparams),
             "lssr1_tr": (LSSR1_TR, get_lssr1_loc_tr_hparams),
-            "tradam": (TRadam, get_loc_tradam_hparams),
+            "tradam": (TRAdam, get_loc_tradam_hparams),
             "sgd": (torch.optim.SGD, lambda _: {"lr": 0.01}),
         }
 
@@ -133,12 +144,25 @@ class APTS_Base(Optimizer):
         self.delta = self.glob_opt.delta
 
         # Buffers for flattened parameters: pre-allocate to avoid reallocations
-        sample_flat = parameters_to_vector(model.parameters())
-        self._flat_params_buffer = torch.empty_like(sample_flat)  # for global model
-        self._loc_flat_buffer = torch.empty_like(sample_flat)  # for local models
+        # Add safety for PMW models that might not work with parameters_to_vector
+        try:
+            sample_flat = parameters_to_vector(model.parameters())
+            self._flat_params_buffer = torch.empty_like(sample_flat)  # for global model
+            self._loc_flat_buffer = torch.empty_like(sample_flat)  # for local models
+            self._diff_cache = torch.empty_like(sample_flat)
+        except (RuntimeError, ValueError, TypeError) as e:
+            print(f"Warning: Failed to create parameter buffers, using None (may impact performance): {e}")
+            self._flat_params_buffer = None
+            self._loc_flat_buffer = None
+            self._diff_cache = None
 
         # Track number of gradient evaluations as simple Python floats
         self.grad_evals, self.loc_grad_evals = 0.0, 0.0
+
+        # Caching for efficiency
+        self._glob_flat_cache = None
+        self._loc_flat_cache = None
+        self._hess_precomputed_for_size = -1
 
     def _update_param_group(self):
         for key in self.param_groups[0].keys():
@@ -172,11 +196,8 @@ class APTS_Base(Optimizer):
         Converts the local model's gradients to a flattened vector.
         Returns a tensor containing the gradients of the local model parameters.
         """
-        return (
-            parameters_to_vector([p.grad for p in self.loc_model.parameters()])
-            .clone()
-            .detach()
-        )
+        # parameters_to_vector already returns a new tensor, no need for .clone()
+        return parameters_to_vector([p.grad for p in self.loc_model.parameters()]).detach()
 
     @torch.no_grad()
     def glob_params_to_vector(self):
@@ -184,7 +205,12 @@ class APTS_Base(Optimizer):
         Converts the global model's parameters to a flattened vector.
         Returns a tensor containing the parameters of the global model.
         """
-        return flatten_params(self.model, self._flat_params_buffer).clone().detach()
+        # flatten_params modifies buffer in-place, so clone is necessary here
+        if self._flat_params_buffer is not None:
+            return flatten_params(self.model, self._flat_params_buffer).clone().detach()
+        else:
+            # Fallback: create vector without buffer (less efficient)
+            return parameters_to_vector(self.model.parameters()).clone().detach()
 
     @torch.no_grad()
     def loc_params_to_vector(self):
@@ -192,7 +218,12 @@ class APTS_Base(Optimizer):
         Converts the local model's parameters to a flattened vector.
         Returns a tensor containing the parameters of the local model.
         """
-        return flatten_params(self.loc_model, self._loc_flat_buffer).clone().detach()
+        # flatten_params modifies buffer in-place, so clone is necessary here
+        if self._loc_flat_buffer is not None:
+            return flatten_params(self.loc_model, self._loc_flat_buffer).clone().detach()
+        else:
+            # Fallback: create vector without buffer (less efficient)
+            return parameters_to_vector(self.loc_model.parameters()).clone().detach()
 
     @torch.no_grad()
     def sync_glob_to_loc(self):
@@ -207,6 +238,9 @@ class APTS_Base(Optimizer):
 
         # Ensure local model matches global model for the next iteration
         self.loc_model.load_state_dict(get_state_dict(self.model))
+        # Preserve dtype after loading state dict
+        original_param = next(self.model.parameters())
+        self.loc_model = self.loc_model.to(dtype=original_param.dtype)
 
     def non_foc_loc_closure(self, compute_grad: bool = False):
         """
@@ -214,9 +248,14 @@ class APTS_Base(Optimizer):
         Computes and optionally backpropagates the local loss.
         """
         self.loc_opt.zero_grad()
-        loss = self.criterion(self.loc_model(self.inputs), self.labels)
-        if torch.is_grad_enabled() or compute_grad:
-            loss.backward()
+        loss = self.criterion(self.loc_model(self.inputs), self.labels.long())
+        if compute_grad:
+            # ``loss`` may be used for multiple backward passes within the
+            # trust-region optimisation loop.  Retaining the graph prevents
+            # PyTorch from freeing intermediate tensors too early, avoiding
+            # ``RuntimeError: Trying to backward through the graph a second
+            # time`` when the closure is re-evaluated.
+            loss.backward(retain_graph=True)
             self.loc_grad_evals += 1  # Count local gradient evaluation
         return loss
 
@@ -228,15 +267,27 @@ class APTS_Base(Optimizer):
         self.loc_opt.zero_grad()
         loss = self.non_foc_loc_closure(compute_grad)
 
-        # Flatten global and local parameters into pre-allocated buffers
-        glob_flat = flatten_params(self.model, self._flat_params_buffer)
-        loc_flat = flatten_params(self.loc_model, self._loc_flat_buffer)
-        diff = loc_flat - glob_flat
+        # Handle buffer availability for PMW models
+        if self._flat_params_buffer is not None and self._loc_flat_buffer is not None and self._diff_cache is not None:
+            # Flatten global and local parameters into pre-allocated buffers
+            glob_flat = flatten_params(self.model, self._flat_params_buffer)
+            loc_flat = flatten_params(self.loc_model, self._loc_flat_buffer)
 
-        # If difference above tolerance, add residual inner-product term
-        if not torch.all(torch.abs(diff) < self.tol):
-            if self.resid.dim() == 0 and self.resid.item() == 0:
+            # Use pre-allocated buffer for difference computation
+            torch.sub(loc_flat, glob_flat, out=self._diff_cache)
+            diff = self._diff_cache
+        else:
+            # Fallback: compute without buffers (less efficient but safer)
+            glob_flat = parameters_to_vector(self.model.parameters())
+            loc_flat = parameters_to_vector(self.loc_model.parameters())
+            diff = loc_flat - glob_flat
+
+        # Optimized tolerance check using norm instead of element-wise operations
+        if diff.norm() > self.tol:
+            if not hasattr(self, 'resid') or self.resid.dim() == 0 and self.resid.item() == 0:
                 self.resid = torch.zeros_like(diff)
+            # Ensure resid has the same dtype as diff for the dot product
+            self.resid = self.resid.to(dtype=diff.dtype)
             loss = loss + (self.resid @ diff)
         return loss
 
@@ -246,7 +297,7 @@ class APTS_Base(Optimizer):
         optionally backpropagates, and reduces loss across processes if needed.
         """
         self.zero_grad()
-        loss = self.criterion(self.model(self.inputs), self.labels)
+        loss = self.criterion(self.model(self.inputs), self.labels.long())
         if torch.is_grad_enabled() or compute_grad:
             loss.backward()  # DDP handles gradient averaging
             # Check if model is DDP-wrapped
@@ -257,15 +308,13 @@ class APTS_Base(Optimizer):
                     flat_grad = self.glob_grad_to_vector()
                     dist.all_reduce(flat_grad, op=dist.ReduceOp.SUM)
                     flat_grad.div_(self.nr_models)
-                    # unpack back into each parameter's grad
                     vector_to_parameters(
                         flat_grad, [p.grad for p in self.model.parameters()]
                     )
-
             self.grad_evals += 1.0  # Count global gradient evaluation
         if self.nr_models > 1:
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
-            loss /= self.nr_models
+            loss.div_(self.nr_models)  # In-place division (safe after all_reduce)
         return loss
 
     # For ASNTR
@@ -273,22 +322,40 @@ class APTS_Base(Optimizer):
         self.loc_opt.zero_grad()
         loss = self.criterion(self.loc_model(self.inputs_d), self.labels_d)
         if torch.is_grad_enabled() or compute_grad:
-            loss.backward()
+            # ``loss`` can be reused by the trust-region solver for multiple
+            # gradient evaluations.  Retaining the graph avoids the
+            # "backward through the graph a second time" runtime error when
+            # the closure is invoked repeatedly within a single optimisation
+            # step.
+            loss.backward(retain_graph=True)
+            self.loc_grad_evals += 1
         return loss
 
     def foc_loc_closure_d(self, compute_grad: bool = False):
         self.loc_opt.zero_grad()
         loss = self.non_foc_loc_closure_d(compute_grad)
 
-        # Flatten global and local parameters into pre-allocated buffers
-        glob_flat = flatten_params(self.model, self._flat_params_buffer)
-        loc_flat = flatten_params(self.loc_model, self._loc_flat_buffer)
-        diff = loc_flat - glob_flat
+        # Handle buffer availability for PMW models
+        if self._flat_params_buffer is not None and self._loc_flat_buffer is not None and self._diff_cache is not None:
+            # Flatten global and local parameters into pre-allocated buffers
+            glob_flat = flatten_params(self.model, self._flat_params_buffer)
+            loc_flat = flatten_params(self.loc_model, self._loc_flat_buffer)
 
-        # If difference above tolerance, add residual inner-product term
-        if not torch.all(torch.abs(diff) < self.tol):
-            if self.resid.dim() == 0 and self.resid.item() == 0:
+            # Use pre-allocated buffer for difference computation
+            torch.sub(loc_flat, glob_flat, out=self._diff_cache)
+            diff = self._diff_cache
+        else:
+            # Fallback: compute without buffers (less efficient but safer)
+            glob_flat = parameters_to_vector(self.model.parameters())
+            loc_flat = parameters_to_vector(self.loc_model.parameters())
+            diff = loc_flat - glob_flat
+
+        # Optimized tolerance check using norm instead of element-wise operations
+        if diff.norm() > self.tol:
+            if not hasattr(self, 'resid') or self.resid.dim() == 0 and self.resid.item() == 0:
                 self.resid = torch.zeros_like(diff)
+            # Ensure resid has the same dtype as diff for the dot product
+            self.resid = self.resid.to(dtype=diff.dtype)
             loss = loss + (self.resid @ diff)
         return loss
 
@@ -299,7 +366,7 @@ class APTS_Base(Optimizer):
             loss.backward()  # DDP will handle gradient averaging
         if self.nr_models > 1:
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
-            loss /= self.nr_models
+            loss.div_(self.nr_models)  # In-place division (safe after all_reduce)
         return loss
 
     def _step_loop(self, optim, max_iters, loss, grad, closure=None, closure_d=None):
@@ -309,6 +376,10 @@ class APTS_Base(Optimizer):
                 # Check if TR or LSSR1_TR optimizer
                 if isinstance(optim, (TR, LSSR1_TR)):
                     loss, grad = optim.step(closure=closure, loss=loss, grad=grad)
+                elif isinstance(optim, TRAdam):
+                    # For TRAdam, only use closure parameter
+                    loss = optim.step(closure=closure)
+                    grad = optim._flat_grad()
                 else:
                     # For ASNTR, we need to provide closure_d as well
                     loss, grad = optim.step(
@@ -323,7 +394,7 @@ class APTS_Base(Optimizer):
                 )
 
             # Stop iterations if gradient norm is below tolerance
-            if grad.norm(p=self.norm_type) <= optim.tol:
+            if hasattr(optim, 'tol') and grad.norm(p=self.norm_type) <= optim.tol:
                 break
 
         return loss, grad
@@ -398,7 +469,12 @@ class APTS_Base(Optimizer):
                 and self.glob_opt.hess._S is not None
                 and len(self.glob_opt.hess._S) > 0
             ):
-                self.glob_opt.hess.precompute()
+                # Only precompute if memory size changed
+                current_memory_size = len(self.glob_opt.hess._S)
+                if self._hess_precomputed_for_size != current_memory_size:
+                    self.glob_opt.hess.precompute()
+                    self._hess_precomputed_for_size = current_memory_size
+                    
                 Bp = self.glob_opt.hess.B(step)
                 pred_red -= 0.5 * step.dot(Bp)
         else:

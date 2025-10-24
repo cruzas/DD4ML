@@ -8,15 +8,53 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from .optimizer_utils import get_state_dict
 
 
+def _get_device():
+    """Cache device to avoid repeated CUDA checks."""
+    from .utils import get_default_device
+    return get_default_device()
+
+
 def flatten_params(model, out=None):
+    # Infer param dtype/device from the first parameter
+    first = next(model.parameters(), None)
+    if first is None:
+        # Empty model: honour out if provided, else default dtype/device
+        if out is None:
+            return torch.empty(0, dtype=torch.get_default_dtype())
+        return out.narrow(0, 0, 0).clone()
+
+    param_dtype = first.dtype
+    param_device = first.device
+
+    # Decide target dtype/device dynamically
+    # Promote to float64 iff either params or out are float64
+    if out is not None and out.dtype == torch.float64 or param_dtype == torch.float64:
+        target_dtype = torch.float64
+    else:
+        target_dtype = param_dtype
+    target_device = param_device
+
     if out is None:
-        return parameters_to_vector(model.parameters())
-    # Write flattened parameters into a preallocated tensor.
+        # Create flattened vector and upcast only if necessary.
+        return parameters_to_vector(model.parameters()).to(
+            dtype=target_dtype, device=target_device
+        )
+
+    # Conform out to target dtype/device (no pre-scan).
+    if out.dtype != target_dtype or out.device != target_device:
+        out = out.to(device=target_device, dtype=target_dtype)
+
+    # Write flattened parameters into the preallocated tensor.
     offset = 0
-    for param in model.parameters():
-        numel = param.numel()
-        out[offset : offset + numel].copy_(param.data.view(-1))
+    for p in model.parameters():
+        numel = p.numel()
+        # Convert on the fly only if needed (avoids an upfront pass).
+        src = p.data.view(-1)
+        if src.dtype != target_dtype:
+            src = src.to(target_dtype)
+        out[offset : offset + numel].copy_(src)
         offset += numel
+
     return out.clone()
 
 
@@ -35,12 +73,15 @@ def clone_model(model):
     config_copy = copy.deepcopy(base_model.config)
     config_copy.model_type = None
     new_model = type(base_model)(config_copy)
+    # Preserve both device and dtype from original model
+    original_param = next(model.parameters())
+    new_model = new_model.to(device=original_param.device, dtype=original_param.dtype)
     new_model.load_state_dict(get_state_dict(base_model))
-    return new_model.to(next(model.parameters()).device)
+    return new_model
 
 
 def broadcast_shuffle(num_layers: int, rank: int, world_size: int) -> torch.Tensor:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = _get_device()
     if rank == 0:
         perm = torch.randperm(num_layers, dtype=torch.long, device=device)
     else:
@@ -50,18 +91,11 @@ def broadcast_shuffle(num_layers: int, rank: int, world_size: int) -> torch.Tens
 
 
 def split_indices(perm: torch.Tensor, rank: int, world_size: int) -> torch.Tensor:
-    # q, r = divmod(len(perm), world_size)
-    # start = rank * q + min(rank, r)
-    # end = start + q + (1 if rank < r else 0)
-    # return perm[start:end]
     n = len(perm)
-    start, remaining = 0, n
-    for i in range(world_size):
-        size = remaining // (world_size - i) if i < world_size - 1 else remaining
-        if i == rank:
-            return perm[start : start + size]
-        start += size
-        remaining -= size
+    q, r = divmod(n, world_size)
+    start = rank * q + min(rank, r)
+    end = start + q + (1 if rank < r else 0)
+    return perm[start:end]
 
 
 def mark_trainable(model: nn.Module):
@@ -69,6 +103,9 @@ def mark_trainable(model: nn.Module):
 
     params = list(model.parameters())
     num_layers = len(params)
+
+    if num_layers == 0:
+        return model
 
     if world_size > num_layers:
         raise ValueError(
@@ -99,37 +136,23 @@ def trainable_params_to_vector(model: nn.Module) -> torch.Tensor:
     """
     Returns a flat vector containing all trainable parameters of the model.
     """
-    return torch.cat(
-        [p.detach().view(-1) for p in model.parameters() if p.requires_grad]
-    ).clone()
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    if not trainable_params:
+        return torch.tensor([], dtype=torch.float32)
+
+    return torch.cat([p.detach().view(-1) for p in trainable_params]).clone()
 
 
 def trainable_grads_to_vector(model: nn.Module) -> torch.Tensor:
     """
     Returns a flat vector containing the gradients of all trainable parameters of the model.
     """
-    grads = []
-    for p in model.parameters():
-        if not p.requires_grad:
-            continue
-        if p.grad is None:
-            grads.append(torch.zeros_like(p).view(-1))
-        else:
-            grads.append(p.grad.view(-1))
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    if not trainable_params:
+        return torch.tensor([], dtype=torch.float32)
+
+    grads = [p.grad.view(-1) if p.grad is not None else torch.zeros_like(p).view(-1)
+             for p in trainable_params]
     return torch.cat(grads).detach()
 
 
-# def trainable_grads_to_vector(model: nn.Module) -> torch.Tensor:
-#     """
-#     Returns a vector containing only the trainable gradients of the model.
-#     """
-#     return torch.cat(
-#         [
-#             (
-#                 p.grad.view(-1)
-#                 if p.requires_grad and p.grad is not None
-#                 else p.new_zeros(p.numel())
-#             )
-#             for p in model.parameters()
-#         ]
-#     ).detach()

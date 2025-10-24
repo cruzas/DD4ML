@@ -26,12 +26,18 @@ def broadcast_dict(d, src=0):
 # -----------------------------------------------------------------------------
 # From minGPT utils
 # -----------------------------------------------------------------------------
+def get_default_device():
+    """Get the default device (CUDA if available, otherwise CPU)."""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # For multi-GPU
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # For multi-GPU
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
@@ -47,7 +53,7 @@ def setup_logging(config):
     # log the config itself
     with open(os.path.join(work_dir, "config.json"), "w") as f:
         dict_config = config.to_dict()
-        f.write(json.dumps(config.to_dict(), indent=4))
+        f.write(json.dumps(dict_config, indent=4))
 
 
 class CfgNode:
@@ -77,26 +83,19 @@ class CfgNode:
 
     def to_dict(self):
         """Return a dict representation of the config with JSON-serializable values."""
-        result = {}
-
-        for k, v in self.__dict__.items():
+        def serialize_value(v):
             if isinstance(v, CfgNode):
-                # Recursively call to_dict for nested CfgNode instances
-                result[k] = v.to_dict()
+                return v.to_dict()
             elif isinstance(v, type):
-                # Convert class references to string
-                result[k] = f"{v.__module__}.{v.__name__}"
+                return f"{v.__module__}.{v.__name__}"
             elif v is None:
-                # Replace None with a JSON-serializable equivalent
-                result[k] = "null"
+                return "null"
             elif v is Ellipsis:
-                # Replace ellipses (...) with a placeholder string
-                result[k] = "..."
+                return "..."
             else:
-                # Keep other values as is
-                result[k] = v
+                return v
 
-        return result
+        return {k: serialize_value(v) for k, v in self.__dict__.items()}
 
     def merge_from_dict(self, d):
         self.__dict__.update(d)

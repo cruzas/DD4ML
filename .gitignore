@@ -16,6 +16,10 @@ tests/wandb_sweep/wandb/
 tests/wandb_sweep/sweep_id.txt
 *.csv
 
+# Experiment tracker files (optional - uncomment if you don't want to commit tracking data)
+# tests/.experiment_tracker_*.json
+# tests/.example_tracker.json
+
 # IDE files
 .vscode/
 .idea/
@@ -52,3 +56,5 @@ tests/config_files/config_files/*trial*
 /tests/MNIST
 /tests/config_files/*trial*
 
+*.pdf
+*.json

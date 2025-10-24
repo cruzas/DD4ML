@@ -6,13 +6,13 @@ parameters:
   optimizer: 
     value: "apts_d" 
   batch_size:
-    value: 5000
+    value: 10000
   effective_batch_size:
-    value: 5000
+    value: 10000
   num_stages:
     value: 1
   num_subdomains:
-    value: 1
+    value: 2
   num_replicas_per_subdomain:
     value: 1
   glob_pass:
@@ -22,11 +22,11 @@ parameters:
   glob_second_order:
     value: True
   glob_dogleg:
-    value: False
+    value: True
   loc_second_order:
-    value: False
+    value: True
   loc_dogleg:
-    value: False
+    value: True
   norm_type:
     value: 2
   max_loc_iters:
@@ -36,17 +36,21 @@ parameters:
   max_iters:
     value: 10 # for Transformers
   epochs: 
-    value: 10
+    value: 5
   delta: 
     value: 0.1
   min_delta: 
-    value: 0.001
+    value: 0.01
   max_delta:
-    value: 2.0
+    value: 1.0
   dataset_name: 
     value: "mnist" 
-  model_name: 
-    value: "simple_cnn"
+  model_name:
+    value: "medium_ffnn"
+  width:
+    value: None
+  num_layers:
+    value: None
   criterion:
     value: "cross_entropy"
   gradient_accumulation:
@@ -57,6 +61,10 @@ parameters:
     value: 42
   tol:
     value: 1e-6
+  shuffle:
+    value: False
+  precision:
+    value: "float32"  # Options: "float32", "float64"
   batch_inc_factor:
     value: 1.5
   overlap:
@@ -64,12 +72,12 @@ parameters:
   mem_length:
     value: 3
   max_wolfe_iters:
-    value: 10
+    value: 5
   max_zoom_iters:
-    value: 20
+    value: 5
   glob_opt:
     value: "lssr1_tr"
   loc_opt:
-    value: "tr"
+    value: "lssr1_tr"
   paper_tr_update:
     value: False

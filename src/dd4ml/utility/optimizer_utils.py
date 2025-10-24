@@ -8,6 +8,13 @@ from torch import Tensor
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 
+def _get_world_size_and_scale(config):
+    """Helper to get world size and delta scaling factor."""
+    world_size = dist.get_world_size() if dist.is_initialized() else 1
+    delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
+    return world_size, delta_scale
+
+
 def get_state_dict(model):
     """
     Returns the state dictionary of the model, handling both single and distributed models.
@@ -70,8 +77,7 @@ def get_lssr1_loc_tr_hparams(config):
     Returns default hyperparameters for the L-S-SR1 Trust-Region optimizer,
     when used as the local optimizer for APTS.
     """
-    world_size = dist.get_world_size() if dist.is_initialized() else 1
-    delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
+    world_size, delta_scale = _get_world_size_and_scale(config)
     return {
         "delta": config.delta * delta_scale,
         "min_delta": config.min_delta * delta_scale,
@@ -127,8 +133,7 @@ def get_loc_tr_hparams(config):
     Returns default hyperparameters for the Trust-Region optimizer,
     when used as the local optimizer for APTS.
     """
-    world_size = dist.get_world_size() if dist.is_initialized() else 1
-    delta_scale = 1.0 / world_size if config.norm_type != math.inf else 1.0
+    world_size, delta_scale = _get_world_size_and_scale(config)
     return {
         "delta": config.delta * delta_scale,
         "max_delta": config.max_delta * delta_scale,  # Lower maximum for local updates
@@ -240,21 +245,23 @@ def solve_tr_second_order(
 
     # Precompute and helpers
     lsr1_hessian.precompute()
-    B = lambda v: lsr1_hessian.B(v)
     delta = trust_radius
 
     # OBS (full step)
+    delta_tensor = torch.scalar_tensor(delta, device=gradient.device, dtype=gradient.dtype)
     p_b = obs_solver.solve_tr_subproblem(
         gradient,
-        torch.tensor(delta, device=gradient.device, dtype=gradient.dtype),
+        delta_tensor,
         lsr1_hessian.gamma,
         lsr1_hessian.Psi,
         lsr1_hessian.Minv,
     )
 
     # Cauchy point along -g
-    Bg = B(gradient)
-    gBg = gradient.dot(Bg)
+    Bg = lsr1_hessian.B(gradient)
+    # Ensure gradient and Bg have compatible dtypes for dot product
+    Bg_compatible = Bg.to(dtype=gradient.dtype)
+    gBg = gradient.dot(Bg_compatible)
     # Safe guard it if g^T*B*g <= 0
     alpha = grad_norm**2 / gBg if gBg > 0 else 0.0
     p_cand = -gradient * alpha
@@ -266,9 +273,11 @@ def solve_tr_second_order(
 
     # Dogleg combination
     if dogleg and gBg > 0:
-        if torch.norm(p_b) <= delta:
+        p_b_norm = torch.norm(p_b)
+        p_c_norm = torch.norm(p_c)
+        if p_b_norm <= delta:
             p = p_b
-        elif torch.norm(p_c) >= delta:
+        elif p_c_norm >= delta:
             p = p_c
         else:
             # solve ||p_c + tau*(p_b-p_c)‖ = delta
@@ -281,14 +290,18 @@ def solve_tr_second_order(
             if disc < 0:
                 p = p_c  # fallback to Cauchy point if no valid tau
             else:
-                tau = (-b + torch.sqrt(disc)) / (2 * a)
+                tau = (-b + torch.sqrt(torch.clamp(disc, min=0.0))) / (2 * a)
                 p = p_c + tau * d
     else:
         p = p_b
 
     # Compute the predicted reduction
-    g_dot_p = gradient.dot(p)
-    p_B_p = p.dot(B(p))
+    # Ensure compatible dtypes for dot products
+    p_compatible = p.to(dtype=gradient.dtype)
+    g_dot_p = gradient.dot(p_compatible)
+    Bp = lsr1_hessian.B(p)
+    Bp_compatible = Bp.to(dtype=p.dtype)
+    p_B_p = p.dot(Bp_compatible)
     predicted = -(g_dot_p + 0.5 * p_B_p)
 
     return p, predicted
@@ -299,12 +312,10 @@ def ensure_tensor(d, device):
     Ensures that the input "d" is a tensor on the specified device.
     If "d" is an int or float, it converts it to a tensor.
     """
-    if isinstance(d, (int, float)):
-        d = torch.tensor(d, device=device)
-        return d
-    elif torch.is_tensor(d):
-        d = d.to(device)
-        return d
+    if torch.is_tensor(d):
+        return d.to(device)
+    elif isinstance(d, (int, float)):
+        return torch.scalar_tensor(d, device=device)
     else:
         raise TypeError(
             f"Unexpected type for d: {type(d)}. Expected int, float, or torch.Tensor."

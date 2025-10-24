@@ -30,4 +30,75 @@ class PINNFFNN(BaseFFNN):
 
     def forward(self, x):
         return self.net(x)
-        return self.net(x)
+
+    def as_model_dict(self):
+        cfg = self.config
+        md = {
+            "start": {
+                "callable": {
+                    "object": nn.Sequential,
+                    "settings": {
+                        "modules": [
+                            {
+                                "object": nn.Linear,
+                                "settings": {
+                                    "in_features": cfg.input_features,
+                                    "out_features": cfg.fc_layers[0],
+                                },
+                            },
+                            {"object": nn.Tanh, "settings": {}},
+                        ]
+                    },
+                },
+                "dst": {"to": ["stage2"]},
+                "rcv": {"src": [], "strategy": None},
+                "stage": 0,
+                "num_layer_shards": 1,
+            },
+            **{
+                f"stage{i}": {
+                    "callable": {
+                        "object": nn.Sequential,
+                        "settings": {
+                            "modules": [
+                                {
+                                    "object": nn.Linear,
+                                    "settings": {
+                                        "in_features": cfg.fc_layers[i - 2],
+                                        "out_features": cfg.fc_layers[i - 1],
+                                    },
+                                },
+                                {"object": nn.Tanh, "settings": {}},
+                            ]
+                        },
+                    },
+                    "dst": {
+                        "to": [f"stage{i+1}"] if i < len(cfg.fc_layers) else ["finish"]
+                    },
+                    "rcv": {
+                        "src": ["start"] if i == 2 else [f"stage{i-1}"],
+                        "strategy": None,
+                    },
+                    "stage": i - 1,
+                    "num_layer_shards": 1,
+                }
+                for i in range(2, len(cfg.fc_layers) + 1)
+            },
+            "finish": {
+                "callable": {
+                    "object": nn.Linear,
+                    "settings": {
+                        "in_features": cfg.fc_layers[-1],
+                        "out_features": cfg.output_classes,
+                    },
+                },
+                "dst": {"to": []},
+                "rcv": {"src": [f"stage{len(cfg.fc_layers)}"], "strategy": None},
+                "stage": len(cfg.fc_layers),
+                "num_layer_shards": 1,
+            },
+        }
+
+        self.model_dict = md
+        self.set_stage()
+        return md

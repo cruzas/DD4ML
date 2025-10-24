@@ -319,7 +319,7 @@ class WeightParallelizedTensor(BasePMWModel):
             master_group=self.master_group,
             rank=self.rank,
         )
-    
+
     def max(self, dim=None, keepdim=False):
         """
         Compute the global maximum across all shards.

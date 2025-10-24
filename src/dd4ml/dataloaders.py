@@ -227,7 +227,9 @@ class MicroBatchFlattenSampler(BatchSampler):
 
 from torch.utils.data import RandomSampler, SequentialSampler
 
+
 class GeneralizedDistributedDataLoader(DataLoader):
+
     def __init__(
         self,
         model_handler,
@@ -241,23 +243,33 @@ class GeneralizedDistributedDataLoader(DataLoader):
         seed=0,
         **kwargs,
     ):
+        # Set default device if not provided
+        if device is None:
+            from .utility.utils import get_default_device
+
+            device = str(get_default_device())
+
         if "drop_last" in kwargs:
-            print("(WARNING) drop_last will always be True in GeneralizedDistributedDataLoader.")
+            print(
+                "(WARNING) drop_last will always be True in GeneralizedDistributedDataLoader."
+            )
             kwargs.pop("drop_last")
         if batch_size > len(dataset):
-            print(f"(WARNING) Batch size {batch_size} > dataset size {len(dataset)}; reducing.")
+            print(
+                f"(WARNING) Batch size {batch_size} > dataset size {len(dataset)}; reducing."
+            )
             batch_size = len(dataset)
 
         tot_replicas = model_handler.tot_replicas
-        distributed = (tot_replicas > 1)
+        distributed = tot_replicas > 1
         per_replica_bs = batch_size // max(tot_replicas, 1)
 
         world_size = dist.get_world_size()
-        rank       = dist.get_rank()
+        rank = dist.get_rank()
 
         first_ranks = model_handler.get_stage_ranks("first", mode="global")
-        last_ranks  = model_handler.get_stage_ranks("last",  mode="global")
-        all_ranks   = list(range(world_size))
+        last_ranks = model_handler.get_stage_ranks("last", mode="global")
+        all_ranks = list(range(world_size))
         middle_ranks = [r for r in all_ranks if r not in first_ranks + last_ranks]
 
         def make_sampler(layer_ranks, ds, do_shuffle):
@@ -442,15 +454,18 @@ class Power_DL:
         dataset,
         batch_size=1,
         shuffle=False,
-        device=(
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        ),
+        device=None,  # Will use get_default_device() in __init__
         precision=torch.get_default_dtype(),
         overlapping_samples=0,
         SHARED_OVERLAP=False,  # if True: overlap samples are shared between minibatches
         mean=[],
         std=[],
     ):
+        # Set default device if not provided
+        if device is None:
+            from .utility.utils import get_default_device
+
+            device = get_default_device()
 
         self.dataset = dataset
         self.batch_size = batch_size
@@ -500,24 +515,28 @@ class Power_DL:
         self.dataset.data = change_channel_position(self.dataset.data)
         # self.dataset.data = normalize_dataset(self.dataset.data, mean, std) # Data normalization
 
-        dtype = torch.LongTensor
-        if torch.cuda.is_available() and (
-            "MNIST" in str(dataset.__class__) or "CIFAR" in str(dataset.__class__)
-        ):
-            dtype = torch.cuda.LongTensor
-        elif torch.cuda.is_available() and "Sine" in str(dataset.__class__):
-            dtype = torch.cuda.FloatTensor
-        elif not torch.cuda.is_available() and (
-            "MNIST" in str(dataset.__class__) or "CIFAR" in str(dataset.__class__)
-        ):
-            dtype = torch.LongTensor
-        elif not torch.cuda.is_available() and "Sine" in str(dataset.__class__):
-            if self.precision == 32:
-                dtype = torch.float32
-            elif self.precision == 64:
-                dtype = torch.float64
-            elif self.precision == 16:
-                dtype = torch.float16
+        cuda_available = torch.cuda.is_available()
+        dataset_class_name = str(dataset.__class__)
+
+        if cuda_available:
+            if "MNIST" in dataset_class_name or "CIFAR" in dataset_class_name:
+                dtype = torch.cuda.LongTensor
+            elif "Sine" in dataset_class_name:
+                dtype = torch.cuda.FloatTensor
+            else:
+                dtype = torch.LongTensor
+        else:
+            if "MNIST" in dataset_class_name or "CIFAR" in dataset_class_name:
+                dtype = torch.LongTensor
+            elif "Sine" in dataset_class_name:
+                precision_map = {
+                    32: torch.float32,
+                    64: torch.float64,
+                    16: torch.float16,
+                }
+                dtype = precision_map.get(self.precision, torch.float32)
+            else:
+                dtype = torch.LongTensor
 
         try:
             # TODO: Copy on cuda to avoid problems with parallelization (and maybe other problems)

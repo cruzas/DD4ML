@@ -1,6 +1,8 @@
+import torch.nn as nn
+import torch.optim as optim
+from .deeponet_loss import DeepONetMSELoss
 from .ml_utils import cross_entropy_transformers
 from .utils import import_attr
-from .deeponet_loss import DeepONetMSELoss
 
 
 class Factory:
@@ -69,12 +71,19 @@ DATASET_MAP = {
     "poisson1d": ("dd4ml.datasets.pinn_poisson", "Poisson1DDataset"),
     "poisson2d": ("dd4ml.datasets.pinn_poisson2d", "Poisson2DDataset"),
     "poisson3d": ("dd4ml.datasets.pinn_poisson3d", "Poisson3DDataset"),
+    "allencahn1d": ("dd4ml.datasets.pinn_allencahn", "AllenCahn1DDataset"),
+    "allencahn1d_time": (
+        "dd4ml.datasets.pinn_allencahn_time",
+        "AllenCahn1DTimeDataset",
+    ),
     "deeponet_sine": ("dd4ml.datasets.deeponet_sine", "SineOperatorDataset"),
 }
 
 MODEL_MAP = {
     "ffnn": ("dd4ml.models.ffnn.simple_ffnn", "SimpleFFNN"),
     "medium_ffnn": ("dd4ml.models.ffnn.medium_ffnn", "MediumFFNN"),
+    "large_ffnn": ("dd4ml.models.ffnn.large_ffnn", "LargeFFNN"),
+    "xl_ffnn": ("dd4ml.models.ffnn.xl_ffnn", "XLFFNN"),
     "simple_cnn": ("dd4ml.models.cnn.simple_cnn", "SimpleCNN"),
     "medium_cnn": ("dd4ml.models.cnn.medium_cnn", "MediumCNN"),
     "big_cnn": ("dd4ml.models.cnn.big_cnn", "BigCNN"),
@@ -89,17 +98,15 @@ MODEL_MAP = {
 }
 
 CRITERION_MAP = {
-    "cross_entropy": ("", lambda ds=None: __import__("torch.nn").nn.CrossEntropyLoss()),
+    "cross_entropy": ("", lambda ds=None: nn.CrossEntropyLoss()),
     "weighted_cross_entropy": (
         "",
-        lambda ds: __import__("torch.nn").nn.CrossEntropyLoss(
-            weight=ds.compute_class_weights()
-        ),
+        lambda ds: nn.CrossEntropyLoss(weight=ds.compute_class_weights()),
     ),
-    "mse": ("", lambda ds=None: __import__("torch.nn").nn.MSELoss()),
+    "mse": ("", lambda ds=None: nn.MSELoss()),
     "cross_entropy_transformers": (
         "",
-        lambda ds=None: cross_entropy_transformers,  # Assumes defined elsewhere.
+        lambda ds=None: cross_entropy_transformers,
     ),
     "pinn_poisson": (
         "dd4ml.utility.pinn_poisson_loss",
@@ -113,6 +120,14 @@ CRITERION_MAP = {
         "dd4ml.utility.pinn_poisson3d_loss",
         "Poisson3DPINNLoss",
     ),
+    "pinn_allencahn": (
+        "dd4ml.utility.pinn_allencahn_loss",
+        "AllenCahnPINNLoss",
+    ),
+    "pinn_allencahn_time": (
+        "dd4ml.utility.pinn_allencahn_time_loss",
+        "AllenCahnTimePINNLoss",
+    ),
     "deeponet_mse": (
         "",
         lambda ds=None: DeepONetMSELoss(),
@@ -122,33 +137,23 @@ CRITERION_MAP = {
 OPTIMIZER_MAP = {
     "sgd": (
         "",
-        lambda model, lr: __import__("torch.optim").optim.SGD(
-            model.parameters(), lr=lr, momentum=0.9
-        ),
+        lambda model, lr: optim.SGD(model.parameters(), lr=lr, momentum=0.9),
     ),
     "adam": (
         "",
-        lambda model, lr: __import__("torch.optim").optim.Adam(
-            model.parameters(), lr=lr
-        ),
+        lambda model, lr: optim.Adam(model.parameters(), lr=lr),
     ),
     "adamw": (
         "",
-        lambda model, lr: __import__("torch.optim").optim.AdamW(
-            model.parameters(), lr=lr
-        ),
+        lambda model, lr: optim.AdamW(model.parameters(), lr=lr),
     ),
     "adagrad": (
         "",
-        lambda model, lr: __import__("torch.optim").optim.Adagrad(
-            model.parameters(), lr=lr
-        ),
+        lambda model, lr: optim.Adagrad(model.parameters(), lr=lr),
     ),
     "rmsprop": (
         "",
-        lambda model, lr: __import__("torch.optim").optim.RMSprop(
-            model.parameters(), lr=lr
-        ),
+        lambda model, lr: optim.RMSprop(model.parameters(), lr=lr),
     ),
 }
 

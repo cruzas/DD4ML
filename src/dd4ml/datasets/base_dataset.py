@@ -62,7 +62,8 @@ class BaseDataset(Dataset, ABC):
         x_batch, _ = next(iter(dummy_train_loader))
         device = config.device
         if device == "auto":
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            from ..utility.utils import get_default_device
+            device = str(get_default_device())
 
         return x_batch.to(device)
 
@@ -81,6 +82,7 @@ class BaseDataset(Dataset, ABC):
         _, y_batch = next(iter(dummy_train_loader))
         device = config.device
         if device == "auto":
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            from ..utility.utils import get_default_device
+            device = str(get_default_device())
 
         return y_batch.to(device)

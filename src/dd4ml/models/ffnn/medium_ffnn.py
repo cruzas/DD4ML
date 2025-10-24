@@ -10,12 +10,17 @@ class MediumFFNN(BaseFFNN):
         C.input_features  = 1 * 28 * 28
         C.output_classes  = 10
         C.fc_layers       = [128] * 8
+        C.num_layers      = None  # if set, overrides fc_layers length
         C.dropout_p       = 0.0
         return C
 
     def __init__(self, config):
         super().__init__(config)
-        # build 8 hidden stages
+        # If num_layers is specified, override fc_layers
+        if config.num_layers is not None:
+            width = config.fc_layers[0] if config.fc_layers else 128
+            config.fc_layers = [width] * config.num_layers
+        # build hidden stages
         in_feats = config.input_features
         for i, h in enumerate(config.fc_layers, start=1):
             setattr(self, f"stage{i}", nn.Sequential(
@@ -32,6 +37,11 @@ class MediumFFNN(BaseFFNN):
         for i in range(1, len(self.config.fc_layers) + 1):
             x = getattr(self, f"stage{i}")(x)
         return F.log_softmax(self.finish(x), dim=1)
+
+    def _create_fc_stages(self):
+        """Create FC stages using the factory helper."""
+        from ...utility.model_factory import create_fc_stage_modules
+        return create_fc_stage_modules(self.config)
 
     def as_model_dict(self):
         cfg = self.config
@@ -68,37 +78,7 @@ class MediumFFNN(BaseFFNN):
                 "stage":    0,
                 "num_layer_shards": 1
             },
-            **{
-                f"stage{i}": {
-                    "callable": {
-                        "object": nn.Sequential,
-                        "settings": {
-                            "modules": [
-                                {
-                                    "object": nn.Linear,
-                                    "settings": {
-                                        "in_features":  cfg.fc_layers[i-2],
-                                        "out_features": cfg.fc_layers[i-1]
-                                    }
-                                },
-                                {
-                                    "object": nn.ReLU,
-                                    "settings": {"inplace": True}
-                                },
-                                {
-                                    "object": nn.Dropout,
-                                    "settings": {"p": cfg.dropout_p}
-                                }
-                            ]
-                        }
-                    },
-                    "dst":      {"to": [f"stage{i+1}"] if i < len(cfg.fc_layers) else ["finish"]},
-                    "rcv":      {"src": ["start"] if i == 2 else [f"stage{i-1}"], "strategy": None},
-                    "stage":    i - 1,
-                    "num_layer_shards": 1
-                }
-                for i in range(2, len(cfg.fc_layers) + 1)
-            },
+            **self._create_fc_stages(),
             "finish": {
                 "callable": {
                     "object": nn.Linear,

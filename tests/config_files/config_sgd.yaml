@@ -2,28 +2,38 @@ method: grid
 metric:
   name: train_loss
   goal: minimize
+
 parameters:
-  optimizer: 
+  optimizer:
     value: "sgd"
   batch_size:
-    value: 128
+    value: 10000
   effective_batch_size:
-    value: 128 
-  epochs: 
+    value: 10000
+  epochs:
     value: 5
   max_iters:
-    value: 2000
+    value: 4000
   learning_rate:
     value: 0.01
-  dataset_name: 
+  dataset_name:
     value: "mnist"
-  model_name: 
-    value: "simple_cnn"
+  model_name:
+    value: "ffnn"
+  width:
+    value: None
+  num_layers:
+    value: None
   criterion:
     value: "cross_entropy"
   seed:
     value: 42
-  # For parallel computation
+  tol:
+    value: 1e-9
+  shuffle:
+    value: False
+  precision:
+    value: "float32"
   num_subdomains:
     value: 1
   num_stages:
@@ -38,3 +48,7 @@ parameters:
     value: 1.0
   overlap:
     value: 0.0
+  contiguous_subdomains:
+    value: False
+  exclusive:
+    value: True

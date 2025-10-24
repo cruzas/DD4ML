@@ -14,22 +14,24 @@ class SimpleFFNN(BaseFFNN):
         C = BaseFFNN.get_default_config()
         C.input_features = 1 * 28 * 28
         C.output_classes = 10
-        C.fc_layers = [128, 64]
-        C.dropout_p = 0.2
+        C.fc_layers = [8, 8]
+        C.dropout_p = 0.0
         return C
 
     def __init__(self, config):
         super().__init__(config)
-        layers = OrderedDict()
-        in_feats = config.input_features
+        from ...utility.model_factory import create_fc_layers
 
-        for i, h in enumerate(config.fc_layers, start=1):
-            layers[f"fc{i}"] = nn.Linear(in_feats, h)
-            layers[f"relu{i}"] = nn.ReLU()
-            layers[f"dropout{i}"] = nn.Dropout(config.dropout_p)
-            in_feats = h
+        # Create the main layers using the factory function
+        layers = create_fc_layers(
+            input_features=config.input_features,
+            fc_layers=config.fc_layers,
+            dropout_p=config.dropout_p,
+            use_sequential=False  # Get OrderedDict to add output layer
+        )
 
-        layers["out"] = nn.Linear(in_feats, config.output_classes)
+        # Add output layer
+        layers["out"] = nn.Linear(config.fc_layers[-1], config.output_classes)
         self.net = nn.Sequential(layers)
 
     def forward(self, x):

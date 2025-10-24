@@ -7,6 +7,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import yaml
 
+from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
 from dd4ml.datasets.pinn_poisson import Poisson1DDataset
 from dd4ml.datasets.pinn_poisson2d import Poisson2DDataset
 from dd4ml.datasets.pinn_poisson3d import Poisson3DDataset
@@ -21,12 +22,33 @@ from dd4ml.utility import (
     set_seed,
 )
 
+# torch.autograd.set_detect_anomaly(True)
+# import warnings
+
+# warnings.filterwarnings("error")
+
+
 try:
     import wandb
 
     WANDB_AVAILABLE = True
 except ImportError:
     WANDB_AVAILABLE = False
+
+
+# Constants
+DEFAULT_SEED = 3407
+LOG_FREQUENCY = 5
+SAVE_FREQUENCY_EPOCH = 5
+SAVE_FREQUENCY_BATCH = 500
+BARRIER_TIMEOUT = 30
+
+
+def get_optimizer_delta_info(optimizer):
+    """Extract delta/learning rate info from optimizer."""
+    if hasattr(optimizer, "delta"):
+        return optimizer.delta, "delta"
+    return optimizer.param_groups[0]["lr"], "lr"
 
 
 def parse_cmd_args() -> argparse.Namespace:
@@ -36,9 +58,7 @@ def parse_cmd_args() -> argparse.Namespace:
         description="Parse command line arguments.",
     )
 
-    parser.add_argument(
-        "--optimizer", type=str, default="apts_ip", help="Optimizer name"
-    )
+    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer name")
     parser.add_argument(
         "--tol", type=float, default=1e-6, help="Tolerance for convergence"
     )
@@ -47,7 +67,7 @@ def parse_cmd_args() -> argparse.Namespace:
     default_use_pmw = temp_args.optimizer == "apts_ip"
 
     default_config_file = f"./config_files/config_{temp_args.optimizer}.yaml"
-    default_project = "gamm2025debugging"
+    default_project = "ohtests"
 
     parser.add_argument(
         "--use_pmw",
@@ -80,16 +100,16 @@ def parse_cmd_args() -> argparse.Namespace:
         help="Directory to save models",
     )
     parser.add_argument(
-        "--dataset_name", type=str, default="cifar10", help="Dataset name"
+        "--dataset_name", type=str, default="mnist", help="Dataset name"
     )
     parser.add_argument("--overlap", type=float, default=0.0, help="Overlap factor")
     parser.add_argument(
-        "--model_name", type=str, default="big_resnet", help="Model name"
+        "--model_name", type=str, default="simple_ffnn", help="Model name"
     )
     parser.add_argument(
         "--criterion",
         type=str,
-        default="cross_entropy_transformers",
+        default="cross_entropy",
         help="Criterion name",
     )
     parser.add_argument(
@@ -122,7 +142,7 @@ def parse_cmd_args() -> argparse.Namespace:
     parser.add_argument(
         "--num_subdomains", type=int, default=1, help="Number of subdomains"
     )
-    parser.add_argument("--num_stages", type=int, default=2, help="Number of stages")
+    parser.add_argument("--num_stages", type=int, default=1, help="Number of stages")
     parser.add_argument(
         "--num_replicas_per_subdomain",
         type=int,
@@ -137,11 +157,13 @@ def parse_cmd_args() -> argparse.Namespace:
 def wait_and_exit(rank: int) -> None:
     """Wait at the barrier and exit gracefully."""
     try:
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier(timeout=BARRIER_TIMEOUT)
         sys.exit(0)
     except Exception as e:
-        print(f"Barrier timeout: {e}. Aborting process group...")
-        dist.destroy_process_group()
+        print(f"Barrier timeout: {e}. Cleaning up...")
+        if dist.is_initialized():
+            dist.destroy_process_group()
         sys.exit(1)
 
 
@@ -190,44 +212,31 @@ def main(
     trial_args = {**args, **wandb_config}
     if trial_args["use_seed"]:
         trial_num = trial_args["trial_num"]
-        seed = wandb_config.get("seed", 3407) * trial_num
+        seed = wandb_config.get("seed", DEFAULT_SEED) * trial_num
         set_seed(seed)
 
-    apts_id = (
-        "nst_"
-        + str(trial_args["num_stages"])
-        + "_nsd_"
-        + str(trial_args["num_subdomains"])
-        + "_nrpsd_"
-        + str(trial_args["num_replicas_per_subdomain"])
-    )
+    apts_id = f"nst_{trial_args['num_stages']}_nsd_{trial_args['num_subdomains']}_nrpsd_{trial_args['num_replicas_per_subdomain']}"
     if trial_args["use_seed"]:
         apts_id += str(seed)
 
     log_fn = wandb.log if (use_wandb and rank == 0) else dprint
 
     def epoch_end_callback(
-        trainer, save_model: bool = False, save_frequency: int = 5
+        trainer, save_model: bool = False, save_frequency: int = SAVE_FREQUENCY_EPOCH
     ) -> None:
 
-        # Check if delta is present in the optimizer's attributes
-        if not hasattr(trainer.optimizer, "delta"):
-            delta = trainer.optimizer.param_groups[0]["lr"]
-            thing_to_print = "lr"
-        else:
-            delta = trainer.optimizer.delta
-            thing_to_print = "delta"
+        delta, thing_to_print = get_optimizer_delta_info(trainer.optimizer)
 
         if isinstance(
             trainer.train_dataset,
-            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset),
+            (Poisson1DDataset, Poisson2DDataset, Poisson3DDataset, AllenCahn1DDataset),
         ):
             dprint(
-                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4e}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
+                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4e}, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
             )
         else:
             dprint(
-                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, time: {trainer.epoch_dt * 1000:.2f}ms, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
+                f"Epoch {trainer.epoch_num}, g-evals: {trainer.grad_evals}, loss: {trainer.loss:.4f}, accuracy: {trainer.accuracy:.2f}%, running time: {trainer.running_time:.2f}s, {thing_to_print}: {delta:.6e}"
             )
 
         if rank == 0 and use_wandb:
@@ -256,17 +265,11 @@ def main(
             )
 
     def batch_end_callback(
-        trainer, save_model: bool = True, save_frequency: int = 2000
+        trainer, save_model: bool = True, save_frequency: int = SAVE_FREQUENCY_BATCH
     ) -> None:
-        # Check if delta is present in the optimizer's attributes
-        if not hasattr(trainer.optimizer, "delta"):
-            delta = trainer.optimizer.param_groups[0]["lr"]
-            thing_to_print = "lr"
-        else:
-            delta = trainer.optimizer.delta
-            thing_to_print = "delta"
+        delta, thing_to_print = get_optimizer_delta_info(trainer.optimizer)
 
-        if trainer.iter_num % 50 == 0:
+        if trainer.iter_num % LOG_FREQUENCY == 0:
             if rank == 0 and use_wandb:
                 log_fn(
                     {
@@ -309,21 +312,42 @@ def main(
 def run_local(args: dict, sweep_config: dict) -> None:
     master_addr = "localhost"
     master_port = find_free_port()
-    world_size = 2
+
+    # Extract config values from sweep_config if available and merge into args
+    # This ensures world_size is calculated using config file values, not command-line defaults
+    if sweep_config and "parameters" in sweep_config:
+        for key, value_dict in sweep_config["parameters"].items():
+            if "value" in value_dict:
+                # Update args with config file values
+                args[key] = value_dict["value"]
+
+    # Always calculate world_size based on config values
+    world_size = (
+        args["num_subdomains"] * args["num_replicas_per_subdomain"] * args["num_stages"]
+    )
     if args["use_pmw"]:
-        world_size = (
-            args["num_subdomains"]
-            * args["num_replicas_per_subdomain"]
-            * args["num_stages"]
+        print(
+            f"PMW enabled: world_size = {args['num_subdomains']} * {args['num_replicas_per_subdomain']} * {args['num_stages']} = {world_size}"
+        )
+    else:
+        print(
+            f"PMW disabled: world_size = {args['num_subdomains']} * {args['num_replicas_per_subdomain']} * {args['num_stages']} = {world_size}"
         )
 
     def spawn_training() -> None:
-        mp.spawn(
-            main,
-            args=(master_addr, master_port, world_size, args),
-            nprocs=world_size,
-            join=True,
-        )
+        if world_size == 1:
+            # For single process, run directly without multiprocessing
+            print("Running single process without multiprocessing")
+            main(0, master_addr, master_port, world_size, args)
+        else:
+            # Use multiprocessing for multiple processes
+            print(f"Running {world_size} processes with multiprocessing")
+            mp.spawn(
+                main,
+                args=(master_addr, master_port, world_size, args),
+                nprocs=world_size,
+                join=True,
+            )
 
     if WANDB_AVAILABLE:
         sweep_id = wandb.sweep(sweep=sweep_config, project=args["project"])
@@ -372,13 +396,25 @@ def run_cluster(args: dict, sweep_config: dict) -> None:
     wait_and_exit(rank)
 
 
-if __name__ == "__main__":
+def main_single_run():
+    """Run a single experiment with command line arguments."""
     args = vars(parse_cmd_args())
-    with open(args["sweep_config"], "r") as f:
-        sweep_config = yaml.safe_load(f)
+    try:
+        with open(args["sweep_config"], "r") as f:
+            sweep_config = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Config file {args['sweep_config']} not found")
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        print(f"Error parsing YAML file {args['sweep_config']}: {e}")
+        sys.exit(1)
 
     comp_env = detect_environment()
     if comp_env == "local":
         run_local(args, sweep_config)
     else:
         run_cluster(args, sweep_config)
+
+
+if __name__ == "__main__":
+    main_single_run()

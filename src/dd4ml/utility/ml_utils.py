@@ -12,12 +12,22 @@ import torch.nn.functional as F
 def get_device(device=None):
     if device is not None:
         return device
-    else:
+
+    # If distributed is initialised, respect its backend.
+    if dist.is_initialized():
+        backend = dist.get_backend()
+        if backend == "gloo":
+            # Gloo => force CPU
+            return "cpu"
+        # Non-gloo backend (e.g. NCCL) -> prefer CUDA if available
         return (
             f"cuda:{torch.cuda.current_device()}"
-            if dist.get_backend() != "gloo"
+            if torch.cuda.is_available()
             else "cpu"
         )
+
+    # Dist not initialised -> prefer CUDA if available
+    return f"cuda:{torch.cuda.current_device()}" if torch.cuda.is_available() else "cpu"
 
 
 def cross_entropy_transformers(logits, targets):
@@ -55,6 +65,7 @@ def closure(
     data_chunks_amount=1,
     grad_norm_clip=None,
     outputs_only=False,
+    precision_dtype=torch.float32,
 ):
     """
     NOTE: Losses from different chunks are averaged.
@@ -101,25 +112,29 @@ def closure(
         losses = [0] * data_chunks_amount if has_model_handler else []
         if hasattr(inputs, "device"):
             inp_device = inputs.device
-        elif isinstance(inputs, (list, tuple)) and len(inputs) > 0 and hasattr(inputs[0], "device"):
+        elif (
+            isinstance(inputs, (list, tuple))
+            and len(inputs) > 0
+            and hasattr(inputs[0], "device")
+        ):
             inp_device = inputs[0].device
         else:
-            inp_device = model.tensor_device if hasattr(model, "tensor_device") else get_device()
+            inp_device = (
+                model.tensor_device if hasattr(model, "tensor_device") else get_device()
+            )
         loss = torch.tensor(0.0, device=inp_device)
 
         if has_model_handler and model.model_handler.is_last_stage():
             for i, out in enumerate(outputs):
-                losses[i] = criterion(out, targets[i].to(out.device))
-            loss = torch.tensor((sum(losses) / len(losses)), device=model.tensor_device)
+                losses[i] = criterion(out, targets[i].to(out.device).long())
+            loss = torch.stack(losses).mean().to(model.tensor_device)
         elif not has_model_handler:
-            loss = criterion(outputs, targets.to(outputs.device))
+            loss = criterion(outputs, targets.to(outputs.device).long())
 
         # Distributed processing (only if model_handler is present)
         if has_model_handler:
-            # Determine original data type
-            orig_dtype = loss.dtype
             # Cast to float64 for all_reduce
-            loss_64 = loss.to(torch.float64)
+            loss = loss.to(torch.float64)
 
             if sync_loss == "global":
                 if model.model_handler.is_last_stage():
@@ -128,7 +143,9 @@ def closure(
                         op=dist.ReduceOp.SUM,
                         group=model.model_handler.get_layers_copy_group(mode="global"),
                     )
-                    loss = loss / model.model_handler.tot_replicas
+                    loss.div_(
+                        model.model_handler.tot_replicas
+                    )  # In-place division (safe in distributed context)
                 last_ranks = model.model_handler.get_stage_ranks(
                     stage_name="last", mode="global"
                 )
@@ -145,7 +162,9 @@ def closure(
                         op=dist.ReduceOp.SUM,
                         group=model.model_handler.get_layers_copy_group(mode="local"),
                     )
-                    loss = loss / model.num_replicas_per_subdomain
+                    loss.div_(
+                        model.num_replicas_per_subdomain
+                    )  # In-place division (safe in distributed context)
                 last_stage_ranks = model.model_handler.get_stage_ranks(
                     stage_name="last", mode="local"
                 )
@@ -162,10 +181,16 @@ def closure(
             and dist.is_initialized()
             and dist.get_world_size() > 1
         ):
+            # Use specified precision for distributed operations
+            # Ensure consistent precision throughout the reduction
+            original_dtype = loss.dtype
+            loss = loss.to(precision_dtype)
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
-            loss /= (
+            loss.div_(
                 dist.get_world_size()
-            )  # gradient averaging taken care of by DDP, assuming model is wrapped by DDP
+            )  # In-place division (safe after all_reduce)
+            # Convert back to original dtype if needed (but keep precision_dtype for training)
+            # loss = loss.to(original_dtype) if original_dtype != precision_dtype else loss
 
         # Compute gradients
         if compute_grad and torch.is_grad_enabled():
@@ -191,29 +216,38 @@ def closure(
 
 
 def decide_tensor_device(ws, backend, gpu_id):
-    loc_rank = os.environ["LOCAL_RANK"]
-    if torch.cuda.is_available():
-        if backend == "gloo":
-            if torch.cuda.device_count() < ws:
-                return f"cuda:{gpu_id}"
-            else:
-                # Local rank
-                return f"cuda:{loc_rank}"
-        else:
-            if gpu_id is None:
-                gpu_id = loc_rank
-            return f"cuda:{gpu_id}"
-    else:
+    # Safe retrieval of local rank (default 0)
+    loc_rank = int(os.environ.get("LOCAL_RANK", "0"))
+
+    # If using Gloo, always use CPU (do not return a CUDA device).
+    if backend == "gloo":
         return "cpu"
+
+    # For non-gloo backends, require CUDA availability.
+    if not torch.cuda.is_available():
+        return "cpu"
+
+    # Choose GPU id safely. If none given, use local rank modulo device count.
+    if gpu_id is None:
+        gpu_id = loc_rank % max(1, torch.cuda.device_count())
+    return f"cuda:{int(gpu_id)}"
 
 
 def list_flattener(l):
     """
     Flattens a list of lists of lists of ... to a single list.
     """
-    while any(isinstance(i, list) for i in l):
-        l = [item for sublist in l for item in sublist]
-    return l
+
+    def _flatten(lst):
+        result = []
+        for item in lst:
+            if isinstance(item, list):
+                result.extend(_flatten(item))
+            else:
+                result.append(item)
+        return result
+
+    return _flatten(l)
 
 
 def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
@@ -225,7 +259,16 @@ def get_starting_info(rank, base_file_name, epoch_file_name, num_epochs):
 
     # Check if the model has already been trained
     max_epoch_already_trained = -1
-    saved_networks = os.listdir("../saved_networks")
+    saved_networks_dir = "../saved_networks"
+    if not os.path.exists(saved_networks_dir):
+        return (
+            starting_epoch,
+            starting_num_iters,
+            epoch_results,
+            iter_results,
+            starting_network,
+        )
+    saved_networks = os.listdir(saved_networks_dir)
     for saved_network in saved_networks:
         if base_file_name in saved_network:
             saved_network_epoch = int(

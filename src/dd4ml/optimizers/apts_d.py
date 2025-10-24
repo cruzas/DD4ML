@@ -78,38 +78,72 @@ class APTS_D(APTS_Base):
                 self.foc_loc_closure_d if self.foc else self.non_foc_loc_closure_d
             )
 
-        # Compute number of parameters in local and global models
-        self.n_global = self.glob_params_to_vector().numel()
-        self.n_local = self.loc_params_to_vector().numel()
-        self.sqrt_n_global = math.sqrt(self.n_global)
-        self.sqrt_n_local = math.sqrt(self.n_local)
+        # Cache parameter counts to avoid expensive vector computations
+        temp_global = self.glob_params_to_vector()
+        temp_local = self.loc_params_to_vector()
+        self.n_global = temp_global.numel()
+        self.n_local = temp_local.numel()
         
-        if self.norm_type == math.inf:        
+        # Only compute square roots if needed
+        if self.norm_type == math.inf:
+            self.sqrt_n_global = math.sqrt(self.n_global)
+            self.sqrt_n_local = math.sqrt(self.n_local)
             # Modify delta for global and local optimizers
             self.glob_opt.min_delta = self.min_delta * self.sqrt_n_global
             self.glob_opt.max_delta = self.max_delta * self.sqrt_n_global
-            self.loc_opt.min_delta  = self.min_delta * self.sqrt_n_local
-            self.loc_opt.max_delta  = self.max_delta * self.sqrt_n_local
-            
-            self.glob_opt.delta = min(self.glob_opt.max_delta, self.delta * self.sqrt_n_global)
-            self.loc_opt.delta = min(self.loc_opt.max_delta, self.delta * self.sqrt_n_local)
+            self.loc_opt.min_delta = self.min_delta * self.sqrt_n_local
+            self.loc_opt.max_delta = self.max_delta * self.sqrt_n_local
+
+            self.glob_opt.delta = min(
+                self.glob_opt.max_delta, self.delta * self.sqrt_n_global
+            )
+            self.loc_opt.delta = min(
+                self.loc_opt.max_delta, self.delta * self.sqrt_n_local
+            )
 
         # Print name of glob_opt and loc_opt
         dprint(
             f"{self.__name__} global optimizer: {type(self.glob_opt).__name__}; local optimizer: {type(self.loc_opt).__name__}"
         )
 
+        # Pre-allocate buffers for efficiency
+        self._coalesced_buffer = None  # For aggregate_loc_steps_and_losses
+        self._weight_tensor_cache = {}  # Cache for weight tensors
+        self._step_buffer = torch.empty_like(temp_global)  # For step computation
+
     @torch.no_grad()
-    def aggregate_loc_steps_and_losses(self, step, loc_red):
+    def aggregate_loc_steps_and_losses(self, step, loc_red, *, weight: float = 1.0):
+        # Cache weight tensors to avoid repeated tensor creation
+        cache_key = (step.device, step.dtype, weight)
+        if cache_key not in self._weight_tensor_cache:
+            self._weight_tensor_cache[cache_key] = torch.tensor(
+                float(weight), device=step.device, dtype=step.dtype
+            )
+        w = self._weight_tensor_cache[cache_key]
+        
         # If more than one model, global step is sum of local steps
         # and loc_red is the sum of all local reductions
         if self.nr_models > 1:
-            # Coalesce step and loc_red into one tensor
-            coalesced = torch.cat([step.view(-1), loc_red.view(1)])
+            # Pre-allocate coalesced buffer on first use
+            coalesced_size = step.numel() + 1
+            if (self._coalesced_buffer is None or 
+                self._coalesced_buffer.numel() < coalesced_size or
+                self._coalesced_buffer.device != step.device or
+                self._coalesced_buffer.dtype != step.dtype):
+                self._coalesced_buffer = torch.empty(
+                    coalesced_size, device=step.device, dtype=step.dtype
+                )
+            
+            # Efficiently populate coalesced buffer
+            numel = step.numel()
+            coalesced = self._coalesced_buffer[:coalesced_size]
+            coalesced[:numel] = step.view(-1)
+            coalesced[numel] = loc_red * w
+            
             # Single all_reduce on that combined tensor
             dist.all_reduce(coalesced, op=dist.ReduceOp.SUM)
+            
             # Split back into step and loc_red
-            numel = step.numel()
             step.copy_(coalesced[:numel].view_as(step))
             loc_red = coalesced[numel].unsqueeze(0)
             if self.norm_type == math.inf:
@@ -137,9 +171,9 @@ class APTS_D(APTS_Base):
         self.init_glob_flat = self.glob_params_to_vector()
 
         # Compute initial global/local loss and gradient
-        self.init_glob_loss, self.init_loc_loss = self.glob_closure_main(
-            compute_grad=True
-        ), self.loc_closure(compute_grad=True)
+        # Note: Both closures need compute_grad=True, so can't avoid dual calls
+        self.init_glob_loss = self.glob_closure_main(compute_grad=True)
+        self.init_loc_loss = self.loc_closure(compute_grad=True)
 
         # Store initial global/local gradients (flattened)
         self.init_glob_grad, self.init_loc_grad = (
@@ -149,7 +183,7 @@ class APTS_D(APTS_Base):
 
         # Calculate residual between global and local gradients
         if self.foc:
-            self.resid = self.init_glob_grad - self.init_loc_grad
+            self.resid = (self.init_glob_grad - self.init_loc_grad).to(dtype=self.init_glob_grad.dtype)
 
         # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)
@@ -157,9 +191,11 @@ class APTS_D(APTS_Base):
         # Compute local step and reduction, then aggregate across all models:
         # step becomes global trial step
         with torch.no_grad():
-            step = self.loc_params_to_vector() - self.init_glob_flat
+            # Use pre-allocated buffer for step computation
+            loc_params = self.loc_params_to_vector()
+            torch.sub(loc_params, self.init_glob_flat, out=self._step_buffer)
             loc_red = self.init_loc_loss - loc_loss
-        step, pred = self.aggregate_loc_steps_and_losses(step, loc_red)
+        step, pred = self.aggregate_loc_steps_and_losses(self._step_buffer, loc_red)
 
         # APTS trust-region control: possibly modifies self.delta and global model parameters
         loss, grad, self.glob_opt.delta = self.control_step(step, pred)

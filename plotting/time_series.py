@@ -1,5 +1,6 @@
 import os
 import pprint
+import re
 from itertools import product
 
 import matplotlib.pyplot as plt
@@ -7,6 +8,15 @@ import numpy as np
 
 import wandb
 from plotting.utils import _abbreviate_val
+
+
+def _format_axis_name(name: str) -> str:
+    # Make labels nicer: replace separators with spaces and normalise whitespace
+    return re.sub(r"\s+", " ", re.sub(r"[._/]+", " ", name.strip()))
+
+
+def _avg_metric_label(metric: str) -> str:
+    return f"Avg. {_format_axis_name(metric)}"
 
 
 def plot_time_series(
@@ -53,9 +63,10 @@ def plot_time_series(
 
     # set up figure
     fig, ax = plt.subplots(figsize=figsize)
-    ax.set_xlabel(x_axis)
-    ax.set_ylabel(metric)
-    ax.set_title(f"{metric} vs {x_axis}")
+    ax.set_xlabel(_format_axis_name(x_axis))
+    y_label = _avg_metric_label(metric)
+    ax.set_ylabel(y_label)
+    ax.set_title(f"{y_label} vs {_format_axis_name(x_axis)}")
     ax.grid(True, alpha=0.3)
 
     for info in grouped.values():
@@ -83,7 +94,7 @@ def plot_time_series(
     plt.tight_layout()
 
     if save_path:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
         fig.savefig(save_path)
         plt.close(fig)
     else:
@@ -130,7 +141,7 @@ def main(
                 f"config.{cfg['base_key']}": size,
             }
             for x_axis, metric in plots:
-                fname = f"{dataset}_{regime}_bs_{size}_" f"{metric}_vs_{x_axis}.pdf"
+                fname = f"{dataset}_{regime}_bs_{size}_{metric}_vs_{x_axis}.pdf"
                 save_path = os.path.join(base_save, fname)
                 plot_time_series(
                     project_path=proj,

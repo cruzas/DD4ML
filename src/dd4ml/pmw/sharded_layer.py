@@ -33,7 +33,10 @@ class ShardedLayer(BasePMWModel):
                 else:
                     # Single-rank trainable module
                     try:
-                        if obj is nn.Sequential and "modules" in layer_dict["callable"]["settings"]:
+                        if (
+                            obj is nn.Sequential
+                            and "modules" in layer_dict["callable"]["settings"]
+                        ):
                             mods = [
                                 m["object"](**m.get("settings", {}))
                                 for m in layer_dict["callable"]["settings"]["modules"]
