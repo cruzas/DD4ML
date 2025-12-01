@@ -58,3 +58,8 @@ tests/config_files/config_files/*trial*
 
 *.pdf
 *.json
+
+.claude
+.idea
+.vscode
+./saved_networks
