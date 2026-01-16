@@ -181,13 +181,12 @@ def save_latex_figure_code(
     loc_so,
     present_variants,
 ):
-    """Saves a .tex file with a 3x2 grid of plots and a dynamic, order-aware caption."""
+    """Saves a .tex file with a grid of plots and a dynamic, order-aware caption."""
     os.makedirs(tex_dir, exist_ok=True)
     filename = f"{dataset}_{regime}_{xax}_grid.tex"
     filepath = os.path.join(tex_dir, filename)
 
     normalized_variants = {v.lower().replace("sapts", "apts") for v in present_variants}
-
     is_glob_2nd = str(glob_so).lower() == "true"
     is_loc_2nd = str(loc_so).lower() == "true"
     order_suffix = " (2nd order)" if (is_glob_2nd and is_loc_2nd) else " (1st order)"
@@ -226,7 +225,7 @@ def save_latex_figure_code(
     \includegraphics[width=\linewidth]{{figures/{dataset}_{regime}_{xax}_grid.pdf}}%
     \vspace{{1ex}}
     \includegraphics[width=\linewidth]{{figures/{dataset}_legend.pdf}}%
-    \caption{{{m_desc} vs number of {xax_label}. Dataset: {dataset_pretty} ({regime} scaling). Network type: {model_pretty}. Optimizers: {opt_list_str}. \SAPTS\ Configuration: Global optimizer: {format_opt_name(glob_opt)}, Local optimizer: {format_opt_name(loc_opt)}, $\Delta_0 = {delta}$. Learning rates for SGD: {lr_str}. From top to bottom, the effective batch size is increased by a factor of 2. An overlap of approximately 33\% was applied between consecutive mini-batches and micro-batches.}}
+    \caption{{{m_desc} vs number of {xax_label}. Dataset: {dataset_pretty} ({regime} scaling regime). Network type: {model_pretty}. Optimizers: {opt_list_str}. \SAPTS\ Configuration: Global optimizer: {format_opt_name(glob_opt)}, Local optimizer: {format_opt_name(loc_opt)}, $\Delta_0 = {delta}$. Learning rates for SGD: {lr_str}. From top to bottom, the effective batch size is increased by a factor of 2. An overlap of approximately 33\% was applied between consecutive mini-batches and micro-batches.}}
 \label{{fig:{dataset}_{regime}_{label_suffix}}}
 \end{{figure}}
 """
@@ -253,6 +252,7 @@ def generate_summary_table(
 ):
     """Saves a consolidated LaTeX table evaluated at the max common training point."""
     os.makedirs(table_dir, exist_ok=True)
+    # Requested filename format
     file_path = os.path.join(table_dir, f"{dataset}_{regime}_scaling.tex")
 
     bs_label = "EBS" if regime == "weak" else "GBS"
@@ -292,16 +292,21 @@ def generate_summary_table(
         "poisson2d": "Poisson 2D",
     }.get(dataset, dataset.capitalize())
     m_desc = (
-        "Summary of performance metrics (Loss and Accuracy)"
+        "Empirical loss (left) and test accuracy (right)"
         if len(metrics) > 1
-        else "Summary of performance metrics (Loss)"
+        else "Avg. Empirical Loss"
     )
 
     with open(file_path, "w") as f:
+        f.write(
+            f"% --- Consolidated LaTeX Table for {dataset_pretty} ({regime} scaling) ---\n"
+        )
         f.write(f"\\begin{{table}}[H]\n  \\centering\n")
         f.write(
-            f"  \\caption{{{m_desc} for {dataset_pretty} ({regime} scaling regime) evaluated at shared {prog_label} {eval_point}. Network type: {model_pretty}. Optimizers: {opt_list_str}. \\SAPTS\\ Configuration: Global: {format_opt_name(glob_opt)}, Local: {format_opt_name(loc_opt)}, $\\Delta_0 = {delta}$. Learning rates for SGD: {lr_str}. An overlap of approximately 33\\% was applied between consecutive mini-batches and micro-batches.}}\n"
+            f"  \\caption{{{m_desc} for {dataset_pretty} ({regime} scaling regime) evaluated at the shared {prog_label} ({eval_point}). Network type: {model_pretty}. Optimizers: {opt_list_str}. \\SAPTS\\ Configuration: Global optimizer: {format_opt_name(glob_opt)}, Local optimizer: {format_opt_name(loc_opt)}, $\\Delta_0 = {delta}$. Learning rates for SGD: {lr_str}. An overlap of approximately 33\\% was applied between consecutive mini-batches and micro-batches.}}\n"
         )
+        # Requested label format
+        f.write(f"  \\label{{tab:{dataset}_{regime}_scaling}}\n")
         f.write("  \\resizebox{\\textwidth}{!}{\n")
 
         col_setup = (
@@ -313,7 +318,7 @@ def generate_summary_table(
         headers = (
             [bs_label, "Optimizer", "$N$", "Grad. Evals"]
             + [
-                ("Accuracy (\%)" if "acc" in m.lower() else m.capitalize())
+                ("Accuracy (\\%)" if "acc" in m.lower() else m.capitalize())
                 for m in metrics
             ]
             + ["{Time (s)}", "Efficiency"]
@@ -492,6 +497,7 @@ def plot_grid_presentation(
                     )
 
         if size in (sgd_filters or {}):
+            lr_f = sgd_filters[size]
             sgd_api_f = {"config.dataset_name": dataset_name, "config.optimizer": "sgd"}
             runs += [
                 m
@@ -502,21 +508,42 @@ def plot_grid_presentation(
                     _safe_int(m["config"].get("batch_size", -1)) == size
                     or _safe_int(m["config"].get("effective_batch_size", -1)) == size
                 )
-                and all(
-                    _loose_match(m["config"].get(k), v)
-                    for k, v in sgd_filters[size].items()
-                )
+                and all(_loose_match(m["config"].get(k), v) for k, v in lr_f.items())
             ]
         data_cache[size] = runs
 
     nrows, ncols = len(batch_sizes), len(metrics)
+
+    # ADJUSTMENT: Further reduced fig_height for 3x1 grids and optimized width
+    is_single_col = ncols == 1
+    fig_width = 7.5 * ncols
+    fig_height = 3.5 * nrows if is_single_col else 5.5 * nrows
+
     fig, axes = plt.subplots(
         nrows=nrows,
         ncols=ncols,
-        figsize=(8 * ncols, 6 * nrows),
+        figsize=(fig_width, fig_height),
         squeeze=False,
         sharey="col",
     )
+
+    metric_bounds = {m: [float("inf"), float("-inf")] for m in metrics}
+    for size, runs in data_cache.items():
+        for m in runs:
+            hist = get_history(m["id"])
+            if not hist.empty:
+                for m_name in metrics:
+                    if m_name in hist.columns:
+                        y_vals = pd.to_numeric(hist[m_name], errors="coerce").dropna()
+                        if y_log or m_name == "loss":
+                            y_vals = y_vals[y_vals > 0]
+                        if not y_vals.empty:
+                            metric_bounds[m_name][0] = min(
+                                metric_bounds[m_name][0], y_vals.min()
+                            )
+                            metric_bounds[m_name][1] = max(
+                                metric_bounds[m_name][1], y_vals.max()
+                            )
 
     for i, size in enumerate(batch_sizes):
         runs_all = data_cache[size]
@@ -572,18 +599,18 @@ def plot_grid_presentation(
                 ax.set_title(_metric_label(metric), pad=15)
             if j == ncols - 1:
                 ax2 = ax.twinx()
-                # Updated label based on scaling regime
                 batch_label = (
                     "GLOBAL BATCH SIZE"
                     if regime == "strong"
                     else "EFFECTIVE BATCH SIZE"
                 )
+                # ADJUSTMENT: Reduced fontsize to 14 to prevent overlapping on the right y-axis
                 ax2.set_ylabel(
                     rf"{batch_label} = {size}",
                     rotation=270,
                     labelpad=30,
                     fontweight="bold",
-                    fontsize=20,
+                    fontsize=14,
                 )
                 ax2.set_yticks([])
             if j == 0:
@@ -591,12 +618,24 @@ def plot_grid_presentation(
             if i == nrows - 1:
                 ax.set_xlabel(x_axis.replace("_", " ").title())
             ax.grid(True, alpha=0.3, linestyle="--")
-            if metric == "loss" or y_log:
+            ax.set_xlim(left=0)
+            if y_log or metric == "loss":
                 ax.set_yscale("log")
+
+            low, high = metric_bounds[metric]
+            if not np.isinf(low):
+                if dataset_name == "poisson2d" and metric == "loss":
+                    ax.set_ylim(max(low, 1e-12), 10**3)
+                elif y_limits and metric in y_limits:
+                    ax.set_ylim(*y_limits[metric])
+                else:
+                    safe_low = max(low, 1e-12) if (y_log or metric == "loss") else low
+                    ax.set_ylim(safe_low / 1.1, high * 1.1)
 
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97], h_pad=1.5, w_pad=1.5)
+        # ADJUSTMENT: Use very tight rect and h_pad to conserve vertical space
+        plt.tight_layout(rect=[0, 0.01, 1, 0.99], h_pad=1.0, w_pad=1.0)
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
