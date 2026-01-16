@@ -22,11 +22,11 @@ mpl.rcParams.update(
         "text.usetex": True,
         "font.family": "serif",
         "font.size": 18,
-        "axes.titlesize": 20,
-        "axes.labelsize": 18,
-        "xtick.labelsize": 16,
-        "ytick.labelsize": 16,
-        "figure.titlesize": 24,
+        "axes.titlesize": 22,
+        "axes.labelsize": 20,
+        "xtick.labelsize": 18,
+        "ytick.labelsize": 18,
+        "figure.titlesize": 26,
         "legend.fontsize": 20,
         "legend.handlelength": 3.0,
         "lines.linewidth": 3,
@@ -34,7 +34,14 @@ mpl.rcParams.update(
 )
 
 
+def format_opt_name(name):
+    """Maps internal optimizer names to pretty LaTeX names."""
+    mapping = {"lssr1_tr": "L-SSR1-TR", "cg": "CG", "adam": "Adam", "sgd": "SGD"}
+    return mapping.get(str(name).lower(), str(name).upper())
+
+
 def latex_opt(opt: str) -> str:
+    """Standardizes optimizer names for LaTeX math mode."""
     opt_lower = opt.lower()
     if "apts" in opt_lower:
         base = r"\mathrm{SAPTS}"
@@ -155,62 +162,161 @@ def get_style_for_combo(optimizer_name, n_val):
 
 
 # ==========================================
-# SUMMARY TABLE GENERATION (LaTeX)
+# LATEX GENERATION
 # ==========================================
+def save_latex_figure_code(
+    tex_dir,
+    dataset,
+    regime,
+    xax,
+    metrics,
+    batch_sizes,
+    sgd_lrs,
+    delta,
+    model_pretty,
+    label_suffix,
+    glob_opt,
+    loc_opt,
+    glob_so,
+    loc_so,
+    present_variants,
+):
+    """Saves a .tex file with a 3x2 grid of plots and a dynamic, order-aware caption."""
+    os.makedirs(tex_dir, exist_ok=True)
+    filename = f"{dataset}_{regime}_{xax}_grid.tex"
+    filepath = os.path.join(tex_dir, filename)
+
+    normalized_variants = {v.lower().replace("sapts", "apts") for v in present_variants}
+
+    is_glob_2nd = str(glob_so).lower() == "true"
+    is_loc_2nd = str(loc_so).lower() == "true"
+    order_suffix = " (2nd order)" if (is_glob_2nd and is_loc_2nd) else " (1st order)"
+
+    lr_label = "EBS" if regime == "weak" else "GBS"
+    lr_parts = [f"{lr} for {lr_label}={bs}" for bs, lr in sgd_lrs.items()]
+    lr_str = ", ".join(lr_parts)
+
+    xax_label = {
+        "grad_evals": "gradient evaluations",
+        "running_time": "wall-clock time",
+    }.get(xax, xax)
+    m_desc = (
+        "Empirical loss (left) and test accuracy (right)"
+        if len(metrics) > 1
+        else "Avg. Empirical Loss"
+    )
+    dataset_pretty = {
+        "mnist": "MNIST",
+        "cifar10": "CIFAR-10",
+        "tinyshakespeare": "Tiny Shakespeare",
+        "poisson2d": "Poisson 2D",
+    }.get(dataset, dataset.capitalize())
+
+    sapts_labels = []
+    if "apts_d" in normalized_variants:
+        sapts_labels.append(rf"\SAPTSD\ {order_suffix}")
+    if "apts_p" in normalized_variants:
+        sapts_labels.append(rf"\SAPTSP\ {order_suffix}")
+    if "apts_ip" in normalized_variants:
+        sapts_labels.append(rf"\SAPTSIP\ {order_suffix}")
+    opt_list_str = ", ".join(["SGD"] + sapts_labels)
+
+    content = rf"""\begin{{figure}}[H]
+    \centering
+    \includegraphics[width=\linewidth]{{figures/{dataset}_{regime}_{xax}_grid.pdf}}%
+    \vspace{{1ex}}
+    \includegraphics[width=\linewidth]{{figures/{dataset}_legend.pdf}}%
+    \caption{{{m_desc} vs number of {xax_label}. Dataset: {dataset_pretty} ({regime} scaling). Network type: {model_pretty}. Optimizers: {opt_list_str}. \SAPTS\ Configuration: Global optimizer: {format_opt_name(glob_opt)}, Local optimizer: {format_opt_name(loc_opt)}, $\Delta_0 = {delta}$. Learning rates for SGD: {lr_str}. From top to bottom, the effective batch size is increased by a factor of 2. An overlap of approximately 33\% was applied between consecutive mini-batches and micro-batches.}}
+\label{{fig:{dataset}_{regime}_{label_suffix}}}
+\end{{figure}}
+"""
+    with open(filepath, "w") as f:
+        f.write(content)
+
+
 def generate_summary_table(
-    data_cache, metrics, combo_key, get_history_fn, dataset_name, regime, file_path
+    table_dir,
+    dataset,
+    regime,
+    metrics,
+    sgd_lrs,
+    glob_opt,
+    loc_opt,
+    glob_so,
+    loc_so,
+    present_variants,
+    delta,
+    model_pretty,
+    data_cache,
+    combo_key,
+    get_history_fn,
 ):
     """Saves a consolidated LaTeX table evaluated at the max common training point."""
-    bs_header = "Effective Batch Size" if regime == "weak" else "Global Batch Size"
-    is_ts = "tinyshakespeare" in dataset_name.lower()
-    progression_key = "iter" if is_ts else "epoch"
-    progression_label = "iteration" if is_ts else "epoch"
+    os.makedirs(table_dir, exist_ok=True)
+    file_path = os.path.join(table_dir, f"{dataset}_{regime}_scaling.tex")
 
-    # Find the maximum valid point common to all runs in this regime
+    bs_label = "EBS" if regime == "weak" else "GBS"
+    is_ts = "tinyshakespeare" in dataset.lower()
+    prog_key = "iter" if is_ts else "epoch"
+    prog_label = "iteration" if is_ts else "epoch"
+
     all_max_points = []
     for size in data_cache:
         for r in data_cache[size]:
             h = get_history_fn(r["id"])
-            if not h.empty and progression_key in h.columns:
-                all_max_points.append(h[progression_key].max())
-
+            if not h.empty and prog_key in h.columns:
+                all_max_points.append(h[prog_key].max())
     eval_point = min(all_max_points) if all_max_points else 0
 
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, "w") as f:
-        table_dataset_name = dataset_name
-        if table_dataset_name.lower() == "mnist":
-            table_dataset_name = "MNIST"
-        elif table_dataset_name.lower() == "cifar10":
-            table_dataset_name = "CIFAR-10"
-        elif table_dataset_name.lower() == "tinyshakespeare":
-            table_dataset_name = "Tiny Shakespeare"
-        elif table_dataset_name.lower() == "poisson2d":
-            table_dataset_name = "Poisson 2D"
+    normalized_variants = {v.lower().replace("sapts", "apts") for v in present_variants}
+    is_glob_2nd = str(glob_so).lower() == "true"
+    is_loc_2nd = str(loc_so).lower() == "true"
+    order_suffix = " (2nd order)" if (is_glob_2nd and is_loc_2nd) else " (1st order)"
 
+    sapts_labels = []
+    if "apts_d" in normalized_variants:
+        sapts_labels.append(rf"\SAPTSD\ {order_suffix}")
+    if "apts_p" in normalized_variants:
+        sapts_labels.append(rf"\SAPTSP\ {order_suffix}")
+    if "apts_ip" in normalized_variants:
+        sapts_labels.append(rf"\SAPTSIP\ {order_suffix}")
+    opt_list_str = ", ".join(["SGD"] + sapts_labels)
+
+    lr_parts = [f"{lr} for {bs_label}={bs}" for bs, lr in sgd_lrs.items()]
+    lr_str = ", ".join(lr_parts)
+
+    dataset_pretty = {
+        "mnist": "MNIST",
+        "cifar10": "CIFAR-10",
+        "tinyshakespeare": "Tiny Shakespeare",
+        "poisson2d": "Poisson 2D",
+    }.get(dataset, dataset.capitalize())
+    m_desc = (
+        "Summary of performance metrics (Loss and Accuracy)"
+        if len(metrics) > 1
+        else "Summary of performance metrics (Loss)"
+    )
+
+    with open(file_path, "w") as f:
+        f.write(f"\\begin{{table}}[H]\n  \\centering\n")
         f.write(
-            f"% --- Consolidated LaTeX Table for {table_dataset_name} ({regime} scaling) ---\n"
-        )
-        f.write("\\begin{table}[H]\n  \\centering\n")
-        f.write(
-            f"  \\caption{{Summary results for {table_dataset_name} ({regime} scaling) "
-            f"evaluated at the max shared {progression_label} ({eval_point}).}}\n"
+            f"  \\caption{{{m_desc} for {dataset_pretty} ({regime} scaling regime) evaluated at shared {prog_label} {eval_point}. Network type: {model_pretty}. Optimizers: {opt_list_str}. \\SAPTS\\ Configuration: Global: {format_opt_name(glob_opt)}, Local: {format_opt_name(loc_opt)}, $\\Delta_0 = {delta}$. Learning rates for SGD: {lr_str}. An overlap of approximately 33\\% was applied between consecutive mini-batches and micro-batches.}}\n"
         )
         f.write("  \\resizebox{\\textwidth}{!}{\n")
 
         col_setup = (
             "l l l l "
             + "l " * len(metrics)
-            + "S[separate-uncertainty, table-format=4.2(4)] l"
+            + "S[separate-uncertainty, table-format=4.2(4.2)] l"
         )
         f.write(f"    \\begin{{tabular}}{{{col_setup}}}\n      \\hline\n")
         headers = (
-            [bs_header, "Optimizer", "$N$", "Gradient Evaluations"]
+            [bs_label, "Optimizer", "$N$", "Grad. Evals"]
             + [
                 ("Accuracy (\%)" if "acc" in m.lower() else m.capitalize())
                 for m in metrics
             ]
-            + ["{Time (s)}", "Speedup"]
+            + ["{Time (s)}", "Efficiency"]
         )
         f.write("      " + " & ".join(headers) + " \\\\\n      \\hline\n")
 
@@ -219,7 +325,6 @@ def generate_summary_table(
             variant_baselines = {}
             for r in runs:
                 raw_opt = r["config"].get("optimizer", "unk").lower()
-                opt_key = "sgd" if "sgd" in raw_opt else raw_opt
                 n = _safe_int(
                     r["config"].get(
                         "num_subdomains" if "sgd" in raw_opt else combo_key, 1
@@ -227,16 +332,12 @@ def generate_summary_table(
                 )
                 if n == 2:
                     h = get_history_fn(r["id"])
-                    if not h.empty and progression_key in h.columns:
-                        idx = (h[progression_key] - eval_point).abs().idxmin()
-                        time_at_pt = (
+                    if not h.empty and prog_key in h.columns:
+                        idx = (h[prog_key] - eval_point).abs().idxmin()
+                        variant_baselines.setdefault(raw_opt, []).append(
                             h.loc[idx, "running_time"] - h["running_time"].min()
                         )
-                        variant_baselines.setdefault(opt_key, []).append(time_at_pt)
-
-            avg_variant_baselines = {
-                k: np.mean(v) for k, v in variant_baselines.items() if v
-            }
+            avg_baselines = {k: np.mean(v) for k, v in variant_baselines.items() if v}
 
             unique_combos = sorted(
                 {
@@ -258,13 +359,13 @@ def generate_summary_table(
                 key=lambda x: (0 if "sgd" in x[0].lower() else 1, x[0], x[1]),
             )
 
-            last_variant = None
+            last_opt = None
             for opt, n in unique_combos:
                 if "sgd" in opt.lower() and n < 2:
                     continue
-                if last_variant is not None and opt != last_variant:
+                if last_opt is not None and opt != last_opt:
                     f.write("      \\hdashline\n")
-                last_variant = opt
+                last_opt = opt
 
                 relevant_runs = [
                     r
@@ -280,25 +381,20 @@ def generate_summary_table(
                 opt_label = "SGD" if "sgd" in opt.lower() else f"${latex_opt(opt)}$"
                 row_data = [str(size), opt_label, str(n)]
 
-                ge_at_pt, times_at_pt, metric_vals = [], [], {m: [] for m in metrics}
+                ge, times, m_vals = [], [], {m: [] for m in metrics}
                 for r in relevant_runs:
                     h = get_history_fn(r["id"])
-                    if not h.empty and progression_key in h.columns:
-                        idx = (h[progression_key] - eval_point).abs().idxmin()
+                    if not h.empty and prog_key in h.columns:
+                        idx = (h[prog_key] - eval_point).abs().idxmin()
                         row = h.loc[idx]
-                        if "grad_evals" in h.columns:
-                            ge_at_pt.append(row["grad_evals"])
-                        if "running_time" in h.columns:
-                            times_at_pt.append(
-                                row["running_time"] - h["running_time"].min()
-                            )
+                        ge.append(row.get("grad_evals", 0))
+                        times.append(row["running_time"] - h["running_time"].min())
                         for m in metrics:
-                            if m in h.columns:
-                                metric_vals[m].append(row[m])
+                            m_vals[m].append(row.get(m, 0))
 
-                row_data.append(f"${np.mean(ge_at_pt):.0f}$" if ge_at_pt else "N/A")
+                row_data.append(f"${np.mean(ge):.0f}$" if ge else "N/A")
                 for m in metrics:
-                    vals = metric_vals[m]
+                    vals = m_vals[m]
                     if vals:
                         prec = 2 if "acc" in m.lower() else 3
                         row_data.append(
@@ -307,16 +403,15 @@ def generate_summary_table(
                     else:
                         row_data.append("N/A")
 
-                if times_at_pt:
-                    avg_t = np.mean(times_at_pt)
-                    row_data.append(f"{avg_t:.2f} \\pm {np.std(times_at_pt):.2f}")
-                    v_key = "sgd" if "sgd" in opt.lower() else opt.lower()
-                    speedup = (
-                        avg_variant_baselines.get(v_key, avg_t) / avg_t
+                if times:
+                    avg_t = np.mean(times)
+                    row_data.append(f"{avg_t:.2f} \\pm {np.std(times):.2f}")
+                    eff = (
+                        avg_baselines.get(opt.lower(), avg_t) / avg_t
                         if avg_t > 0
                         else 1.0
                     )
-                    row_data.append(f"${speedup:.2f}$")
+                    row_data.append(f"${eff:.2f}$")
                 else:
                     row_data.extend(["N/A", "N/A"])
                 f.write("      " + " & ".join(row_data) + " \\\\\n")
@@ -325,7 +420,7 @@ def generate_summary_table(
 
 
 # ==========================================
-# PLOTTING
+# PLOTTING & METADATA EXTRACTION
 # ==========================================
 def plot_grid_presentation(
     project_path,
@@ -337,7 +432,6 @@ def plot_grid_presentation(
     sgd_filters=None,
     y_limits=None,
     save_path=None,
-    table_path=None,
     y_log=False,
     combo_key="num_subdomains",
     cache_dir=None,
@@ -360,16 +454,44 @@ def plot_grid_presentation(
             else combo_key
         )
         v = cfg.get(
-            k, cfg.get("num_stages" if k == "num_subdomains" else "num_subdomains", 1)
+            k, cfg.get("num_subdomains" if k == "num_stages" else "num_stages", 1)
         )
         return _safe_int(v) if _safe_int(v) > 0 else 1
 
     data_cache = {}
+    config_meta = {
+        "delta": "N/A",
+        "glob_opt": "N/A",
+        "loc_opt": "N/A",
+        "glob_so": "N/A",
+        "loc_so": "N/A",
+    }
+    present_variants = set()
+
     for size in batch_sizes:
         base_f = {**filters_base, f"config.{base_key}": size}
         runs = _list_runs_cached(api, project_path, base_f, cache_dir, dataset_name)
+        for r in runs:
+            opt_raw = r["config"].get("optimizer", "").lower()
+            if "sgd" not in opt_raw:
+                present_variants.add(opt_raw)
+                if config_meta["delta"] == "N/A":
+                    c = r["config"]
+                    config_meta.update(
+                        {
+                            "delta": c.get("delta", "N/A"),
+                            "glob_opt": c.get(
+                                "glob_opt", c.get("global_optimizer", "N/A")
+                            ),
+                            "loc_opt": c.get(
+                                "loc_opt", c.get("local_optimizer", "N/A")
+                            ),
+                            "glob_so": c.get("glob_second_order", "False"),
+                            "loc_so": c.get("loc_second_order", "False"),
+                        }
+                    )
+
         if size in (sgd_filters or {}):
-            lr_f = sgd_filters[size]
             sgd_api_f = {"config.dataset_name": dataset_name, "config.optimizer": "sgd"}
             runs += [
                 m
@@ -380,73 +502,44 @@ def plot_grid_presentation(
                     _safe_int(m["config"].get("batch_size", -1)) == size
                     or _safe_int(m["config"].get("effective_batch_size", -1)) == size
                 )
-                and all(_loose_match(m["config"].get(k), v) for k, v in lr_f.items())
+                and all(
+                    _loose_match(m["config"].get(k), v)
+                    for k, v in sgd_filters[size].items()
+                )
             ]
         data_cache[size] = runs
 
-    if x_axis == "grad_evals" and table_path:
-        generate_summary_table(
-            data_cache,
-            metrics,
-            combo_key,
-            get_history,
-            dataset_name,
-            regime,
-            table_path,
-        )
-
-    nrows, ncols = len(metrics), len(batch_sizes)
+    nrows, ncols = len(batch_sizes), len(metrics)
     fig, axes = plt.subplots(
         nrows=nrows,
         ncols=ncols,
-        figsize=(6 * ncols, 5 * nrows),
+        figsize=(8 * ncols, 6 * nrows),
         squeeze=False,
-        sharey="row",
+        sharey="col",
     )
 
-    metric_bounds = {m: [float("inf"), float("-inf")] for m in metrics}
-    for size, runs in data_cache.items():
-        for m in runs:
-            hist = get_history(m["id"])
-            if not hist.empty:
-                for m_name in metrics:
-                    if m_name in hist.columns:
-                        y_vals = pd.to_numeric(hist[m_name], errors="coerce").dropna()
-                        if y_log or m_name == "loss":
-                            y_vals = y_vals[y_vals > 0]
-                        if not y_vals.empty:
-                            metric_bounds[m_name][0] = min(
-                                metric_bounds[m_name][0], y_vals.min()
-                            )
-                            metric_bounds[m_name][1] = max(
-                                metric_bounds[m_name][1], y_vals.max()
-                            )
-
-    all_combos = set()
-    for j, size in enumerate(batch_sizes):
+    for i, size in enumerate(batch_sizes):
         runs_all = data_cache[size]
         combos = sorted(
             {
-                (m["config"].get("optimizer", "unk"), _res_n(m["config"]))
-                for m in runs_all
+                (r["config"].get("optimizer", "unk"), _res_n(r["config"]))
+                for r in runs_all
             },
             key=lambda x: (str(x[0]), x[1]),
         )
-        all_combos.update(combos)
-        for i, metric in enumerate(metrics):
+        for j, metric in enumerate(metrics):
             ax = axes[i, j]
             for combo in combos:
                 opt_name, n_val = combo
                 if "sgd" in str(opt_name).lower() and n_val > 1:
                     continue
                 series_list = []
-                relevant_runs = [
+                for m in [
                     r
                     for r in runs_all
                     if (r["config"].get("optimizer", "unk"), _res_n(r["config"]))
                     == combo
-                ]
-                for m in relevant_runs:
+                ]:
                     hist = get_history(m["id"])
                     if (
                         not hist.empty
@@ -474,41 +567,40 @@ def plot_grid_presentation(
                             alpha=0.15,
                             color=color,
                         )
+
             if i == 0:
-                ax.set_title(rf"{base_key.replace('_', ' ').upper()} = {size}")
+                ax.set_title(_metric_label(metric), pad=15)
+            if j == ncols - 1:
+                ax2 = ax.twinx()
+                # Updated label based on scaling regime
+                batch_label = (
+                    "GLOBAL BATCH SIZE"
+                    if regime == "strong"
+                    else "EFFECTIVE BATCH SIZE"
+                )
+                ax2.set_ylabel(
+                    rf"{batch_label} = {size}",
+                    rotation=270,
+                    labelpad=30,
+                    fontweight="bold",
+                    fontsize=20,
+                )
+                ax2.set_yticks([])
             if j == 0:
                 ax.set_ylabel(_metric_label(metric))
             if i == nrows - 1:
-                ax.set_xlabel(
-                    {
-                        "grad_evals": "Gradient Evaluations",
-                        "running_time": "Wall-clock Time (s)",
-                        "epoch": "Epochs",
-                        "iter": "Iterations",
-                    }.get(x_axis, x_axis)
-                )
-            ax.grid(True, alpha=0.3)
-            ax.set_xlim(left=0)
-            is_log = y_log or metric == "loss"
-            if is_log:
+                ax.set_xlabel(x_axis.replace("_", " ").title())
+            ax.grid(True, alpha=0.3, linestyle="--")
+            if metric == "loss" or y_log:
                 ax.set_yscale("log")
-            low, high = metric_bounds[metric]
-            if not np.isinf(low):
-                if dataset_name == "poisson2d" and metric == "loss":
-                    ax.set_ylim(max(low, 1e-12), 10**3)
-                elif y_limits and metric in y_limits:
-                    ax.set_ylim(*y_limits[metric])
-                else:
-                    safe_low = max(low, 1e-12) if is_log else low
-                    pad = high * 0.1 if is_log else (high - low) * 0.05
-                    ax.set_ylim(safe_low / (1.1 if is_log else 1), high + pad)
 
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0.03, 1, 0.97], h_pad=1.5, w_pad=1.5)
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
-    return all_combos
+
+    return data_cache, config_meta, present_variants
 
 
 # ==========================================
@@ -519,14 +611,16 @@ def main():
     base_fig_dir = os.path.expanduser(
         "~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures/thesis"
     )
-    base_table_dir = (
-        "/Users/cruzalegriasamueladolfo/Documents/GitHub/PhD-Thesis-Samuel-Cruz/tables"
+    tex_dir = os.path.expanduser(
+        "~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures_tex"
     )
+    table_dir = os.path.expanduser("~/Documents/GitHub/PhD-Thesis-Samuel-Cruz/tables")
     cache_dir = os.path.join(os.path.dirname(base_fig_dir), ".cache")
 
     configs = {
         "mnist": {
             "filters": {"config.model_name": "simple_cnn"},
+            "model_pretty": "CNN",
             "sgd_filters_strong": {
                 1024: {"learning_rate": 0.10},
                 2048: {"learning_rate": 0.10},
@@ -538,11 +632,11 @@ def main():
                 512: {"learning_rate": 0.10},
             },
             "metrics": ["loss", "accuracy"],
-            "y_limits": {"accuracy": (0, 100)},
             "y_log": False,
         },
         "cifar10": {
             "filters": {"config.model_name": "big_resnet"},
+            "model_pretty": "ResNet",
             "sgd_filters_strong": {
                 256: {"learning_rate": 0.01},
                 512: {"learning_rate": 0.1},
@@ -554,11 +648,11 @@ def main():
                 1024: {"learning_rate": 0.1},
             },
             "metrics": ["loss", "accuracy"],
-            "y_limits": {"accuracy": (0, 100)},
             "y_log": False,
         },
         "tinyshakespeare": {
             "filters": {"config.model_name": "minigpt"},
+            "model_pretty": "MiniGPT",
             "sgd_filters_strong": {
                 1024: {"learning_rate": 0.01},
                 2048: {"learning_rate": 0.01},
@@ -574,6 +668,7 @@ def main():
         },
         "poisson2d": {
             "filters": {"config.model_name": "pinn_ffnn"},
+            "model_pretty": "PINN-FFNN",
             "sgd_filters_strong": {
                 128: {"learning_rate": 0.001},
                 256: {"learning_rate": 0.10},
@@ -589,27 +684,22 @@ def main():
         },
     }
 
+    api = wandb.Api(timeout=300)
+
     for dataset, cfg in configs.items():
         ck = "num_stages" if dataset == "cifar10" else "num_subdomains"
         dataset_combos = set()
         for reg in ["weak", "strong"]:
             bkey = "effective_batch_size" if reg == "weak" else "batch_size"
             smap = cfg[f"sgd_filters_{reg}"]
+            lrs = {bs: v["learning_rate"] for bs, v in smap.items()}
 
-            table_filename = f"{dataset}_{reg}_scaling.tex"
-            table_path = os.path.join(base_table_dir, table_filename)
-
-            for xax_raw in ["grad_evals", "running_time", "epoch"]:
-                xax = (
-                    "iter"
-                    if dataset == "tinyshakespeare" and xax_raw == "epoch"
-                    else xax_raw
-                )
+            data_cache, meta, variants = None, None, None
+            for xax in ["grad_evals", "running_time"]:
                 save_path = os.path.join(
                     base_fig_dir, f"{dataset}_{reg}_{xax}_grid.pdf"
                 )
-
-                combos = plot_grid_presentation(
+                data_cache, meta, variants = plot_grid_presentation(
                     proj,
                     xax,
                     bkey,
@@ -617,17 +707,60 @@ def main():
                     cfg["metrics"],
                     {"config.dataset_name": dataset, **cfg["filters"]},
                     smap,
-                    cfg.get("y_limits"),
+                    None,
                     save_path,
-                    table_path,
                     cfg["y_log"],
                     ck,
                     cache_dir,
-                    reg,
+                    regime=reg,
                 )
-                if combos:
-                    dataset_combos.update(combos)
 
+                save_latex_figure_code(
+                    tex_dir,
+                    dataset,
+                    reg,
+                    xax,
+                    cfg["metrics"],
+                    sorted(smap.keys()),
+                    lrs,
+                    meta["delta"],
+                    cfg["model_pretty"],
+                    f"scaling_{xax}",
+                    meta["glob_opt"],
+                    meta["loc_opt"],
+                    meta["glob_so"],
+                    meta["loc_so"],
+                    variants,
+                )
+
+                if data_cache:
+                    for size in data_cache:
+                        for m in data_cache[size]:
+                            opt = m["config"].get("optimizer", "unk")
+                            n = _safe_int(m["config"].get(ck, 1))
+                            dataset_combos.add((opt, n))
+
+            generate_summary_table(
+                table_dir,
+                dataset,
+                reg,
+                cfg["metrics"],
+                lrs,
+                meta["glob_opt"],
+                meta["loc_opt"],
+                meta["glob_so"],
+                meta["loc_so"],
+                variants,
+                meta["delta"],
+                cfg["model_pretty"],
+                data_cache,
+                ck,
+                lambda rid: _load_history_cached_by_id(
+                    api, proj, rid, cache_dir, dataset
+                ),
+            )
+
+        # Legend Logic
         if dataset_combos:
             sorted_combos = sorted(
                 dataset_combos,
@@ -639,12 +772,12 @@ def main():
                     continue
                 col, ls = get_style_for_combo(c[0], c[1])
                 leg_h.append(Line2D([0], [0], color=col, lw=4, linestyle=ls))
-                lbl = (
-                    r"SGD Baseline"
-                    if str(c[0]).lower() == "sgd"
-                    else rf"${latex_opt(str(c[0]))}\;\mid\;N={c[1]}$"
-                )
+                if str(c[0]).lower() == "sgd":
+                    lbl = r"SGD $\mid$ $N=1$"
+                else:
+                    lbl = rf"${latex_opt(str(c[0]))}$ $\mid$ $N={c[1]}$"
                 leg_l.append(lbl)
+
             leg_fig = plt.figure(figsize=(18, 1.5 if len(leg_l) <= 4 else 2.5))
             leg_fig.legend(
                 leg_h, leg_l, loc="center", ncol=min(len(leg_l), 4), frameon=False
