@@ -13,6 +13,7 @@ Usage:
     python analyze_hyperparam_results.py --metric loss
 """
 
+#!/usr/bin/env python3
 import argparse
 import hashlib
 import json
@@ -22,26 +23,74 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from cycler import cycler
 
-# Enable LaTeX rendering and set font sizes
+# =============================================================================
+# MODERN COLOR SCHEME & BEAMER STYLING
+# =============================================================================
+COLORS = {
+    "modernBlue": "#0054A6",
+    "modernLight": "#2980B9",
+    "modernBlack": "#1E1E1E",
+    "modernDark": "#34495E",
+    "modernPink": "#FF2D55",
+    "modernPurple": "#8E44AD",
+    "modernTeal": "#00A896",
+    "background": "#FAFAFA",
+}
+
+custom_cycler = cycler(
+    color=[
+        COLORS["modernBlue"],
+        COLORS["modernPink"],
+        COLORS["modernTeal"],
+        COLORS["modernPurple"],
+        COLORS["modernLight"],
+        COLORS["modernDark"],
+    ]
+)
+
 plt.rcParams.update(
     {
         "text.usetex": True,
-        "font.family": "serif",
-        "font.size": 18,
-        "axes.titlesize": 20,
-        "axes.labelsize": 18,
-        "xtick.labelsize": 16,
-        "ytick.labelsize": 16,
-        "figure.titlesize": 22,
-        "legend.fontsize": 20,
-        "legend.title_fontsize": 20,
+        "text.latex.preamble": r"\usepackage{amsmath}\usepackage{amssymb}\usepackage{sfmath}",
+        "font.family": "sans-serif",
+        "font.size": 22,
+        "axes.titlesize": 26,
+        "axes.labelsize": 24,
+        "xtick.labelsize": 20,
+        "ytick.labelsize": 20,
+        "legend.fontsize": 18,
+        "figure.titlesize": 30,
+        "axes.prop_cycle": custom_cycler,
+        "text.color": COLORS["modernBlack"],
+        "axes.labelcolor": COLORS["modernDark"],
+        "xtick.color": COLORS["modernDark"],
+        "ytick.color": COLORS["modernDark"],
+        "axes.edgecolor": COLORS["modernDark"],
+        "grid.color": "#BDC3C7",
+        "lines.linewidth": 4,
+        "lines.markersize": 12,
+        "axes.grid": True,
+        "grid.alpha": 0.3,
+        "grid.linestyle": "--",
+        "figure.facecolor": COLORS["background"],
     }
 )
+
+
+def get_custom_heat_cmap(metric_type="loss"):
+    if metric_type == "loss":
+        colors = [COLORS["modernBlue"], "#FFFFFF", COLORS["modernPink"]]
+    else:
+        colors = [COLORS["modernPink"], "#FFFFFF", COLORS["modernBlue"]]
+    return mcolors.LinearSegmentedColormap.from_list("modern_theme", colors)
+
 
 try:
     import wandb
@@ -634,8 +683,7 @@ def create_comparison_plots(
 
             # Use SGD with specified overlap value
             sgd_subset = df[
-                (df["optimizer"] == "sgd")
-                & (abs(df["overlap"] - sgd_overlap) < 0.01)
+                (df["optimizer"] == "sgd") & (abs(df["overlap"] - sgd_overlap) < 0.01)
             ]
 
             # Combine SGD (no overlap) with APTS (with specified overlap/batch_inc)
@@ -742,7 +790,12 @@ def create_comparison_plots(
                 fontsize=12,
                 verticalalignment="top",
                 horizontalalignment="right",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+                bbox=dict(
+                    boxstyle="round",
+                    facecolor=COLORS["background"],
+                    edgecolor=COLORS["modernDark"],
+                    alpha=0.8,
+                ),
             )
 
         plt.tight_layout()
@@ -818,7 +871,12 @@ def create_comparison_plots(
                 fontsize=12,
                 verticalalignment="bottom",
                 horizontalalignment="right",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+                bbox=dict(
+                    boxstyle="round",
+                    facecolor=COLORS["background"],
+                    edgecolor=COLORS["modernDark"],
+                    alpha=0.8,
+                ),
             )
 
         plt.tight_layout()
@@ -940,12 +998,14 @@ def create_comparison_plots(
                 aggfunc="mean",
             )
             if not pivot.empty:
-                heatmap_data.append({
-                    "pivot": pivot,
-                    "title": format_optimizer_name("sgd"),
-                    "optimizer": "sgd",
-                    "num_subs": None
-                })
+                heatmap_data.append(
+                    {
+                        "pivot": pivot,
+                        "title": format_optimizer_name("sgd"),
+                        "optimizer": "sgd",
+                        "num_subs": None,
+                    }
+                )
 
         # Add APTS variants with overlap=0.33, batch_inc=1.5
         for optimizer in apts_variants:
@@ -965,12 +1025,14 @@ def create_comparison_plots(
                     aggfunc="mean",
                 )
                 if not pivot.empty:
-                    heatmap_data.append({
-                        "pivot": pivot,
-                        "title": format_optimizer_name(optimizer, int(num_subs)),
-                        "optimizer": optimizer,
-                        "num_subs": int(num_subs)
-                    })
+                    heatmap_data.append(
+                        {
+                            "pivot": pivot,
+                            "title": format_optimizer_name(optimizer, int(num_subs)),
+                            "optimizer": optimizer,
+                            "num_subs": int(num_subs),
+                        }
+                    )
 
         # Create combined figure with all loss heatmaps
         if heatmap_data:
@@ -998,13 +1060,15 @@ def create_comparison_plots(
                     data["pivot"],
                     annot=True,
                     fmt=".4f",
-                    cmap="RdYlGn_r",
+                    cmap=get_custom_heat_cmap("loss"),
                     ax=ax,
                     vmin=global_loss_min,
                     vmax=global_loss_max,
                     cbar=False,
                     xticklabels=True,  # Show all x tick labels
-                    yticklabels=(col == 0),  # Show y tick labels only on leftmost column
+                    yticklabels=(
+                        col == 0
+                    ),  # Show y tick labels only on leftmost column
                 )
                 ax.set_title(data["title"], fontsize=14, fontweight="bold")
 
@@ -1022,13 +1086,14 @@ def create_comparison_plots(
 
             # Hide unused subplots
             for idx in range(n_heatmaps, len(axes)):
-                axes[idx].axis('off')
+                axes[idx].axis("off")
 
             # Add a single colorbar for all heatmaps
             from matplotlib import cm
             from matplotlib.colors import Normalize
+
             norm = Normalize(vmin=global_loss_min, vmax=global_loss_max)
-            sm = cm.ScalarMappable(cmap="RdYlGn_r", norm=norm)
+            sm = cm.ScalarMappable(cmap=get_custom_heat_cmap("loss"), norm=norm)
             sm.set_array([])
 
             # Adjust layout to make room for colorbar
@@ -1061,12 +1126,14 @@ def create_comparison_plots(
                 aggfunc="mean",
             )
             if not pivot.empty:
-                heatmap_data.append({
-                    "pivot": pivot,
-                    "title": format_optimizer_name("sgd"),
-                    "optimizer": "sgd",
-                    "num_subs": None
-                })
+                heatmap_data.append(
+                    {
+                        "pivot": pivot,
+                        "title": format_optimizer_name("sgd"),
+                        "optimizer": "sgd",
+                        "num_subs": None,
+                    }
+                )
 
         # Add APTS variants with overlap=0.33, batch_inc=1.5
         for optimizer in apts_variants:
@@ -1086,12 +1153,14 @@ def create_comparison_plots(
                     aggfunc="mean",
                 )
                 if not pivot.empty:
-                    heatmap_data.append({
-                        "pivot": pivot,
-                        "title": format_optimizer_name(optimizer, int(num_subs)),
-                        "optimizer": optimizer,
-                        "num_subs": int(num_subs)
-                    })
+                    heatmap_data.append(
+                        {
+                            "pivot": pivot,
+                            "title": format_optimizer_name(optimizer, int(num_subs)),
+                            "optimizer": optimizer,
+                            "num_subs": int(num_subs),
+                        }
+                    )
 
         # Create combined figure with all accuracy heatmaps
         if heatmap_data:
@@ -1119,13 +1188,15 @@ def create_comparison_plots(
                     data["pivot"],
                     annot=True,
                     fmt=".2f",
-                    cmap="RdYlGn",
+                    cmap=get_custom_heat_cmap("accuracy"),
                     ax=ax,
                     vmin=global_acc_min,
                     vmax=global_acc_max,
                     cbar=False,
                     xticklabels=True,  # Show all x tick labels
-                    yticklabels=(col == 0),  # Show y tick labels only on leftmost column
+                    yticklabels=(
+                        col == 0
+                    ),  # Show y tick labels only on leftmost column
                 )
                 ax.set_title(data["title"], fontsize=14, fontweight="bold")
 
@@ -1143,13 +1214,14 @@ def create_comparison_plots(
 
             # Hide unused subplots
             for idx in range(n_heatmaps, len(axes)):
-                axes[idx].axis('off')
+                axes[idx].axis("off")
 
             # Add a single colorbar for all heatmaps
             from matplotlib import cm
             from matplotlib.colors import Normalize
+
             norm = Normalize(vmin=global_acc_min, vmax=global_acc_max)
-            sm = cm.ScalarMappable(cmap="RdYlGn", norm=norm)
+            sm = cm.ScalarMappable(cmap=get_custom_heat_cmap("accuracy"), norm=norm)
             sm.set_array([])
 
             # Adjust layout to make room for colorbar
@@ -1200,322 +1272,137 @@ def create_sgd_parameter_comparison_plots(
         print("Need at least 2 combinations for comparison. Skipping...")
         return
 
-    print(f"\nFound {len(param_combinations)} SGD parameter combination(s):")
-    for overlap, batch_inc in param_combinations:
-        print(f"  - overlap={overlap:.2f}, batch_inc_factor={batch_inc:.2f}")
+    # Sort combinations to ensure consistent axis assignment:
+    # We want config with overlap=0.0 on x-axis (Config 1)
+    # and config with overlap=0.33 on y-axis (Config 2)
+    param_combinations.sort(key=lambda x: x[0])
+
+    overlap1, batch_inc1 = param_combinations[0]
+    overlap2, batch_inc2 = param_combinations[1]
+
+    label1 = f"overlap={overlap1*100:.0f}\\%, batch inc. factor={batch_inc1:.2f}"
+    label2 = f"overlap={overlap2*100:.0f}\\%, batch inc. factor={batch_inc2:.2f}"
 
     sns.set_style("whitegrid")
 
-    # Plot 1: Side-by-side line plot (Loss vs Model Size)
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    for overlap_val, batch_inc_val in param_combinations:
-        # Filter SGD to this parameter combination
-        sgd_subset = sgd_df[
-            (abs(sgd_df["overlap"] - overlap_val) < 0.01)
-            & (abs(sgd_df["batch_inc_factor"] - batch_inc_val) < 0.01)
-        ]
-
-        if len(sgd_subset) == 0:
+    # --- Plot 1 & 2: Line plots (unchanged logic, but using sorted labels) ---
+    for metric in ["loss", "accuracy"]:
+        if metric == "accuracy" and not sgd_df["final_accuracy"].notna().any():
             continue
 
-        # Aggregate across trials
-        agg_df = (
-            sgd_subset.groupby("total_params")
-            .agg({"final_loss": ["mean", "std"]})
-            .reset_index()
-        )
-
-        # Flatten column names
-        agg_df.columns = ["total_params", "loss_mean", "loss_std"]
-
-        label = (
-            f"overlap={overlap_val*100:.0f}\\%, batch inc. factor={batch_inc_val:.2f}"
-        )
-        ax.errorbar(
-            agg_df["total_params"],
-            agg_df["loss_mean"],
-            yerr=agg_df["loss_std"],
-            marker="o",
-            capsize=5,
-            label=label,
-            linewidth=2,
-            markersize=8,
-        )
-
-    ax.set_xlabel(r"Number of parameters", fontsize=12)
-    ax.set_ylabel(r"Final avg. loss (SGD)", fontsize=12)
-    ax.set_title(
-        r"SGD: Parameter Combination Comparison", fontsize=14, fontweight="bold"
-    )
-    ax.legend(fontsize=11)
-    ax.grid(True, alpha=0.3)
-    ax.set_xscale("log")
-
-    plt.tight_layout()
-
-    if output_dir:
-        filepath = output_dir / "sgd_parameter_comparison_loss_ffnn.pdf"
-        plt.savefig(filepath, bbox_inches="tight")
-        print(f"  Saved: {filepath}")
-    else:
-        plt.show()
-
-    plt.close()
-
-    # Plot 2: Side-by-side line plot (Accuracy vs Model Size)
-    if sgd_df["final_accuracy"].notna().any():
         fig, ax = plt.subplots(figsize=(10, 6))
-
-        for overlap_val, batch_inc_val in param_combinations:
-            # Filter SGD to this parameter combination
-            sgd_subset = sgd_df[
-                (abs(sgd_df["overlap"] - overlap_val) < 0.01)
-                & (abs(sgd_df["batch_inc_factor"] - batch_inc_val) < 0.01)
+        for ov, bif in param_combinations:
+            subset = sgd_df[
+                (abs(sgd_df["overlap"] - ov) < 0.01)
+                & (abs(sgd_df["batch_inc_factor"] - bif) < 0.01)
             ]
-
-            if len(sgd_subset) == 0:
+            if len(subset) == 0:
                 continue
-
-            # Aggregate across trials
-            agg_df = (
-                sgd_subset.groupby("total_params")
-                .agg({"final_accuracy": ["mean", "std"]})
+            agg = (
+                subset.groupby("total_params")
+                .agg({f"final_{metric}": ["mean", "std"]})
                 .reset_index()
             )
-
-            # Flatten column names
-            agg_df.columns = ["total_params", "accuracy_mean", "accuracy_std"]
-
-            label = f"overlap={overlap_val*100:.0f}\\%, batch inc. factor={batch_inc_val:.2f}"
+            agg.columns = ["total_params", "m", "s"]
             ax.errorbar(
-                agg_df["total_params"],
-                agg_df["accuracy_mean"],
-                yerr=agg_df["accuracy_std"],
+                agg["total_params"],
+                agg["m"],
+                yerr=agg["s"],
                 marker="o",
                 capsize=5,
-                label=label,
+                label=f"overlap={ov*100:.0f}\\%, bif={bif:.2f}",
                 linewidth=2,
-                markersize=8,
             )
 
-        ax.set_xlabel(r"Number of parameters", fontsize=12)
-        ax.set_ylabel(r"Final avg. accuracy (SGD) (\%)", fontsize=12)
-        ax.set_title(
-            r"SGD: Parameter Combination Comparison", fontsize=14, fontweight="bold"
-        )
-        ax.legend(fontsize=11)
-        ax.grid(True, alpha=0.3)
         ax.set_xscale("log")
-
+        ax.set_xlabel(r"Number of parameters")
+        ax.set_ylabel(f"Final avg. {metric} (SGD)")
+        ax.legend()
         plt.tight_layout()
-
         if output_dir:
-            filepath = output_dir / "sgd_parameter_comparison_accuracy_ffnn.pdf"
-            plt.savefig(filepath, bbox_inches="tight")
-            print(f"  Saved: {filepath}")
-        else:
-            plt.show()
-
+            plt.savefig(output_dir / f"sgd_parameter_comparison_{metric}_ffnn.pdf")
         plt.close()
 
-    # Plot 3 & 4: Scatter plots for pairwise comparison
-    if len(param_combinations) == 2:
-        overlap1, batch_inc1 = param_combinations[0]
-        overlap2, batch_inc2 = param_combinations[1]
+    # --- Plot 3 & 4: Scatter plots (Update for Axis Consistency) ---
+    sgd1 = sgd_df[
+        (abs(sgd_df["overlap"] - overlap1) < 0.01)
+        & (abs(sgd_df["batch_inc_factor"] - batch_inc1) < 0.01)
+    ].copy()
+    sgd2 = sgd_df[
+        (abs(sgd_df["overlap"] - overlap2) < 0.01)
+        & (abs(sgd_df["batch_inc_factor"] - batch_inc2) < 0.01)
+    ].copy()
 
-        # Get data for both combinations
-        sgd1 = sgd_df[
-            (abs(sgd_df["overlap"] - overlap1) < 0.01)
-            & (abs(sgd_df["batch_inc_factor"] - batch_inc1) < 0.01)
-        ].copy()
-        sgd2 = sgd_df[
-            (abs(sgd_df["overlap"] - overlap2) < 0.01)
-            & (abs(sgd_df["batch_inc_factor"] - batch_inc2) < 0.01)
-        ].copy()
+    sgd1_agg = (
+        sgd1.groupby(["width", "num_layers"])
+        .agg({"final_loss": "mean", "final_accuracy": "mean", "total_params": "first"})
+        .reset_index()
+    )
+    sgd2_agg = (
+        sgd2.groupby(["width", "num_layers"])
+        .agg({"final_loss": "mean", "final_accuracy": "mean", "total_params": "first"})
+        .reset_index()
+    )
 
-        # Create labels for debugging
-        label1 = f"overlap={overlap1*100:.0f}\\%, batch inc. factor={batch_inc1:.2f}"
-        label2 = f"overlap={overlap2*100:.0f}\\%, batch inc. factor={batch_inc2:.2f}"
+    merged = pd.merge(
+        sgd1_agg,
+        sgd2_agg,
+        on=["width", "num_layers", "total_params"],
+        suffixes=("_1", "_2"),
+    )
 
-        print(f"\n  Found {len(sgd1)} runs for Config 1 ({label1})")
-        print(f"  Found {len(sgd2)} runs for Config 2 ({label2})")
+    if len(merged) > 0:
+        for metric in ["loss", "accuracy"]:
+            m1, m2 = f"final_{metric}_1", f"final_{metric}_2"
+            if merged[m1].isna().all():
+                continue
 
-        # Aggregate by architecture (width, num_layers)
-        sgd1_agg = (
-            sgd1.groupby(["width", "num_layers"])
-            .agg(
-                {
-                    "final_loss": "mean",
-                    "final_accuracy": "mean",
-                    "total_params": "first",
-                }
-            )
-            .reset_index()
-        )
-        sgd2_agg = (
-            sgd2.groupby(["width", "num_layers"])
-            .agg(
-                {
-                    "final_loss": "mean",
-                    "final_accuracy": "mean",
-                    "total_params": "first",
-                }
-            )
-            .reset_index()
-        )
-
-        print(f"  Config 1: {len(sgd1_agg)} unique architectures")
-        print(
-            f"    Architectures in Config 1: {list(sgd1_agg[['width', 'num_layers']].itertuples(index=False, name=None))}"
-        )
-        print(f"  Config 2: {len(sgd2_agg)} unique architectures")
-        print(
-            f"    Architectures in Config 2: {list(sgd2_agg[['width', 'num_layers']].itertuples(index=False, name=None))}"
-        )
-
-        # Merge on architecture
-        merged = pd.merge(
-            sgd1_agg,
-            sgd2_agg,
-            on=["width", "num_layers", "total_params"],
-            suffixes=("_1", "_2"),
-        )
-
-        print(f"  Architectures present in both configs: {len(merged)}")
-
-        # Check for NaN values
-        if len(merged) > 0:
-            loss_valid = (
-                merged[["final_loss_1", "final_loss_2"]].notna().all(axis=1).sum()
-            )
-            acc_valid = (
-                merged[["final_accuracy_1", "final_accuracy_2"]]
-                .notna()
-                .all(axis=1)
-                .sum()
-            )
-            print(f"  Architectures with valid loss data: {loss_valid}")
-            print(f"  Architectures with valid accuracy data: {acc_valid}")
-
-        if len(merged) > 0:
-            # Scatter plot for loss
             fig, ax = plt.subplots(figsize=(8, 8))
-
             ax.scatter(
-                merged["final_loss_1"],
-                merged["final_loss_2"],
+                merged[m1],
+                merged[m2],
                 s=100,
                 alpha=0.6,
                 edgecolors="black",
                 linewidth=1.5,
             )
 
-            # Add diagonal line
-            min_val = min(merged["final_loss_1"].min(), merged["final_loss_2"].min())
-            max_val = max(merged["final_loss_1"].max(), merged["final_loss_2"].max())
-            ax.plot(
-                [min_val, max_val], [min_val, max_val], "k--", alpha=0.5, linewidth=1
-            )
+            # Diagonal line
+            lims = [
+                min(merged[m1].min(), merged[m2].min()),
+                max(merged[m1].max(), merged[m2].max()),
+            ]
+            ax.plot(lims, lims, "k--", alpha=0.5)
 
-            ax.set_xlabel(f"Final loss: {label1}", fontsize=18)
-            ax.set_ylabel(f"Final loss: {label2}", fontsize=18)
-            ax.set_title(r"SGD: Direct Loss Comparison", fontsize=20, fontweight="bold")
-            ax.grid(True, alpha=0.3)
+            ax.set_xlabel(f"Final {metric}: {label1}", fontsize=18)
+            ax.set_ylabel(f"Final {metric}: {label2}", fontsize=18)
 
-            # Create descriptive labels
-            def get_config_label(overlap, batch_inc):
-                if abs(overlap) < 0.01 and abs(batch_inc - 1.0) < 0.01:
-                    return "no overlap \\& no batch increase"
-                elif abs(overlap - 0.33) < 0.01 and abs(batch_inc - 1.5) < 0.01:
-                    return "overlap \\& batch increase"
-                else:
-                    return f"overlap={overlap*100:.0f}\\%, batch inc. factor={batch_inc:.2f}"
+            # Helper for label text
+            def get_cfg_desc(ov, bif):
+                return (
+                    "overlap \\& batch inc."
+                    if ov > 0
+                    else "no overlap \\& no batch inc."
+                )
 
-            config1_label = get_config_label(overlap1, batch_inc1)
-            config2_label = get_config_label(overlap2, batch_inc2)
+            better_side = "Below" if metric == "loss" else "Above"
+            other_side = "Above" if metric == "loss" else "Below"
 
-            # Add text indicating which is better
             ax.text(
                 0.05,
                 0.95,
-                f"Below diagonal = {config2_label} better\nAbove diagonal = {config1_label} better",
+                f"{better_side} diagonal = {get_cfg_desc(overlap2, batch_inc2)} better\n"
+                f"{other_side} diagonal = {get_cfg_desc(overlap1, batch_inc1)} better",
                 transform=ax.transAxes,
                 fontsize=16,
                 verticalalignment="top",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+                bbox=dict(boxstyle="round", facecolor=COLORS["background"], alpha=0.5),
             )
 
             plt.tight_layout()
-
             if output_dir:
-                filepath = output_dir / "sgd_parameter_scatter_loss_ffnn.pdf"
-                plt.savefig(filepath, bbox_inches="tight")
-                print(f"  Saved: {filepath}")
-            else:
-                plt.show()
-
+                plt.savefig(output_dir / f"sgd_parameter_scatter_{metric}_ffnn.pdf")
             plt.close()
-
-            # Scatter plot for accuracy
-            if (
-                merged["final_accuracy_1"].notna().any()
-                and merged["final_accuracy_2"].notna().any()
-            ):
-                fig, ax = plt.subplots(figsize=(8, 8))
-
-                ax.scatter(
-                    merged["final_accuracy_1"],
-                    merged["final_accuracy_2"],
-                    s=100,
-                    alpha=0.6,
-                    edgecolors="black",
-                    linewidth=1.5,
-                )
-
-                # Add diagonal line
-                min_val = min(
-                    merged["final_accuracy_1"].min(), merged["final_accuracy_2"].min()
-                )
-                max_val = max(
-                    merged["final_accuracy_1"].max(), merged["final_accuracy_2"].max()
-                )
-                ax.plot(
-                    [min_val, max_val],
-                    [min_val, max_val],
-                    "k--",
-                    alpha=0.5,
-                    linewidth=1,
-                )
-
-                ax.set_xlabel(f"Final accuracy (\\%): {label1}", fontsize=18)
-                ax.set_ylabel(f"Final accuracy (\\%): {label2}", fontsize=18)
-                ax.set_title(
-                    r"SGD: Direct Accuracy Comparison", fontsize=20, fontweight="bold"
-                )
-                ax.grid(True, alpha=0.3)
-
-                # Add text indicating which is better
-                ax.text(
-                    0.05,
-                    0.95,
-                    f"Above diagonal = {config2_label} better\nBelow diagonal = {config1_label} better",
-                    transform=ax.transAxes,
-                    fontsize=16,
-                    verticalalignment="top",
-                    bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
-                )
-
-                plt.tight_layout()
-
-                if output_dir:
-                    filepath = output_dir / "sgd_parameter_scatter_accuracy_ffnn.pdf"
-                    plt.savefig(filepath, bbox_inches="tight")
-                    print(f"  Saved: {filepath}")
-                else:
-                    plt.show()
-
-                plt.close()
 
 
 def create_sgd_vs_apts_comparison_plots(

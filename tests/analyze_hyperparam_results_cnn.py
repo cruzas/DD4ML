@@ -22,26 +22,74 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from cycler import cycler
 
-# Enable LaTeX rendering and set font sizes
+# =============================================================================
+# MODERN COLOR SCHEME & BEAMER STYLING
+# =============================================================================
+COLORS = {
+    "modernBlue": "#0054A6",
+    "modernLight": "#2980B9",
+    "modernBlack": "#1E1E1E",
+    "modernDark": "#34495E",
+    "modernPink": "#FF2D55",
+    "modernPurple": "#8E44AD",
+    "modernTeal": "#00A896",
+    "background": "#FAFAFA",
+}
+
+custom_cycler = cycler(
+    color=[
+        COLORS["modernBlue"],
+        COLORS["modernPink"],
+        COLORS["modernTeal"],
+        COLORS["modernPurple"],
+        COLORS["modernLight"],
+        COLORS["modernDark"],
+    ]
+)
+
 plt.rcParams.update(
     {
         "text.usetex": True,
-        "font.family": "serif",
-        "font.size": 18,
-        "axes.titlesize": 20,
-        "axes.labelsize": 18,
-        "xtick.labelsize": 16,
-        "ytick.labelsize": 16,
-        "figure.titlesize": 22,
-        "legend.fontsize": 20,
-        "legend.title_fontsize": 20,
+        "text.latex.preamble": r"\usepackage{amsmath}\usepackage{amssymb}\usepackage{sfmath}",
+        "font.family": "sans-serif",
+        "font.size": 22,
+        "axes.titlesize": 26,
+        "axes.labelsize": 24,
+        "xtick.labelsize": 20,
+        "ytick.labelsize": 20,
+        "legend.fontsize": 18,
+        "figure.titlesize": 30,
+        "axes.prop_cycle": custom_cycler,
+        "text.color": COLORS["modernBlack"],
+        "axes.labelcolor": COLORS["modernDark"],
+        "xtick.color": COLORS["modernDark"],
+        "ytick.color": COLORS["modernDark"],
+        "axes.edgecolor": COLORS["modernDark"],
+        "grid.color": "#BDC3C7",
+        "lines.linewidth": 4,
+        "lines.markersize": 12,
+        "axes.grid": True,
+        "grid.alpha": 0.3,
+        "grid.linestyle": "--",
+        "figure.facecolor": COLORS["background"],
     }
 )
+
+
+def get_custom_heat_cmap(metric_type="loss"):
+    if metric_type == "loss":
+        colors = [COLORS["modernBlue"], "#FFFFFF", COLORS["modernPink"]]
+    else:
+        colors = [COLORS["modernPink"], "#FFFFFF", COLORS["modernBlue"]]
+    return mcolors.LinearSegmentedColormap.from_list("modern_theme", colors)
+
 
 try:
     import wandb
@@ -106,10 +154,7 @@ def fetch_runs(
         # Cache the results
         if use_cache:
             try:
-                cache_data = {
-                    "_fetched_at": time.time(),
-                    "runs": runs_list
-                }
+                cache_data = {"_fetched_at": time.time(), "runs": runs_list}
                 pd.to_pickle(cache_data, cache_file)
                 print(f"Cached {len(runs_list)} runs")
             except Exception as e:
@@ -141,7 +186,11 @@ def format_optimizer_name(optimizer: str, num_subdomains: Optional[int] = None) 
     base_name = formatter.get(optimizer.lower(), optimizer)
 
     # Add subdomain count for APTS variants if specified
-    if num_subdomains is not None and optimizer.lower() in ["apts_d", "apts_p", "apts_ip"]:
+    if num_subdomains is not None and optimizer.lower() in [
+        "apts_d",
+        "apts_p",
+        "apts_ip",
+    ]:
         base_name += f" ($N={num_subdomains}$)"
 
     return base_name
@@ -189,21 +238,29 @@ def validate_apts_parameters(df: pd.DataFrame) -> None:
         overlap_values = opt_df["overlap"].dropna().unique()
         if len(overlap_values) > 0:
             if not all(abs(v - 0.33) < 0.01 for v in overlap_values):
-                print(f"\n⚠ WARNING: {optimizer.upper()} has non-standard overlap values: {overlap_values}")
+                print(
+                    f"\n⚠ WARNING: {optimizer.upper()} has non-standard overlap values: {overlap_values}"
+                )
                 print(f"  Expected: 0.33")
                 issues_found = True
             else:
-                print(f"\n✓ {optimizer.upper()}: overlap = {overlap_values[0]:.2f} (correct)")
+                print(
+                    f"\n✓ {optimizer.upper()}: overlap = {overlap_values[0]:.2f} (correct)"
+                )
 
         # Check batch_inc_factor
         batch_inc_values = opt_df["batch_inc_factor"].dropna().unique()
         if len(batch_inc_values) > 0:
             if not all(abs(v - 1.5) < 0.01 for v in batch_inc_values):
-                print(f"⚠ WARNING: {optimizer.upper()} has non-standard batch_inc_factor values: {batch_inc_values}")
+                print(
+                    f"⚠ WARNING: {optimizer.upper()} has non-standard batch_inc_factor values: {batch_inc_values}"
+                )
                 print(f"  Expected: 1.5")
                 issues_found = True
             else:
-                print(f"✓ {optimizer.upper()}: batch_inc_factor = {batch_inc_values[0]:.2f} (correct)")
+                print(
+                    f"✓ {optimizer.upper()}: batch_inc_factor = {batch_inc_values[0]:.2f} (correct)"
+                )
 
     if not issues_found:
         print("\n✓ All APTS variants have correct parameters")
@@ -232,7 +289,9 @@ def extract_run_data(runs: List) -> pd.DataFrame:
             filters = None
 
         try:
-            num_conv_layers = int(num_conv_layers) if num_conv_layers is not None else None
+            num_conv_layers = (
+                int(num_conv_layers) if num_conv_layers is not None else None
+            )
         except (ValueError, TypeError):
             num_conv_layers = None
 
@@ -260,7 +319,7 @@ def extract_run_data(runs: List) -> pd.DataFrame:
             # MNIST is 28x28, pooling reduces by factor of 2 every pool_every layers
             if pool_every and pool_every > 0:
                 num_pools = num_conv_layers // pool_every
-                feature_size = 28 // (2 ** num_pools)
+                feature_size = 28 // (2**num_pools)
             else:
                 feature_size = 28
 
@@ -388,13 +447,15 @@ def print_comparison_by_network_size(df: pd.DataFrame) -> None:
         filters = arch["filters"]
         num_conv_layers = arch["num_conv_layers"]
 
-        arch_df = df[(df["filters"] == filters) & (df["num_conv_layers"] == num_conv_layers)]
+        arch_df = df[
+            (df["filters"] == filters) & (df["num_conv_layers"] == num_conv_layers)
+        ]
 
         if len(arch_df) == 0:
             continue
 
         print(f"\n{'─' * 80}")
-        total_params = arch_df['total_params'].iloc[0]
+        total_params = arch_df["total_params"].iloc[0]
         if total_params is not None:
             print(
                 f"Filters={filters}, Conv Layers={num_conv_layers} (~{total_params:,} parameters)"
@@ -455,9 +516,9 @@ def print_hyperparameterization_analysis(df: pd.DataFrame) -> None:
             for _, row in summary.iterrows():
                 # Handle total_params - access directly from the Series
                 try:
-                    total_params_val = row['total_params']
+                    total_params_val = row["total_params"]
                     # Convert to scalar if needed
-                    if hasattr(total_params_val, 'item'):
+                    if hasattr(total_params_val, "item"):
                         total_params_val = total_params_val.item()
                     if pd.isna(total_params_val):
                         params = "N/A"
@@ -540,11 +601,13 @@ def create_comparison_plots(
         for overlap, batch_inc in param_combinations:
             # Count which optimizers have this combination
             matching_runs = df[
-                (abs(df["overlap"] - overlap) < 0.01) &
-                (abs(df["batch_inc_factor"] - batch_inc) < 0.01)
+                (abs(df["overlap"] - overlap) < 0.01)
+                & (abs(df["batch_inc_factor"] - batch_inc) < 0.01)
             ]
             optimizers = sorted(matching_runs["optimizer"].unique())
-            print(f"  - overlap={overlap:.2f}, batch_inc_factor={batch_inc:.2f}: {optimizers}")
+            print(
+                f"  - overlap={overlap:.2f}, batch_inc_factor={batch_inc:.2f}: {optimizers}"
+            )
 
     # If no parameter combinations found or all are NaN, use default grouping
     if not param_combinations:
@@ -554,26 +617,29 @@ def create_comparison_plots(
     # Create plots for each parameter combination
     for overlap_val, batch_inc_val in param_combinations:
         if overlap_val is not None and batch_inc_val is not None:
-            print(f"\n--- Creating plots for overlap={overlap_val:.2f}, batch_inc_factor={batch_inc_val:.2f} ---")
+            print(
+                f"\n--- Creating plots for overlap={overlap_val:.2f}, batch_inc_factor={batch_inc_val:.2f} ---"
+            )
 
             # Filter APTS variants to this parameter combination
             # But always use SGD with no overlap (best performing configuration)
             apts_subset = df[
-                (df["optimizer"].isin(["apts_d", "apts_p", "apts_ip"])) &
-                (abs(df["overlap"] - overlap_val) < 0.01) &
-                (abs(df["batch_inc_factor"] - batch_inc_val) < 0.01)
+                (df["optimizer"].isin(["apts_d", "apts_p", "apts_ip"]))
+                & (abs(df["overlap"] - overlap_val) < 0.01)
+                & (abs(df["batch_inc_factor"] - batch_inc_val) < 0.01)
             ]
 
             # Use SGD with specified overlap value
             sgd_subset = df[
-                (df["optimizer"] == "sgd") &
-                (abs(df["overlap"] - sgd_overlap) < 0.01)
+                (df["optimizer"] == "sgd") & (abs(df["overlap"] - sgd_overlap) < 0.01)
             ]
 
             # Combine SGD (no overlap) with APTS (with specified overlap/batch_inc)
             df_subset = pd.concat([sgd_subset, apts_subset])
 
-            suffix = f"_overlap{overlap_val:.2f}_batchinc{batch_inc_val:.2f}".replace(".", "_")
+            suffix = f"_overlap{overlap_val:.2f}_batchinc{batch_inc_val:.2f}".replace(
+                ".", "_"
+            )
         else:
             print("\n--- Creating combined plots (no parameter filtering) ---")
             df_subset = df
@@ -608,7 +674,8 @@ def create_comparison_plots(
 
             # Flatten column names
             agg_df.columns = [
-                "_".join(col).strip("_") if col[1] else col[0] for col in agg_df.columns.values
+                "_".join(col).strip("_") if col[1] else col[0]
+                for col in agg_df.columns.values
             ]
 
             # Plot 1: Final Loss vs Network Size
@@ -618,10 +685,14 @@ def create_comparison_plots(
             for optimizer in sorted(agg_df["optimizer"].unique()):
                 # For APTS variants, plot each subdomain count separately
                 if optimizer in apts_variants and "num_subdomains" in agg_df.columns:
-                    for num_subs in sorted(agg_df[agg_df["optimizer"] == optimizer]["num_subdomains"].dropna().unique()):
+                    for num_subs in sorted(
+                        agg_df[agg_df["optimizer"] == optimizer]["num_subdomains"]
+                        .dropna()
+                        .unique()
+                    ):
                         opt_df = agg_df[
-                            (agg_df["optimizer"] == optimizer) &
-                            (agg_df["num_subdomains"] == num_subs)
+                            (agg_df["optimizer"] == optimizer)
+                            & (agg_df["num_subdomains"] == num_subs)
                         ].sort_values("total_params")
                         ax.errorbar(
                             opt_df["total_params"],
@@ -635,7 +706,9 @@ def create_comparison_plots(
                         )
                 else:
                     # For SGD and other optimizers, plot normally
-                    opt_df = agg_df[agg_df["optimizer"] == optimizer].sort_values("total_params")
+                    opt_df = agg_df[agg_df["optimizer"] == optimizer].sort_values(
+                        "total_params"
+                    )
                     ax.errorbar(
                         opt_df["total_params"],
                         opt_df["final_loss_mean"],
@@ -660,13 +733,19 @@ def create_comparison_plots(
                     f"SGD: ov={sgd_overlap:.2f}"
                 )
                 ax.text(
-                    0.98, 0.98,
+                    0.98,
+                    0.98,
                     param_text,
                     transform=ax.transAxes,
                     fontsize=12,
                     verticalalignment="top",
                     horizontalalignment="right",
-                    bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8)
+                    bbox=dict(
+                        boxstyle="round",
+                        facecolor=COLORS["background"],
+                        edgecolor=COLORS["modernDark"],
+                        alpha=0.8,
+                    ),
                 )
 
             plt.tight_layout()
@@ -687,10 +766,14 @@ def create_comparison_plots(
             for optimizer in sorted(agg_df["optimizer"].unique()):
                 # For APTS variants, plot each subdomain count separately
                 if optimizer in apts_variants and "num_subdomains" in agg_df.columns:
-                    for num_subs in sorted(agg_df[agg_df["optimizer"] == optimizer]["num_subdomains"].dropna().unique()):
+                    for num_subs in sorted(
+                        agg_df[agg_df["optimizer"] == optimizer]["num_subdomains"]
+                        .dropna()
+                        .unique()
+                    ):
                         opt_df = agg_df[
-                            (agg_df["optimizer"] == optimizer) &
-                            (agg_df["num_subdomains"] == num_subs)
+                            (agg_df["optimizer"] == optimizer)
+                            & (agg_df["num_subdomains"] == num_subs)
                         ].sort_values("total_params")
                         ax.errorbar(
                             opt_df["total_params"],
@@ -704,7 +787,9 @@ def create_comparison_plots(
                         )
                 else:
                     # For SGD and other optimizers, plot normally
-                    opt_df = agg_df[agg_df["optimizer"] == optimizer].sort_values("total_params")
+                    opt_df = agg_df[agg_df["optimizer"] == optimizer].sort_values(
+                        "total_params"
+                    )
                     ax.errorbar(
                         opt_df["total_params"],
                         opt_df["final_accuracy_mean"],
@@ -729,13 +814,19 @@ def create_comparison_plots(
                     f"SGD: ov={sgd_overlap:.2f}"
                 )
                 ax.text(
-                    0.98, 0.02,
+                    0.98,
+                    0.02,
                     param_text,
                     transform=ax.transAxes,
                     fontsize=12,
                     verticalalignment="bottom",
                     horizontalalignment="right",
-                    bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8)
+                    bbox=dict(
+                        boxstyle="round",
+                        facecolor=COLORS["background"],
+                        edgecolor=COLORS["modernDark"],
+                        alpha=0.8,
+                    ),
                 )
 
             plt.tight_layout()
@@ -766,7 +857,10 @@ def create_comparison_plots(
     ]
     if len(sgd_selected) > 0:
         pivot = sgd_selected.pivot_table(
-            values="final_loss", index="num_conv_layers", columns="filters", aggfunc="mean"
+            values="final_loss",
+            index="num_conv_layers",
+            columns="filters",
+            aggfunc="mean",
         )
         if not pivot.empty:
             all_loss_pivots_global.append(pivot)
@@ -806,7 +900,10 @@ def create_comparison_plots(
     # For SGD, use specified overlap value
     if len(sgd_selected) > 0:
         pivot = sgd_selected.pivot_table(
-            values="final_accuracy", index="num_conv_layers", columns="filters", aggfunc="mean"
+            values="final_accuracy",
+            index="num_conv_layers",
+            columns="filters",
+            aggfunc="mean",
         )
         if not pivot.empty:
             all_acc_pivots_global.append(pivot)
@@ -857,12 +954,14 @@ def create_comparison_plots(
                 aggfunc="mean",
             )
             if not pivot.empty:
-                heatmap_data.append({
-                    "pivot": pivot,
-                    "title": format_optimizer_name("sgd"),
-                    "optimizer": "sgd",
-                    "num_subs": None
-                })
+                heatmap_data.append(
+                    {
+                        "pivot": pivot,
+                        "title": format_optimizer_name("sgd"),
+                        "optimizer": "sgd",
+                        "num_subs": None,
+                    }
+                )
 
         # Add APTS variants with overlap=0.33, batch_inc=1.5
         for optimizer in apts_variants:
@@ -882,12 +981,14 @@ def create_comparison_plots(
                     aggfunc="mean",
                 )
                 if not pivot.empty:
-                    heatmap_data.append({
-                        "pivot": pivot,
-                        "title": format_optimizer_name(optimizer, int(num_subs)),
-                        "optimizer": optimizer,
-                        "num_subs": int(num_subs)
-                    })
+                    heatmap_data.append(
+                        {
+                            "pivot": pivot,
+                            "title": format_optimizer_name(optimizer, int(num_subs)),
+                            "optimizer": optimizer,
+                            "num_subs": int(num_subs),
+                        }
+                    )
 
         # Create combined figure with all loss heatmaps
         if heatmap_data:
@@ -915,13 +1016,15 @@ def create_comparison_plots(
                     data["pivot"],
                     annot=True,
                     fmt=".4f",
-                    cmap="RdYlGn_r",
+                    cmap=get_custom_heat_cmap("loss"),
                     ax=ax,
                     vmin=global_loss_min,
                     vmax=global_loss_max,
                     cbar=False,
                     xticklabels=True,  # Show all x tick labels
-                    yticklabels=(col == 0),  # Show y tick labels only on leftmost column
+                    yticklabels=(
+                        col == 0
+                    ),  # Show y tick labels only on leftmost column
                 )
                 ax.set_title(data["title"], fontsize=14, fontweight="bold")
 
@@ -939,13 +1042,14 @@ def create_comparison_plots(
 
             # Hide unused subplots
             for idx in range(n_heatmaps, len(axes)):
-                axes[idx].axis('off')
+                axes[idx].axis("off")
 
             # Add a single colorbar for all heatmaps
             from matplotlib import cm
             from matplotlib.colors import Normalize
+
             norm = Normalize(vmin=global_loss_min, vmax=global_loss_max)
-            sm = cm.ScalarMappable(cmap="RdYlGn_r", norm=norm)
+            sm = cm.ScalarMappable(cmap=get_custom_heat_cmap("loss"), norm=norm)
             sm.set_array([])
 
             # Adjust layout to make room for colorbar
@@ -978,12 +1082,14 @@ def create_comparison_plots(
                 aggfunc="mean",
             )
             if not pivot.empty:
-                heatmap_data.append({
-                    "pivot": pivot,
-                    "title": format_optimizer_name("sgd"),
-                    "optimizer": "sgd",
-                    "num_subs": None
-                })
+                heatmap_data.append(
+                    {
+                        "pivot": pivot,
+                        "title": format_optimizer_name("sgd"),
+                        "optimizer": "sgd",
+                        "num_subs": None,
+                    }
+                )
 
         # Add APTS variants with overlap=0.33, batch_inc=1.5
         for optimizer in apts_variants:
@@ -1003,12 +1109,14 @@ def create_comparison_plots(
                     aggfunc="mean",
                 )
                 if not pivot.empty:
-                    heatmap_data.append({
-                        "pivot": pivot,
-                        "title": format_optimizer_name(optimizer, int(num_subs)),
-                        "optimizer": optimizer,
-                        "num_subs": int(num_subs)
-                    })
+                    heatmap_data.append(
+                        {
+                            "pivot": pivot,
+                            "title": format_optimizer_name(optimizer, int(num_subs)),
+                            "optimizer": optimizer,
+                            "num_subs": int(num_subs),
+                        }
+                    )
 
         # Create combined figure with all accuracy heatmaps
         if heatmap_data:
@@ -1036,13 +1144,15 @@ def create_comparison_plots(
                     data["pivot"],
                     annot=True,
                     fmt=".2f",
-                    cmap="RdYlGn",
+                    cmap=get_custom_heat_cmap("accuracy"),
                     ax=ax,
                     vmin=global_acc_min,
                     vmax=global_acc_max,
                     cbar=False,
                     xticklabels=True,  # Show all x tick labels
-                    yticklabels=(col == 0),  # Show y tick labels only on leftmost column
+                    yticklabels=(
+                        col == 0
+                    ),  # Show y tick labels only on leftmost column
                 )
                 ax.set_title(data["title"], fontsize=14, fontweight="bold")
 
@@ -1060,13 +1170,14 @@ def create_comparison_plots(
 
             # Hide unused subplots
             for idx in range(n_heatmaps, len(axes)):
-                axes[idx].axis('off')
+                axes[idx].axis("off")
 
             # Add a single colorbar for all heatmaps
             from matplotlib import cm
             from matplotlib.colors import Normalize
+
             norm = Normalize(vmin=global_acc_min, vmax=global_acc_max)
-            sm = cm.ScalarMappable(cmap="RdYlGn", norm=norm)
+            sm = cm.ScalarMappable(cmap=get_custom_heat_cmap("accuracy"), norm=norm)
             sm.set_array([])
 
             # Adjust layout to make room for colorbar
@@ -1129,8 +1240,8 @@ def create_sgd_parameter_comparison_plots_cnn(
     for overlap_val, batch_inc_val in param_combinations:
         # Filter SGD to this parameter combination
         sgd_subset = sgd_df[
-            (abs(sgd_df["overlap"] - overlap_val) < 0.01) &
-            (abs(sgd_df["batch_inc_factor"] - batch_inc_val) < 0.01)
+            (abs(sgd_df["overlap"] - overlap_val) < 0.01)
+            & (abs(sgd_df["batch_inc_factor"] - batch_inc_val) < 0.01)
         ]
 
         if len(sgd_subset) == 0:
@@ -1146,7 +1257,9 @@ def create_sgd_parameter_comparison_plots_cnn(
         # Flatten column names
         agg_df.columns = ["total_params", "loss_mean", "loss_std"]
 
-        label = f"overlap={overlap_val*100:.0f}\\%, batch inc. factor={batch_inc_val:.2f}"
+        label = (
+            f"overlap={overlap_val*100:.0f}\\%, batch inc. factor={batch_inc_val:.2f}"
+        )
         ax.errorbar(
             agg_df["total_params"],
             agg_df["loss_mean"],
@@ -1160,7 +1273,9 @@ def create_sgd_parameter_comparison_plots_cnn(
 
     ax.set_xlabel(r"Number of parameters", fontsize=12)
     ax.set_ylabel(r"Final avg. loss (SGD)", fontsize=12)
-    ax.set_title(r"SGD: Parameter Combination Comparison", fontsize=14, fontweight="bold")
+    ax.set_title(
+        r"SGD: Parameter Combination Comparison", fontsize=14, fontweight="bold"
+    )
     ax.legend(fontsize=11)
     ax.grid(True, alpha=0.3)
     ax.set_xscale("log")
@@ -1183,8 +1298,8 @@ def create_sgd_parameter_comparison_plots_cnn(
         for overlap_val, batch_inc_val in param_combinations:
             # Filter SGD to this parameter combination
             sgd_subset = sgd_df[
-                (abs(sgd_df["overlap"] - overlap_val) < 0.01) &
-                (abs(sgd_df["batch_inc_factor"] - batch_inc_val) < 0.01)
+                (abs(sgd_df["overlap"] - overlap_val) < 0.01)
+                & (abs(sgd_df["batch_inc_factor"] - batch_inc_val) < 0.01)
             ]
 
             if len(sgd_subset) == 0:
@@ -1214,7 +1329,9 @@ def create_sgd_parameter_comparison_plots_cnn(
 
         ax.set_xlabel(r"Number of parameters", fontsize=12)
         ax.set_ylabel(r"Final avg. accuracy (SGD) (\%)", fontsize=12)
-        ax.set_title(r"SGD: Parameter Combination Comparison", fontsize=14, fontweight="bold")
+        ax.set_title(
+            r"SGD: Parameter Combination Comparison", fontsize=14, fontweight="bold"
+        )
         ax.legend(fontsize=11)
         ax.grid(True, alpha=0.3)
         ax.set_xscale("log")
@@ -1237,12 +1354,12 @@ def create_sgd_parameter_comparison_plots_cnn(
 
         # Get data for both combinations
         sgd1 = sgd_df[
-            (abs(sgd_df["overlap"] - overlap1) < 0.01) &
-            (abs(sgd_df["batch_inc_factor"] - batch_inc1) < 0.01)
+            (abs(sgd_df["overlap"] - overlap1) < 0.01)
+            & (abs(sgd_df["batch_inc_factor"] - batch_inc1) < 0.01)
         ].copy()
         sgd2 = sgd_df[
-            (abs(sgd_df["overlap"] - overlap2) < 0.01) &
-            (abs(sgd_df["batch_inc_factor"] - batch_inc2) < 0.01)
+            (abs(sgd_df["overlap"] - overlap2) < 0.01)
+            & (abs(sgd_df["batch_inc_factor"] - batch_inc2) < 0.01)
         ].copy()
 
         # Create labels for debugging
@@ -1253,36 +1370,59 @@ def create_sgd_parameter_comparison_plots_cnn(
         print(f"  Found {len(sgd2)} runs for Config 2 ({label2})")
 
         # Aggregate by architecture (filters, num_conv_layers)
-        sgd1_agg = sgd1.groupby(["filters", "num_conv_layers"]).agg({
-            "final_loss": "mean",
-            "final_accuracy": "mean",
-            "total_params": "first"
-        }).reset_index()
-        sgd2_agg = sgd2.groupby(["filters", "num_conv_layers"]).agg({
-            "final_loss": "mean",
-            "final_accuracy": "mean",
-            "total_params": "first"
-        }).reset_index()
+        sgd1_agg = (
+            sgd1.groupby(["filters", "num_conv_layers"])
+            .agg(
+                {
+                    "final_loss": "mean",
+                    "final_accuracy": "mean",
+                    "total_params": "first",
+                }
+            )
+            .reset_index()
+        )
+        sgd2_agg = (
+            sgd2.groupby(["filters", "num_conv_layers"])
+            .agg(
+                {
+                    "final_loss": "mean",
+                    "final_accuracy": "mean",
+                    "total_params": "first",
+                }
+            )
+            .reset_index()
+        )
 
         print(f"  Config 1: {len(sgd1_agg)} unique architectures")
-        print(f"    Architectures in Config 1: {list(sgd1_agg[['filters', 'num_conv_layers']].itertuples(index=False, name=None))}")
+        print(
+            f"    Architectures in Config 1: {list(sgd1_agg[['filters', 'num_conv_layers']].itertuples(index=False, name=None))}"
+        )
         print(f"  Config 2: {len(sgd2_agg)} unique architectures")
-        print(f"    Architectures in Config 2: {list(sgd2_agg[['filters', 'num_conv_layers']].itertuples(index=False, name=None))}")
+        print(
+            f"    Architectures in Config 2: {list(sgd2_agg[['filters', 'num_conv_layers']].itertuples(index=False, name=None))}"
+        )
 
         # Merge on architecture
         merged = pd.merge(
             sgd1_agg,
             sgd2_agg,
             on=["filters", "num_conv_layers", "total_params"],
-            suffixes=("_1", "_2")
+            suffixes=("_1", "_2"),
         )
 
         print(f"  Architectures present in both configs: {len(merged)}")
 
         # Check for NaN values
         if len(merged) > 0:
-            loss_valid = merged[["final_loss_1", "final_loss_2"]].notna().all(axis=1).sum()
-            acc_valid = merged[["final_accuracy_1", "final_accuracy_2"]].notna().all(axis=1).sum()
+            loss_valid = (
+                merged[["final_loss_1", "final_loss_2"]].notna().all(axis=1).sum()
+            )
+            acc_valid = (
+                merged[["final_accuracy_1", "final_accuracy_2"]]
+                .notna()
+                .all(axis=1)
+                .sum()
+            )
             print(f"  Architectures with valid loss data: {loss_valid}")
             print(f"  Architectures with valid accuracy data: {acc_valid}")
 
@@ -1296,13 +1436,15 @@ def create_sgd_parameter_comparison_plots_cnn(
                 s=100,
                 alpha=0.6,
                 edgecolors="black",
-                linewidth=1.5
+                linewidth=1.5,
             )
 
             # Add diagonal line
             min_val = min(merged["final_loss_1"].min(), merged["final_loss_2"].min())
             max_val = max(merged["final_loss_1"].max(), merged["final_loss_2"].max())
-            ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=1)
+            ax.plot(
+                [min_val, max_val], [min_val, max_val], "k--", alpha=0.5, linewidth=1
+            )
 
             ax.set_xlabel(f"Final loss: {label1}", fontsize=18)
             ax.set_ylabel(f"Final loss: {label2}", fontsize=18)
@@ -1323,12 +1465,18 @@ def create_sgd_parameter_comparison_plots_cnn(
 
             # Add text indicating which is better
             ax.text(
-                0.05, 0.95,
+                0.05,
+                0.95,
                 f"Below diagonal = {config2_label} better\nAbove diagonal = {config1_label} better",
                 transform=ax.transAxes,
                 fontsize=16,
                 verticalalignment="top",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5)
+                bbox=dict(
+                    boxstyle="round",
+                    facecolor=COLORS["background"],
+                    edgecolor=COLORS["modernDark"],
+                    alpha=0.5,
+                ),
             )
 
             plt.tight_layout()
@@ -1343,7 +1491,10 @@ def create_sgd_parameter_comparison_plots_cnn(
             plt.close()
 
             # Scatter plot for accuracy
-            if merged["final_accuracy_1"].notna().any() and merged["final_accuracy_2"].notna().any():
+            if (
+                merged["final_accuracy_1"].notna().any()
+                and merged["final_accuracy_2"].notna().any()
+            ):
                 fig, ax = plt.subplots(figsize=(8, 8))
 
                 ax.scatter(
@@ -1352,27 +1503,45 @@ def create_sgd_parameter_comparison_plots_cnn(
                     s=100,
                     alpha=0.6,
                     edgecolors="black",
-                    linewidth=1.5
+                    linewidth=1.5,
                 )
 
                 # Add diagonal line
-                min_val = min(merged["final_accuracy_1"].min(), merged["final_accuracy_2"].min())
-                max_val = max(merged["final_accuracy_1"].max(), merged["final_accuracy_2"].max())
-                ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=1)
+                min_val = min(
+                    merged["final_accuracy_1"].min(), merged["final_accuracy_2"].min()
+                )
+                max_val = max(
+                    merged["final_accuracy_1"].max(), merged["final_accuracy_2"].max()
+                )
+                ax.plot(
+                    [min_val, max_val],
+                    [min_val, max_val],
+                    "k--",
+                    alpha=0.5,
+                    linewidth=1,
+                )
 
                 ax.set_xlabel(f"Final accuracy (\\%): {label1}", fontsize=18)
                 ax.set_ylabel(f"Final accuracy (\\%): {label2}", fontsize=18)
-                ax.set_title(r"SGD: Direct Accuracy Comparison", fontsize=20, fontweight="bold")
+                ax.set_title(
+                    r"SGD: Direct Accuracy Comparison", fontsize=20, fontweight="bold"
+                )
                 ax.grid(True, alpha=0.3)
 
                 # Add text indicating which is better
                 ax.text(
-                    0.05, 0.95,
+                    0.05,
+                    0.95,
                     f"Above diagonal = {config2_label} better\nBelow diagonal = {config1_label} better",
                     transform=ax.transAxes,
                     fontsize=16,
                     verticalalignment="top",
-                    bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5)
+                    bbox=dict(
+                        boxstyle="round",
+                        facecolor=COLORS["background"],
+                        edgecolor=COLORS["modernDark"],
+                        alpha=0.5,
+                    ),
                 )
 
                 plt.tight_layout()
@@ -1397,20 +1566,20 @@ def create_sgd_vs_apts_comparison_plots(
 
     # Filter SGD with no overlap and no batch increase (overlap~0, batch_inc~1.0)
     sgd_baseline = df[
-        (df["optimizer"] == "sgd") &
-        (df["overlap"].notna()) &
-        (df["batch_inc_factor"].notna()) &
-        (abs(df["overlap"]) < 0.01) &
-        (abs(df["batch_inc_factor"] - 1.0) < 0.01)
+        (df["optimizer"] == "sgd")
+        & (df["overlap"].notna())
+        & (df["batch_inc_factor"].notna())
+        & (abs(df["overlap"]) < 0.01)
+        & (abs(df["batch_inc_factor"] - 1.0) < 0.01)
     ].copy()
 
     # Filter APTS_D with overlap and batch increase (overlap~0.33, batch_inc~1.5)
     apts_d_optimized = df[
-        (df["optimizer"] == "apts_d") &
-        (df["overlap"].notna()) &
-        (df["batch_inc_factor"].notna()) &
-        (abs(df["overlap"] - 0.33) < 0.01) &
-        (abs(df["batch_inc_factor"] - 1.5) < 0.01)
+        (df["optimizer"] == "apts_d")
+        & (df["overlap"].notna())
+        & (df["batch_inc_factor"].notna())
+        & (abs(df["overlap"] - 0.33) < 0.01)
+        & (abs(df["batch_inc_factor"] - 1.5) < 0.01)
     ].copy()
 
     if len(sgd_baseline) == 0:
@@ -1418,17 +1587,23 @@ def create_sgd_vs_apts_comparison_plots(
         return
 
     if len(apts_d_optimized) == 0:
-        print("\nNo APTS_D data with overlap=0.33, batch_inc_factor=1.5 found. Skipping...")
+        print(
+            "\nNo APTS_D data with overlap=0.33, batch_inc_factor=1.5 found. Skipping..."
+        )
         return
 
     print(f"\nFound {len(sgd_baseline)} SGD runs (overlap=0%, batch inc. factor=1.0)")
-    print(f"Found {len(apts_d_optimized)} APTS_D runs (overlap=33%, batch inc. factor=1.5)")
+    print(
+        f"Found {len(apts_d_optimized)} APTS_D runs (overlap=33%, batch inc. factor=1.5)"
+    )
 
     # Check subdomain counts for APTS_D
     if "num_subdomains" in apts_d_optimized.columns:
         subdomain_counts = sorted(apts_d_optimized["num_subdomains"].dropna().unique())
         if len(subdomain_counts) > 0:
-            print(f"  APTS_D subdomain counts included: {[int(x) for x in subdomain_counts]}")
+            print(
+                f"  APTS_D subdomain counts included: {[int(x) for x in subdomain_counts]}"
+            )
 
     # Combine the two datasets
     combined_df = pd.concat([sgd_baseline, apts_d_optimized])
@@ -1448,7 +1623,8 @@ def create_sgd_vs_apts_comparison_plots(
 
         # Flatten column names
         agg_df.columns = [
-            "_".join(col).strip("_") if col[1] else col[0] for col in agg_df.columns.values
+            "_".join(col).strip("_") if col[1] else col[0]
+            for col in agg_df.columns.values
         ]
 
         sns.set_style("whitegrid")
@@ -1457,7 +1633,9 @@ def create_sgd_vs_apts_comparison_plots(
         fig, ax = plt.subplots(figsize=(10, 6))
 
         for optimizer in ["sgd", "apts_d"]:
-            opt_df = agg_df[agg_df["optimizer"] == optimizer].sort_values("total_params")
+            opt_df = agg_df[agg_df["optimizer"] == optimizer].sort_values(
+                "total_params"
+            )
             if len(opt_df) == 0:
                 continue
 
@@ -1500,7 +1678,9 @@ def create_sgd_vs_apts_comparison_plots(
             fig, ax = plt.subplots(figsize=(10, 6))
 
             for optimizer in ["sgd", "apts_d"]:
-                opt_df = agg_df[agg_df["optimizer"] == optimizer].sort_values("total_params")
+                opt_df = agg_df[agg_df["optimizer"] == optimizer].sort_values(
+                    "total_params"
+                )
                 if len(opt_df) == 0:
                     continue
 

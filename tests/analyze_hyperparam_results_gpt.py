@@ -22,26 +22,74 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from cycler import cycler
 
-# Enable LaTeX rendering and set font sizes
+# =============================================================================
+# MODERN COLOR SCHEME & BEAMER STYLING
+# =============================================================================
+COLORS = {
+    "modernBlue": "#0054A6",
+    "modernLight": "#2980B9",
+    "modernBlack": "#1E1E1E",
+    "modernDark": "#34495E",
+    "modernPink": "#FF2D55",
+    "modernPurple": "#8E44AD",
+    "modernTeal": "#00A896",
+    "background": "#FAFAFA",
+}
+
+custom_cycler = cycler(
+    color=[
+        COLORS["modernBlue"],
+        COLORS["modernPink"],
+        COLORS["modernTeal"],
+        COLORS["modernPurple"],
+        COLORS["modernLight"],
+        COLORS["modernDark"],
+    ]
+)
+
 plt.rcParams.update(
     {
         "text.usetex": True,
-        "font.family": "serif",
-        "font.size": 18,
-        "axes.titlesize": 20,
-        "axes.labelsize": 18,
-        "xtick.labelsize": 16,
-        "ytick.labelsize": 16,
-        "figure.titlesize": 22,
-        "legend.fontsize": 20,
-        "legend.title_fontsize": 20,
+        "text.latex.preamble": r"\usepackage{amsmath}\usepackage{amssymb}\usepackage{sfmath}",
+        "font.family": "sans-serif",
+        "font.size": 22,
+        "axes.titlesize": 26,
+        "axes.labelsize": 24,
+        "xtick.labelsize": 20,
+        "ytick.labelsize": 20,
+        "legend.fontsize": 18,
+        "figure.titlesize": 30,
+        "axes.prop_cycle": custom_cycler,
+        "text.color": COLORS["modernBlack"],
+        "axes.labelcolor": COLORS["modernDark"],
+        "xtick.color": COLORS["modernDark"],
+        "ytick.color": COLORS["modernDark"],
+        "axes.edgecolor": COLORS["modernDark"],
+        "grid.color": "#BDC3C7",
+        "lines.linewidth": 4,
+        "lines.markersize": 12,
+        "axes.grid": True,
+        "grid.alpha": 0.3,
+        "grid.linestyle": "--",
+        "figure.facecolor": COLORS["background"],
     }
 )
+
+
+def get_custom_heat_cmap(metric_type="loss"):
+    if metric_type == "loss":
+        colors = [COLORS["modernBlue"], "#FFFFFF", COLORS["modernPink"]]
+    else:
+        colors = [COLORS["modernPink"], "#FFFFFF", COLORS["modernBlue"]]
+    return mcolors.LinearSegmentedColormap.from_list("modern_theme", colors)
+
 
 try:
     import wandb
@@ -678,7 +726,12 @@ def create_comparison_plots(
                 fontsize=12,
                 verticalalignment="top",
                 horizontalalignment="right",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+                bbox=dict(
+                    boxstyle="round",
+                    facecolor=COLORS["background"],
+                    edgecolor=COLORS["modernDark"],
+                    alpha=0.8,
+                ),
             )
 
         plt.tight_layout()
@@ -761,7 +814,12 @@ def create_comparison_plots(
                     fontsize=12,
                     verticalalignment="bottom",
                     horizontalalignment="right",
-                    bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+                    bbox=dict(
+                        boxstyle="round",
+                        facecolor=COLORS["background"],
+                        edgecolor=COLORS["modernDark"],
+                        alpha=0.8,
+                    ),
                 )
 
             plt.tight_layout()
@@ -881,19 +939,23 @@ def create_comparison_plots(
 
         # Add SGD with selected overlap
         if len(sgd_selected) > 0:
-            pivot = sgd_selected[sgd_selected["n_head"] == most_common_n_head].pivot_table(
+            pivot = sgd_selected[
+                sgd_selected["n_head"] == most_common_n_head
+            ].pivot_table(
                 values="final_loss",
                 index="n_layer",
                 columns="n_embd",
                 aggfunc="mean",
             )
             if not pivot.empty:
-                heatmap_data.append({
-                    "pivot": pivot,
-                    "title": format_optimizer_name("sgd"),
-                    "optimizer": "sgd",
-                    "num_subs": None
-                })
+                heatmap_data.append(
+                    {
+                        "pivot": pivot,
+                        "title": format_optimizer_name("sgd"),
+                        "optimizer": "sgd",
+                        "num_subs": None,
+                    }
+                )
 
         # Add APTS variants with overlap=0.33, batch_inc=1.5
         for optimizer in apts_variants:
@@ -914,12 +976,14 @@ def create_comparison_plots(
                     aggfunc="mean",
                 )
                 if not pivot.empty:
-                    heatmap_data.append({
-                        "pivot": pivot,
-                        "title": format_optimizer_name(optimizer, int(num_subs)),
-                        "optimizer": optimizer,
-                        "num_subs": int(num_subs)
-                    })
+                    heatmap_data.append(
+                        {
+                            "pivot": pivot,
+                            "title": format_optimizer_name(optimizer, int(num_subs)),
+                            "optimizer": optimizer,
+                            "num_subs": int(num_subs),
+                        }
+                    )
 
         # Create combined figure with all loss heatmaps
         if heatmap_data:
@@ -947,15 +1011,21 @@ def create_comparison_plots(
                     data["pivot"],
                     annot=True,
                     fmt=".4f",
-                    cmap="RdYlGn_r",
+                    cmap=get_custom_heat_cmap("loss"),
                     ax=ax,
                     vmin=global_loss_min,
                     vmax=global_loss_max,
                     cbar=False,
                     xticklabels=True,  # Show all x tick labels
-                    yticklabels=(col == 0),  # Show y tick labels only on leftmost column
+                    yticklabels=(
+                        col == 0
+                    ),  # Show y tick labels only on leftmost column
                 )
-                ax.set_title(f"{data['title']} (n\_head={most_common_n_head})", fontsize=14, fontweight="bold")
+                ax.set_title(
+                    f"{data['title']} (n\_head={most_common_n_head})",
+                    fontsize=14,
+                    fontweight="bold",
+                )
 
                 # Only show x-label on center plot of bottom row
                 if row == n_rows - 1 and col == n_cols // 2:
@@ -971,13 +1041,14 @@ def create_comparison_plots(
 
             # Hide unused subplots
             for idx in range(n_heatmaps, len(axes)):
-                axes[idx].axis('off')
+                axes[idx].axis("off")
 
             # Add a single colorbar for all heatmaps
             from matplotlib import cm
             from matplotlib.colors import Normalize
+
             norm = Normalize(vmin=global_loss_min, vmax=global_loss_max)
-            sm = cm.ScalarMappable(cmap="RdYlGn_r", norm=norm)
+            sm = cm.ScalarMappable(cmap=get_custom_heat_cmap("loss"), norm=norm)
             sm.set_array([])
 
             # Adjust layout to make room for colorbar
@@ -1003,19 +1074,23 @@ def create_comparison_plots(
 
         # Add SGD with selected overlap
         if len(sgd_selected) > 0:
-            pivot = sgd_selected[sgd_selected["n_head"] == most_common_n_head].pivot_table(
+            pivot = sgd_selected[
+                sgd_selected["n_head"] == most_common_n_head
+            ].pivot_table(
                 values="final_accuracy",
                 index="n_layer",
                 columns="n_embd",
                 aggfunc="mean",
             )
             if not pivot.empty:
-                heatmap_data.append({
-                    "pivot": pivot,
-                    "title": format_optimizer_name("sgd"),
-                    "optimizer": "sgd",
-                    "num_subs": None
-                })
+                heatmap_data.append(
+                    {
+                        "pivot": pivot,
+                        "title": format_optimizer_name("sgd"),
+                        "optimizer": "sgd",
+                        "num_subs": None,
+                    }
+                )
 
         # Add APTS variants with overlap=0.33, batch_inc=1.5
         for optimizer in apts_variants:
@@ -1036,12 +1111,14 @@ def create_comparison_plots(
                     aggfunc="mean",
                 )
                 if not pivot.empty:
-                    heatmap_data.append({
-                        "pivot": pivot,
-                        "title": format_optimizer_name(optimizer, int(num_subs)),
-                        "optimizer": optimizer,
-                        "num_subs": int(num_subs)
-                    })
+                    heatmap_data.append(
+                        {
+                            "pivot": pivot,
+                            "title": format_optimizer_name(optimizer, int(num_subs)),
+                            "optimizer": optimizer,
+                            "num_subs": int(num_subs),
+                        }
+                    )
 
         # Create combined figure with all accuracy heatmaps
         if heatmap_data:
@@ -1069,15 +1146,21 @@ def create_comparison_plots(
                     data["pivot"],
                     annot=True,
                     fmt=".2f",
-                    cmap="RdYlGn",
+                    cmap=get_custom_heat_cmap("accuracy"),
                     ax=ax,
                     vmin=global_acc_min,
                     vmax=global_acc_max,
                     cbar=False,
                     xticklabels=True,  # Show all x tick labels
-                    yticklabels=(col == 0),  # Show y tick labels only on leftmost column
+                    yticklabels=(
+                        col == 0
+                    ),  # Show y tick labels only on leftmost column
                 )
-                ax.set_title(f"{data['title']} (n\_head={most_common_n_head})", fontsize=14, fontweight="bold")
+                ax.set_title(
+                    f"{data['title']} (n\_head={most_common_n_head})",
+                    fontsize=14,
+                    fontweight="bold",
+                )
 
                 # Only show x-label on center plot of bottom row
                 if row == n_rows - 1 and col == n_cols // 2:
@@ -1093,13 +1176,14 @@ def create_comparison_plots(
 
             # Hide unused subplots
             for idx in range(n_heatmaps, len(axes)):
-                axes[idx].axis('off')
+                axes[idx].axis("off")
 
             # Add a single colorbar for all heatmaps
             from matplotlib import cm
             from matplotlib.colors import Normalize
+
             norm = Normalize(vmin=global_acc_min, vmax=global_acc_max)
-            sm = cm.ScalarMappable(cmap="RdYlGn", norm=norm)
+            sm = cm.ScalarMappable(cmap=get_custom_heat_cmap("accuracy"), norm=norm)
             sm.set_array([])
 
             # Adjust layout to make room for colorbar
@@ -1387,7 +1471,12 @@ def create_sgd_parameter_comparison_plots_gpt(
                 transform=ax.transAxes,
                 fontsize=16,
                 verticalalignment="top",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+                bbox=dict(
+                    boxstyle="round",
+                    facecolor=COLORS["background"],
+                    edgecolor=COLORS["modernDark"],
+                    alpha=0.5,
+                ),
             )
 
             plt.tight_layout()
@@ -1447,7 +1536,12 @@ def create_sgd_parameter_comparison_plots_gpt(
                     transform=ax.transAxes,
                     fontsize=16,
                     verticalalignment="top",
-                    bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+                    bbox=dict(
+                        boxstyle="round",
+                        facecolor=COLORS["background"],
+                        edgecolor=COLORS["modernDark"],
+                        alpha=0.5,
+                    ),
                 )
 
                 plt.tight_layout()
