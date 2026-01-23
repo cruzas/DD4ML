@@ -180,11 +180,16 @@ def save_latex_figure_code(
     glob_so,
     loc_so,
     present_variants,
+    eval_point,
+    data_cache,
+    get_history_fn,
 ):
-    """Saves a .tex file with a grid of plots and a dynamic, order-aware caption."""
     os.makedirs(tex_dir, exist_ok=True)
     filename = f"{dataset}_{regime}_{xax}_grid.tex"
     filepath = os.path.join(tex_dir, filename)
+
+    is_ts = "tinyshakespeare" in dataset.lower()
+    prog_label = "iteration" if is_ts else "epoch"
 
     normalized_variants = {v.lower().replace("sapts", "apts") for v in present_variants}
     is_glob_2nd = str(glob_so).lower() == "true"
@@ -195,14 +200,15 @@ def save_latex_figure_code(
     lr_parts = [f"{lr} for {lr_label}={bs}" for bs, lr in sgd_lrs.items()]
     lr_str = ", ".join(lr_parts)
 
-    xax_label = {
-        "grad_evals": "gradient evaluations",
+    xax_label_raw = {
+        "grad_evals": "grad. evals.",
         "running_time": "wall-clock time",
     }.get(xax, xax)
+
     m_desc = (
-        "Empirical loss (left) and test accuracy (right)"
+        "Average empirical loss (left) and average test accuracy (right)"
         if len(metrics) > 1
-        else "Avg. Empirical Loss"
+        else "Average empirical loss"
     )
     dataset_pretty = {
         "mnist": "MNIST",
@@ -220,17 +226,33 @@ def save_latex_figure_code(
         sapts_labels.append(rf"\SAPTSIP\ {order_suffix}")
     opt_list_str = ", ".join(["SGD"] + sapts_labels)
 
-    content = rf"""\begin{{figure}}[H]
+    xax_label_for_fig = xax_label_raw.strip(".")
+    if xax_label_for_fig == "grad. evals":
+        xax_label_for_fig = "number of gradient evaluations"
+
+    content = rf"""\begin{{figure}}[htbp]
     \centering
     \includegraphics[width=\linewidth]{{figures/{dataset}_{regime}_{xax}_grid.pdf}}%
     \vspace{{1ex}}
     \includegraphics[width=\linewidth]{{figures/{dataset}_legend.pdf}}%
-    \caption{{{m_desc} vs number of {xax_label}. Dataset: {dataset_pretty} ({regime} scaling regime). Network type: {model_pretty}. Optimizers: {opt_list_str}. \SAPTS\ Configuration: Global optimizer: {format_opt_name(glob_opt)}, Local optimizer: {format_opt_name(loc_opt)}, $\Delta_0 = {delta}$. Learning rates for SGD: {lr_str}. From top to bottom, the effective batch size is increased by a factor of 2. An overlap of approximately 33\% was applied between consecutive mini-batches and micro-batches.}}
+    \caption{{{m_desc} vs {xax_label_for_fig}. Dataset: {dataset_pretty} ({regime} scaling regime). Network type: {model_pretty}. Optimizers: {opt_list_str}. \SAPTS configuration: global optimizer: {format_opt_name(glob_opt)}, local optimizer: {format_opt_name(loc_opt)}, $\Delta^{{(0)}} = {delta}$. Learning rates for SGD: {lr_str}. Curves are clipped at {eval_point:.0f} {prog_label}s. An overlap of approximately 33\% was applied between consecutive mini-batches and micro-batches.}}
 \label{{fig:{dataset}_{regime}_{label_suffix}}}
 \end{{figure}}
 """
     with open(filepath, "w") as f:
         f.write(content)
+
+
+def get_siunitx_format(val_list, default_prec=2):
+    if not val_list:
+        return f"1.{default_prec}(1.{default_prec})"
+    max_int_m = 1
+    max_int_s = 1
+    for item in val_list:
+        m, s = item if isinstance(item, (list, tuple)) else (item, 0)
+        max_int_m = max(max_int_m, len(str(int(abs(m)))))
+        max_int_s = max(max_int_s, len(str(int(abs(s)))))
+    return f"{max_int_m}.{default_prec}({max_int_s}.{default_prec})"
 
 
 def generate_summary_table(
@@ -249,25 +271,53 @@ def generate_summary_table(
     data_cache,
     combo_key,
     get_history_fn,
+    eval_point,
 ):
-    """Saves a consolidated LaTeX table evaluated at the max common training point."""
     os.makedirs(table_dir, exist_ok=True)
-    # Requested filename format
     file_path = os.path.join(table_dir, f"{dataset}_{regime}_scaling.tex")
 
-    bs_label = "EBS" if regime == "weak" else "GBS"
+    is_strong = regime.lower() == "strong"
+    bs_acronym = "GBS" if is_strong else "EBS"
+    bs_full = "global batch size (GBS)" if is_strong else "effective batch size (EBS)"
+
+    metric_col_name = "Speedup" if is_strong else "Efficiency"
+
     is_ts = "tinyshakespeare" in dataset.lower()
     prog_key = "iter" if is_ts else "epoch"
     prog_label = "iteration" if is_ts else "epoch"
 
-    all_max_points = []
-    for size in data_cache:
+    # --- PASS 1: FORMATTING PASS ---
+    metric_stats = {m: [] for m in metrics}
+    time_stats = []
+    for size in sorted(data_cache.keys()):
         for r in data_cache[size]:
             h = get_history_fn(r["id"])
-            if not h.empty and prog_key in h.columns:
-                all_max_points.append(h[prog_key].max())
-    eval_point = min(all_max_points) if all_max_points else 0
+            if (
+                not h.empty
+                and prog_key in h.columns
+                and h[prog_key].max() >= eval_point
+            ):
+                idx = (h[prog_key] - eval_point).abs().idxmin()
+                row = h.loc[idx]
+                for m in metrics:
+                    metric_stats[m].append((row.get(m, 0), 0.1))
+                time_stats.append((row["running_time"] - h["running_time"].min(), 1.0))
 
+    m_formats = {
+        m: get_siunitx_format(metric_stats[m], 2 if "acc" in m.lower() else 3)
+        for m in metrics
+    }
+    t_format = get_siunitx_format(time_stats, 2)
+
+    # --- PASS 2: CAPTION LOGIC (Matched to Figure Logic with User Fixes) ---
+    dataset_pretty = {
+        "mnist": "MNIST",
+        "cifar10": "CIFAR-10",
+        "tinyshakespeare": "Tiny Shakespeare",
+        "poisson2d": "Poisson 2D",
+    }.get(dataset, dataset.capitalize())
+
+    # Build SAPTS variant list and order suffix
     normalized_variants = {v.lower().replace("sapts", "apts") for v in present_variants}
     is_glob_2nd = str(glob_so).lower() == "true"
     is_loc_2nd = str(loc_so).lower() == "true"
@@ -282,67 +332,74 @@ def generate_summary_table(
         sapts_labels.append(rf"\SAPTSIP\ {order_suffix}")
     opt_list_str = ", ".join(["SGD"] + sapts_labels)
 
-    lr_parts = [f"{lr} for {bs_label}={bs}" for bs, lr in sgd_lrs.items()]
+    # Build Learning Rate string to match figure format
+    lr_parts = [f"{lr} for {bs_acronym}={bs}" for bs, lr in sgd_lrs.items()]
     lr_str = ", ".join(lr_parts)
 
-    dataset_pretty = {
-        "mnist": "MNIST",
-        "cifar10": "CIFAR-10",
-        "tinyshakespeare": "Tiny Shakespeare",
-        "poisson2d": "Poisson 2D",
-    }.get(dataset, dataset.capitalize())
-    m_desc = (
-        "Empirical loss (left) and test accuracy (right)"
-        if len(metrics) > 1
-        else "Avg. Empirical Loss"
+    # Final Table Caption Construction (Redundancy removed)
+    table_caption = (
+        f"{regime.capitalize()} scaling table. Dataset: {dataset_pretty}. "
+        f"Network type: {model_pretty}. Optimizers: {opt_list_str}. "
+        f"SAPTS configuration: global optimizer: {format_opt_name(glob_opt)}, local optimizer: {format_opt_name(loc_opt)}, $\\Delta^{{(0)}} = {delta}$. "
+        f"Learning rates for SGD: {lr_str}. "
+        f"Values are evaluated at {eval_point:.0f} {prog_label}s. "
+        f"An overlap of approximately 33\% was applied between consecutive mini-batches and micro-batches."
     )
 
+    # --- PASS 3: GENERATE THE TABLE ---
     with open(file_path, "w") as f:
-        f.write(
-            f"% --- Consolidated LaTeX Table for {dataset_pretty} ({regime} scaling) ---\n"
-        )
-        f.write(f"\\begin{{table}}[H]\n  \\centering\n")
-        f.write(
-            f"  \\caption{{{m_desc} for {dataset_pretty} ({regime} scaling regime) evaluated at the shared {prog_label} ({eval_point}). Network type: {model_pretty}. Optimizers: {opt_list_str}. \\SAPTS\\ Configuration: Global optimizer: {format_opt_name(glob_opt)}, Local optimizer: {format_opt_name(loc_opt)}, $\\Delta_0 = {delta}$. Learning rates for SGD: {lr_str}. An overlap of approximately 33\\% was applied between consecutive mini-batches and micro-batches.}}\n"
-        )
-        # Requested label format
+        f.write(f"\\begin{{table}}[htbp]\n  \\centering\n")
+        f.write(f"  \\caption{{{table_caption}}}\n")
         f.write(f"  \\label{{tab:{dataset}_{regime}_scaling}}\n")
         f.write("  \\resizebox{\\textwidth}{!}{\n")
 
-        col_setup = (
-            "l l l l "
-            + "l " * len(metrics)
-            + "S[separate-uncertainty, table-format=4.2(4.2)] l"
+        si_opts = (
+            "separate-uncertainty, input-open-uncertainty=(, input-close-uncertainty=)"
         )
-        f.write(f"    \\begin{{tabular}}{{{col_setup}}}\n      \\hline\n")
+        col_setup = "c c c c c "
+        for m in metrics:
+            col_setup += f"S[{si_opts}, table-format={m_formats[m]}] "
+        col_setup += f"S[{si_opts}, table-format={t_format}] c"
+
+        f.write(f"    \\begin{{tabular}}{{{col_setup.strip()}}}\n      \\toprule\n")
+
         headers = (
-            [bs_label, "Optimizer", "$N$", "Grad. Evals"]
+            [f"{{{bs_acronym}}}", "{Optimizer}", "{Runs}", "{$N$}", "{Grad. Evals.}"]
             + [
-                ("Accuracy (\\%)" if "acc" in m.lower() else m.capitalize())
+                ("{Accuracy (\\%)}" if "acc" in m.lower() else f"{{{m.capitalize()}}}")
                 for m in metrics
             ]
-            + ["{Time (s)}", "Efficiency"]
+            + ["{Time (s)}", f"{{{metric_col_name}}}"]
         )
-        f.write("      " + " & ".join(headers) + " \\\\\n      \\hline\n")
+        f.write("      " + " & ".join(headers) + " \\\\\n      \\midrule\n")
 
         for size in sorted(data_cache.keys()):
             runs = data_cache[size]
-            variant_baselines = {}
-            for r in runs:
-                raw_opt = r["config"].get("optimizer", "unk").lower()
-                n = _safe_int(
-                    r["config"].get(
-                        "num_subdomains" if "sgd" in raw_opt else combo_key, 1
+
+            # 1. FIND THE GLOBAL BASELINE (SGD N=1) FOR THIS BATCH SIZE
+            global_baseline_time = None
+            sgd_n1_runs = [
+                r
+                for r in runs
+                if r["config"].get("optimizer", "").lower() == "sgd"
+                and _safe_int(r["config"].get("num_subdomains", 1)) == 1
+            ]
+
+            baseline_times = []
+            for r in sgd_n1_runs:
+                h = get_history_fn(r["id"])
+                if (
+                    not h.empty
+                    and prog_key in h.columns
+                    and h[prog_key].max() >= eval_point
+                ):
+                    idx = (h[prog_key] - eval_point).abs().idxmin()
+                    baseline_times.append(
+                        h.loc[idx, "running_time"] - h["running_time"].min()
                     )
-                )
-                if n == 2:
-                    h = get_history_fn(r["id"])
-                    if not h.empty and prog_key in h.columns:
-                        idx = (h[prog_key] - eval_point).abs().idxmin()
-                        variant_baselines.setdefault(raw_opt, []).append(
-                            h.loc[idx, "running_time"] - h["running_time"].min()
-                        )
-            avg_baselines = {k: np.mean(v) for k, v in variant_baselines.items() if v}
+
+            if baseline_times:
+                global_baseline_time = np.mean(baseline_times)
 
             unique_combos = sorted(
                 {
@@ -364,12 +421,11 @@ def generate_summary_table(
                 key=lambda x: (0 if "sgd" in x[0].lower() else 1, x[0], x[1]),
             )
 
+            is_first_row_of_size = True
             last_opt = None
             for opt, n in unique_combos:
-                if "sgd" in opt.lower() and n < 2:
-                    continue
                 if last_opt is not None and opt != last_opt:
-                    f.write("      \\hdashline\n")
+                    f.write(f"      \\cmidrule(lr){{2-{len(headers)}}}\n")
                 last_opt = opt
 
                 relevant_runs = [
@@ -383,44 +439,57 @@ def generate_summary_table(
                     )
                     == n
                 ]
-                opt_label = "SGD" if "sgd" in opt.lower() else f"${latex_opt(opt)}$"
-                row_data = [str(size), opt_label, str(n)]
 
-                ge, times, m_vals = [], [], {m: [] for m in metrics}
+                valid_stats = []
                 for r in relevant_runs:
                     h = get_history_fn(r["id"])
-                    if not h.empty and prog_key in h.columns:
+                    if (
+                        not h.empty
+                        and prog_key in h.columns
+                        and h[prog_key].max() >= eval_point
+                    ):
                         idx = (h[prog_key] - eval_point).abs().idxmin()
-                        row = h.loc[idx]
-                        ge.append(row.get("grad_evals", 0))
-                        times.append(row["running_time"] - h["running_time"].min())
-                        for m in metrics:
-                            m_vals[m].append(row.get(m, 0))
-
-                row_data.append(f"${np.mean(ge):.0f}$" if ge else "N/A")
-                for m in metrics:
-                    vals = m_vals[m]
-                    if vals:
-                        prec = 2 if "acc" in m.lower() else 3
-                        row_data.append(
-                            f"${np.mean(vals):.{prec}f} \\pm {np.std(vals):.{prec}f}$"
+                        valid_stats.append(
+                            h.iloc[idx].to_dict() | {"start_t": h["running_time"].min()}
                         )
-                    else:
-                        row_data.append("N/A")
 
-                if times:
-                    avg_t = np.mean(times)
-                    row_data.append(f"{avg_t:.2f} \\pm {np.std(times):.2f}")
-                    eff = (
-                        avg_baselines.get(opt.lower(), avg_t) / avg_t
-                        if avg_t > 0
-                        else 1.0
-                    )
-                    row_data.append(f"${eff:.2f}$")
+                if not valid_stats:
+                    continue
+
+                time_vals = [s["running_time"] - s["start_t"] for s in valid_stats]
+                avg_time = np.mean(time_vals)
+
+                if global_baseline_time:
+                    relative_val = global_baseline_time / avg_time
                 else:
-                    row_data.extend(["N/A", "N/A"])
-                f.write("      " + " & ".join(row_data) + " \\\\\n")
-            f.write("      \\hline\n")
+                    relative_val = 1.0
+
+                opt_label = "SGD" if "sgd" in opt.lower() else f"${latex_opt(opt)}$"
+                row = [
+                    str(size) if is_first_row_of_size else "",
+                    opt_label,
+                    str(len(valid_stats)),
+                    str(n),
+                    f"{np.mean([s.get('grad_evals', 0) for s in valid_stats]):.0f}",
+                ]
+                is_first_row_of_size = False
+
+                for m in metrics:
+                    vals = [s.get(m, 0) for s in valid_stats]
+                    p = 2 if "acc" in m.lower() else 3
+                    row.append(f"{np.mean(vals):.{p}f}({np.std(vals):.{p}f})")
+
+                row.append(f"{avg_time:.2f}({np.std(time_vals):.2f})")
+                row.append(f"{relative_val:.2f}")
+
+                f.write("      " + " & ".join(row) + " \\\\\n")
+
+            f.write(
+                "      \\midrule\n"
+                if size != sorted(data_cache.keys())[-1]
+                else "      \\bottomrule\n"
+            )
+
         f.write("    \\end{tabular}}\n\\end{table}\n")
 
 
@@ -441,9 +510,11 @@ def plot_grid_presentation(
     combo_key="num_subdomains",
     cache_dir=None,
     regime="unknown",
+    eval_point=None,
 ):
     api = wandb.Api(timeout=300)
-    dataset_name = filters_base.get("config.dataset_name", "dataset")
+    dataset_name = filters_base.get("config.dataset_name", "dataset").lower()
+    prog_key = "iter" if "tinyshakespeare" in dataset_name else "epoch"
 
     @lru_cache(maxsize=None)
     def get_history(run_id):
@@ -453,25 +524,23 @@ def plot_grid_presentation(
 
     def _res_n(cfg):
         opt = cfg.get("optimizer", "").lower()
-        k = (
-            "num_stages"
-            if ("cifar" in dataset_name.lower() and "sgd" in opt)
-            else combo_key
-        )
+        k = "num_stages" if ("cifar" in dataset_name and "sgd" in opt) else combo_key
         v = cfg.get(
             k, cfg.get("num_subdomains" if k == "num_stages" else "num_stages", 1)
         )
         return _safe_int(v) if _safe_int(v) > 0 else 1
 
-    data_cache = {}
-    config_meta = {
-        "delta": "N/A",
-        "glob_opt": "N/A",
-        "loc_opt": "N/A",
-        "glob_so": "N/A",
-        "loc_so": "N/A",
-    }
-    present_variants = set()
+    data_cache, config_meta, present_variants = (
+        {},
+        {
+            "delta": "N/A",
+            "glob_opt": "N/A",
+            "loc_opt": "N/A",
+            "glob_so": "N/A",
+            "loc_so": "N/A",
+        },
+        set(),
+    )
 
     for size in batch_sizes:
         base_f = {**filters_base, f"config.{base_key}": size}
@@ -495,7 +564,6 @@ def plot_grid_presentation(
                             "loc_so": c.get("loc_second_order", "False"),
                         }
                     )
-
         if size in (sgd_filters or {}):
             lr_f = sgd_filters[size]
             sgd_api_f = {"config.dataset_name": dataset_name, "config.optimizer": "sgd"}
@@ -513,16 +581,10 @@ def plot_grid_presentation(
         data_cache[size] = runs
 
     nrows, ncols = len(batch_sizes), len(metrics)
-
-    # ADJUSTMENT: Further reduced fig_height for 3x1 grids and optimized width
-    is_single_col = ncols == 1
-    fig_width = 7.5 * ncols
-    fig_height = 3.5 * nrows if is_single_col else 5.5 * nrows
-
     fig, axes = plt.subplots(
         nrows=nrows,
         ncols=ncols,
-        figsize=(fig_width, fig_height),
+        figsize=(7.5 * ncols, 3.5 * nrows if ncols == 1 else 5.5 * nrows),
         squeeze=False,
         sharey="col",
     )
@@ -554,6 +616,28 @@ def plot_grid_presentation(
             },
             key=lambda x: (str(x[0]), x[1]),
         )
+
+        sgd_limit = None
+        datasets_to_limit = ["poisson2d", "tinyshakespeare", "cifar10"]
+        if any(ds in dataset_name for ds in datasets_to_limit):
+            sgd_runs = [
+                r for r in runs_all if "sgd" in r["config"].get("optimizer", "").lower()
+            ]
+            limit_candidates = []
+            for r in sgd_runs:
+                hist = get_history(r["id"])
+                if (
+                    not hist.empty
+                    and prog_key in hist.columns
+                    and x_axis in hist.columns
+                ):
+                    if hist[prog_key].max() >= eval_point:
+                        limit_candidates.append(
+                            hist[hist[prog_key] <= eval_point][x_axis].max()
+                        )
+            if limit_candidates:
+                sgd_limit = max(limit_candidates)
+
         for j, metric in enumerate(metrics):
             ax = axes[i, j]
             for combo in combos:
@@ -572,12 +656,16 @@ def plot_grid_presentation(
                         not hist.empty
                         and x_axis in hist.columns
                         and metric in hist.columns
+                        and prog_key in hist.columns
                     ):
-                        df = hist[[x_axis, metric]].dropna()
-                        if not df.empty:
-                            if x_axis == "running_time":
-                                df[x_axis] -= df[x_axis].min()
-                            series_list.append(df)
+                        if hist[prog_key].max() >= eval_point:
+                            df = hist[hist[prog_key] <= eval_point][
+                                [x_axis, metric]
+                            ].dropna()
+                            if not df.empty:
+                                if x_axis == "running_time":
+                                    df[x_axis] -= df[x_axis].min()
+                                series_list.append(df)
                 if series_list:
                     all_x = np.concatenate([s[x_axis].values for s in series_list])
                     grid = np.linspace(all_x.min(), all_x.max(), 200)
@@ -599,42 +687,41 @@ def plot_grid_presentation(
                 ax.set_title(_metric_label(metric), pad=15)
             if j == ncols - 1:
                 ax2 = ax.twinx()
-                batch_label = (
-                    "GLOBAL BATCH SIZE"
-                    if regime == "strong"
-                    else "EFFECTIVE BATCH SIZE"
-                )
-                # ADJUSTMENT: Reduced fontsize to 14 to prevent overlapping on the right y-axis
                 ax2.set_ylabel(
-                    rf"{batch_label} = {size}",
+                    rf"{'GLOBAL' if regime == 'strong' else 'EFFECTIVE'} BATCH SIZE = {size}",
                     rotation=270,
                     labelpad=30,
                     fontweight="bold",
                     fontsize=14,
                 )
                 ax2.set_yticks([])
-            if j == 0:
-                ax.set_ylabel(_metric_label(metric))
             if i == nrows - 1:
-                ax.set_xlabel(x_axis.replace("_", " ").title())
+                label_name = (
+                    "Grad. Evals."
+                    if x_axis == "grad_evals"
+                    else x_axis.replace("_", " ").title()
+                )
+                ax.set_xlabel(label_name)
             ax.grid(True, alpha=0.3, linestyle="--")
             ax.set_xlim(left=0)
+            if sgd_limit:
+                ax.set_xlim(right=sgd_limit)
             if y_log or metric == "loss":
                 ax.set_yscale("log")
-
             low, high = metric_bounds[metric]
             if not np.isinf(low):
-                if dataset_name == "poisson2d" and metric == "loss":
+                if "poisson2d" in dataset_name and metric == "loss":
                     ax.set_ylim(max(low, 1e-12), 10**3)
                 elif y_limits and metric in y_limits:
                     ax.set_ylim(*y_limits[metric])
                 else:
-                    safe_low = max(low, 1e-12) if (y_log or metric == "loss") else low
-                    ax.set_ylim(safe_low / 1.1, high * 1.1)
+                    ax.set_ylim(
+                        (max(low, 1e-12) if (y_log or metric == "loss") else low) / 1.1,
+                        high * 1.1,
+                    )
 
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        # ADJUSTMENT: Use very tight rect and h_pad to conserve vertical space
         plt.tight_layout(rect=[0, 0.01, 1, 0.99], h_pad=1.0, w_pad=1.0)
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
@@ -658,22 +745,24 @@ def main():
 
     configs = {
         "mnist": {
+            "eval_point": 5,
             "filters": {"config.model_name": "simple_cnn"},
             "model_pretty": "CNN",
             "sgd_filters_strong": {
-                1024: {"learning_rate": 0.10},
-                2048: {"learning_rate": 0.10},
-                4096: {"learning_rate": 0.10},
+                1024: {"learning_rate": 0.1},
+                2048: {"learning_rate": 0.1},
+                4096: {"learning_rate": 0.1},
             },
             "sgd_filters_weak": {
                 128: {"learning_rate": 0.01},
-                256: {"learning_rate": 0.10},
-                512: {"learning_rate": 0.10},
+                256: {"learning_rate": 0.1},
+                512: {"learning_rate": 0.1},
             },
             "metrics": ["loss", "accuracy"],
             "y_log": False,
         },
         "cifar10": {
+            "eval_point": 25,
             "filters": {"config.model_name": "big_resnet"},
             "model_pretty": "ResNet",
             "sgd_filters_strong": {
@@ -690,6 +779,7 @@ def main():
             "y_log": False,
         },
         "tinyshakespeare": {
+            "eval_point": 750,
             "filters": {"config.model_name": "minigpt"},
             "model_pretty": "MiniGPT",
             "sgd_filters_strong": {
@@ -698,25 +788,26 @@ def main():
                 4096: {"learning_rate": 0.01},
             },
             "sgd_filters_weak": {
-                128: {"learning_rate": 0.10},
-                256: {"learning_rate": 0.10},
-                512: {"learning_rate": 0.10},
+                128: {"learning_rate": 0.1},
+                256: {"learning_rate": 0.1},
+                512: {"learning_rate": 0.1},
             },
             "metrics": ["loss"],
             "y_log": False,
         },
         "poisson2d": {
+            "eval_point": 500,
             "filters": {"config.model_name": "pinn_ffnn"},
             "model_pretty": "PINN-FFNN",
             "sgd_filters_strong": {
                 128: {"learning_rate": 0.001},
-                256: {"learning_rate": 0.10},
+                256: {"learning_rate": 0.1},
                 512: {"learning_rate": 0.001},
             },
             "sgd_filters_weak": {
                 64: {"learning_rate": 0.01},
                 128: {"learning_rate": 0.001},
-                256: {"learning_rate": 0.10},
+                256: {"learning_rate": 0.1},
             },
             "metrics": ["loss"],
             "y_log": True,
@@ -733,7 +824,6 @@ def main():
             smap = cfg[f"sgd_filters_{reg}"]
             lrs = {bs: v["learning_rate"] for bs, v in smap.items()}
 
-            data_cache, meta, variants = None, None, None
             for xax in ["grad_evals", "running_time"]:
                 save_path = os.path.join(
                     base_fig_dir, f"{dataset}_{reg}_{xax}_grid.pdf"
@@ -752,6 +842,7 @@ def main():
                     ck,
                     cache_dir,
                     regime=reg,
+                    eval_point=cfg["eval_point"],
                 )
 
                 save_latex_figure_code(
@@ -770,36 +861,43 @@ def main():
                     meta["glob_so"],
                     meta["loc_so"],
                     variants,
+                    cfg["eval_point"],
+                    data_cache,
+                    lambda rid: _load_history_cached_by_id(
+                        api, proj, rid, cache_dir, dataset
+                    ),
                 )
 
-                if data_cache:
+                if xax == "grad_evals":
+                    generate_summary_table(
+                        table_dir,
+                        dataset,
+                        reg,
+                        cfg["metrics"],
+                        lrs,
+                        meta["glob_opt"],
+                        meta["loc_opt"],
+                        meta["glob_so"],
+                        meta["loc_so"],
+                        variants,
+                        meta["delta"],
+                        cfg["model_pretty"],
+                        data_cache,
+                        ck,
+                        lambda rid: _load_history_cached_by_id(
+                            api, proj, rid, cache_dir, dataset
+                        ),
+                        cfg["eval_point"],
+                    )
                     for size in data_cache:
                         for m in data_cache[size]:
-                            opt = m["config"].get("optimizer", "unk")
-                            n = _safe_int(m["config"].get(ck, 1))
-                            dataset_combos.add((opt, n))
+                            dataset_combos.add(
+                                (
+                                    m["config"].get("optimizer", "unk"),
+                                    _safe_int(m["config"].get(ck, 1)),
+                                )
+                            )
 
-            generate_summary_table(
-                table_dir,
-                dataset,
-                reg,
-                cfg["metrics"],
-                lrs,
-                meta["glob_opt"],
-                meta["loc_opt"],
-                meta["glob_so"],
-                meta["loc_so"],
-                variants,
-                meta["delta"],
-                cfg["model_pretty"],
-                data_cache,
-                ck,
-                lambda rid: _load_history_cached_by_id(
-                    api, proj, rid, cache_dir, dataset
-                ),
-            )
-
-        # Legend Logic
         if dataset_combos:
             sorted_combos = sorted(
                 dataset_combos,
@@ -811,12 +909,11 @@ def main():
                     continue
                 col, ls = get_style_for_combo(c[0], c[1])
                 leg_h.append(Line2D([0], [0], color=col, lw=4, linestyle=ls))
-                if str(c[0]).lower() == "sgd":
-                    lbl = r"SGD $\mid$ $N=1$"
-                else:
-                    lbl = rf"${latex_opt(str(c[0]))}$ $\mid$ $N={c[1]}$"
-                leg_l.append(lbl)
-
+                leg_l.append(
+                    r"SGD $\mid$ $N=1$"
+                    if str(c[0]).lower() == "sgd"
+                    else rf"${latex_opt(str(c[0]))}$ $\mid$ $N={c[1]}$"
+                )
             leg_fig = plt.figure(figsize=(18, 1.5 if len(leg_l) <= 4 else 2.5))
             leg_fig.legend(
                 leg_h, leg_l, loc="center", ncol=min(len(leg_l), 4), frameon=False

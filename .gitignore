@@ -63,3 +63,15 @@ tests/config_files/config_files/*trial*
 .idea
 .vscode
 ./saved_networks
+plotting/data/MNIST/raw/train-labels-idx1-ubyte
+plotting/data/MNIST/raw/train-images-idx3-ubyte
+plotting/data/MNIST/raw/t10k-labels-idx1-ubyte
+plotting/data/MNIST/raw/t10k-images-idx3-ubyte
+plotting/data/cifar-10-batches-py/test_batch
+plotting/data/cifar-10-batches-py/readme.html
+plotting/data/cifar-10-batches-py/data_batch_5
+plotting/data/cifar-10-batches-py/data_batch_4
+plotting/data/cifar-10-batches-py/data_batch_3
+plotting/data/cifar-10-batches-py/data_batch_2
+plotting/data/cifar-10-batches-py/data_batch_1
+plotting/data/cifar-10-batches-py/batches.meta
