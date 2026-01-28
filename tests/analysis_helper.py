@@ -244,12 +244,77 @@ def export_results(df: pd.DataFrame, output_path: Path) -> None:
 
 
 def finalize_plot(ax: plt.Axes, output_dir: Optional[Path], filename: str):
-    """Standardize the finalization, saving, and closing of matplotlib figures."""
+    """
+    Standardize the finalization, saving, and closing of matplotlib figures.
+    Removes the interactive 'show' step to allow for headless/automated execution.
+    """
     plt.tight_layout()
     if output_dir:
         filepath = output_dir / filename
         plt.savefig(filepath, bbox_inches="tight")
         print(f"  Saved: {filepath}")
-    else:
-        plt.show()
+
+    # Crucial: Close the plot immediately to free memory and prevent
+    # it from being shown if plt.show() is called later globally.
     plt.close()
+
+
+def calculate_params(model_type: str, config: Dict) -> Optional[int]:
+    """Centralized parameter calculation based on model architecture."""
+    try:
+        if model_type == "medium_ffnn":
+            w, nl = config.get("width"), config.get("num_layers")
+            if w and nl:
+                return (784 * w) + ((nl - 1) * w * w) + (w * 10)
+
+        elif model_type == "medium_cnn":
+            f, nl, fw = (
+                config.get("filters_per_layer"),
+                config.get("num_conv_layers"),
+                config.get("fc_width"),
+            )
+            pe = config.get("pool_every", 0)
+            if f and nl and fw:
+                conv = (1 * f * 9) + ((nl - 1) * f * f * 9)
+                num_pools = nl // pe if pe > 0 else 0
+                feat = 28 // (2**num_pools)
+                return conv + (f * feat * feat * fw) + (fw * 10)
+
+        elif model_type == "nanogpt":
+            e, h, l = config.get("n_embd"), config.get("n_head"), config.get("n_layer")
+            v, b = 65, 256  # Defaults for tinyshakespeare
+            if e and h and l:
+                emb = v * e + b * e
+                blk = l * (10 * e * e + 4 * e)  # Simplified GPT block estimate
+                head = 2 * e + e * v
+                return emb + blk + head
+    except:
+        return None
+    return None
+
+
+def get_arch_keys(model_type: str) -> List[str]:
+    """Returns config keys used to define the architecture for heatmaps."""
+    mapping = {
+        "medium_ffnn": ["width", "num_layers"],
+        "medium_cnn": ["filters_per_layer", "num_conv_layers"],
+        "nanogpt": ["n_embd", "n_layer"],
+    }
+    return mapping.get(model_type, [])
+
+
+def get_arch_labels(model_type: str) -> List[str]:
+    """Returns human-readable labels for the architecture axes."""
+    mapping = {
+        "medium_ffnn": ["Width", "Number of Layers"],
+        "medium_cnn": ["Filters per Layer", "Number of Conv Layers"],
+        "nanogpt": ["Embedding Dimension", "Number of Layers"],
+    }
+    return mapping.get(model_type, ["Param A", "Param B"])
+
+
+def get_common_n_head(df: pd.DataFrame) -> Optional[int]:
+    """Helper for GPT models to find the mode of n_head to keep heatmaps 2D."""
+    if "n_head" in df.columns and not df["n_head"].dropna().empty:
+        return df["n_head"].mode()[0]
+    return None
