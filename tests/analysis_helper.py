@@ -52,26 +52,18 @@ def setup_plotting_style():
             "text.usetex": True,
             "text.latex.preamble": r"\usepackage{amsmath}\usepackage{amssymb}\usepackage{sfmath}",
             "font.family": "serif",
-            "font.size": 18,
-            "axes.titlesize": 22,
-            "axes.labelsize": 20,
-            "xtick.labelsize": 18,
-            "ytick.labelsize": 18,
-            "figure.titlesize": 26,
+            "font.size": 22,  # Increased from 18
+            "axes.titlesize": 28,  # Increased from 22
+            "axes.labelsize": 24,  # Increased from 20
+            "xtick.labelsize": 20,  # Increased from 18
+            "ytick.labelsize": 20,  # Increased from 18
+            "figure.titlesize": 32,  # Increased from 26
             "legend.fontsize": 20,
             "legend.handlelength": 3.0,
-            "lines.linewidth": 3,
+            "lines.linewidth": 4,  # Thicker lines for visibility
             "lines.markersize": 12,
             "axes.prop_cycle": custom_cycler,
-            "text.color": COLOURS["modernBlack"],
-            "axes.labelcolor": COLOURS["modernDark"],
-            "xtick.color": COLOURS["modernDark"],
-            "ytick.color": COLOURS["modernDark"],
-            "axes.edgecolor": COLOURS["modernDark"],
-            "grid.color": "#BDC3C7",
-            "axes.grid": True,
             "grid.alpha": 0.3,
-            "grid.linestyle": "--",
             "figure.facecolor": COLOURS["background"],
         }
     )
