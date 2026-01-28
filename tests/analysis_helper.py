@@ -30,7 +30,8 @@ COLOURS = {
     "modernPink": "#FF2D55",
     "modernPurple": "#8E44AD",
     "modernTeal": "#00A896",
-    "background": "#FAFAFA",
+    # "background": "#FAFAFA",
+    "background": "#FFFFFF",
 }
 
 
