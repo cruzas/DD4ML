@@ -30,7 +30,6 @@ COLOURS = {
     "modernPink": "#FF2D55",
     "modernPurple": "#8E44AD",
     "modernTeal": "#00A896",
-    # "background": "#FAFAFA",
     "background": "#FFFFFF",
 }
 
@@ -50,22 +49,28 @@ def setup_plotting_style():
 
     plt.rcParams.update(
         {
+            # Core LaTeX Integration
             "text.usetex": True,
             "text.latex.preamble": r"\usepackage{amsmath}\usepackage{amssymb}\usepackage{sfmath}",
             "font.family": "serif",
-            "font.size": 22,  # Increased from 18
-            "axes.titlesize": 28,  # Increased from 22
-            "axes.labelsize": 24,  # Increased from 20
-            "xtick.labelsize": 20,  # Increased from 18
-            "ytick.labelsize": 20,  # Increased from 18
-            "figure.titlesize": 32,  # Increased from 26
-            "legend.fontsize": 20,
-            "legend.handlelength": 3.0,
-            "lines.linewidth": 4,  # Thicker lines for visibility
-            "lines.markersize": 12,
+            # Scaled Font Sizes for High Legibility
+            "font.size": 26,  # Base size
+            "axes.titlesize": 34,  # Titles (SGD, SAPTS)
+            "axes.labelsize": 30,  # X/Y Axis Labels (Width, Layers)
+            "xtick.labelsize": 26,  # X-axis tick numbers
+            "ytick.labelsize": 26,  # Y-axis tick numbers
+            "figure.titlesize": 38,  # Main figure titles
+            "legend.fontsize": 24,  # Legend text
+            "legend.title_fontsize": 26,
+            # Line and Marker Styling
+            "lines.linewidth": 5,  # Thicker lines for better visibility in print
+            "lines.markersize": 14,  # Larger markers for scatter plots
+            "axes.linewidth": 2.5,  # Thicker spines/borders
+            # Heatmap specific and Grid adjustments
+            "grid.alpha": 0.4,
             "axes.prop_cycle": custom_cycler,
-            "grid.alpha": 0.3,
             "figure.facecolor": COLOURS["background"],
+            "savefig.dpi": 300,  # Ensure high-res export
         }
     )
 
@@ -300,7 +305,7 @@ def get_arch_labels(model_type: str) -> List[str]:
     """Returns human-readable labels for the architecture axes."""
     mapping = {
         "medium_ffnn": ["Width", "Number of Layers"],
-        "medium_cnn": ["Filters per Layer", "Number of Conv Layers"],
+        "medium_cnn": ["Filters per Layer", "Number of Conv. Layers"],
         "nanogpt": ["Embedding Dimension", "Number of Layers"],
     }
     return mapping.get(model_type, ["Param A", "Param B"])

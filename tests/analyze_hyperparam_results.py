@@ -12,15 +12,15 @@ import seaborn as sns
 # =============================================================================
 # FILENAME & ARCHITECTURE MAPPINGS
 # =============================================================================
-SUFFIX_MAP = {"medium_ffnn": "ffnn", "medium_cnn": "cnn", "nanogpt": "gpt"}
+SUFFIX_MAP = {"medium_ffnn": "fcnn", "medium_cnn": "cnn", "nanogpt": "gpt"}
 LATEX_OUT_DIR = Path.home() / "Documents/GitHub/PhD-Thesis-Samuel-Cruz/figures_tex"
 
 
 def write_latex_figure(filename, caption, label, extra_images=None, side_by_side=False):
     """
     Generates a LaTeX figure fragment.
-    If side_by_side is True, images are placed next to each other.
-    If extra_images is provided without side_by_side, they are stacked vertically.
+    Ensures the overparameterization_legend.pdf takes full width on top
+    for loss_vs_size and accuracy_vs_size plots.
     """
     LATEX_OUT_DIR.mkdir(parents=True, exist_ok=True)
     tex_path = LATEX_OUT_DIR / f"{Path(filename).stem}.tex"
@@ -29,8 +29,17 @@ def write_latex_figure(filename, caption, label, extra_images=None, side_by_side
 
     content = ["\\begin{figure}[htbp]", "    \\centering"]
 
+    # Check if this is a size-related plot to include the global legend
+    is_size_plot = "loss_vs_size" in filename or "accuracy_vs_size" in filename
+
+    if is_size_plot:
+        # Legend takes full width on its own line
+        content.append(
+            f"    \\includegraphics[width=\\linewidth]{{figures/overparameterization_legend.pdf}}\\\\"
+        )
+
     if side_by_side and extra_images:
-        # Side-by-side layout (e.g., Loss and Accuracy scatter plots)
+        # Side-by-side layout for the data plots
         content.append(
             f"    \\includegraphics[width=0.49\\linewidth]{{figures/{filename}}}"
         )
@@ -39,13 +48,14 @@ def write_latex_figure(filename, caption, label, extra_images=None, side_by_side
                 f"    \\includegraphics[width=0.49\\linewidth]{{figures/{f}}}"
             )
     elif extra_images:
-        # Vertical stacking (e.g., Bundled heatmaps)
+        # Vertical stacking for heatmaps
         content.append(
             f"    \\includegraphics[width=\\linewidth]{{figures/{filename}}}"
         )
         for f in extra_images:
             content.append(f"    \\includegraphics[width=\\linewidth]{{figures/{f}}}")
     else:
+        # Single plot (e.g., GPT loss)
         content.append(
             f"    \\includegraphics[width=\\linewidth]{{figures/{filename}}}"
         )
@@ -59,9 +69,10 @@ def write_latex_figure(filename, caption, label, extra_images=None, side_by_side
 
 
 def create_global_legend(output_dir):
-    """Creates a standalone legend file with a white background and no border frame."""
+    """Creates a standalone legend file with no border and no background."""
     helper.setup_plotting_style()
-    fig, ax = plt.subplots(figsize=(10, 1))
+    # Use facecolor='none' to ensure the initial figure is transparent
+    fig, ax = plt.subplots(figsize=(10, 1), facecolor="none")
 
     ax.plot(
         [],
@@ -85,16 +96,21 @@ def create_global_legend(output_dir):
         color=helper.COLOURS["modernTeal"],
     )
 
-    # frameon=False removes the border box around the legend
+    # 1. Force the legend frame to be fully transparent and have no width
     legend = ax.legend(loc="center", ncol=3, frameon=False)
+    legend.get_frame().set_linewidth(0.0)
+    legend.get_frame().set_facecolor("none")
+
     ax.axis("off")
 
     fig.canvas.draw()
     bbox = legend.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
 
     legend_path = output_dir / "overparameterization_legend.pdf"
-    # facecolor='white' ensures the background remains white even without a frame
-    fig.savefig(legend_path, bbox_inches=bbox, transparent=False, facecolor="white")
+
+    # 2. Use transparent=True and remove facecolor='white'
+    # 3. Add pad_inches=0 to ensure the tight crop doesn't create a border artifact
+    fig.savefig(legend_path, bbox_inches=bbox, transparent=True, pad_inches=0)
     plt.close(fig)
 
 
@@ -118,7 +134,7 @@ def extract_data(runs, model_type):
             "final_loss": summary.get("loss"),
             "final_accuracy": summary.get("accuracy"),
             "dataset": config.get(
-                "dataset", "MNIST" if "gpt" not in model_type else "Tiny Shakespeare"
+                "dataset", "MNIST" if "gpt" not in model_type else "TinyShakespeare"
             ),
         }
         for key in arch_keys:
@@ -144,8 +160,14 @@ def create_sgd_parameter_comparison_plots(df, model_type, output_dir):
 
     model_suffix = SUFFIX_MAP.get(model_type, model_type)
     p1, p2 = param_list[0], param_list[1]
-    c1_lab = f"ov={p1[0]*100:.0f}%, bif={p1[1]:.2f}"
-    c2_lab = f"ov={p2[0]*100:.0f}%, bif={p2[1]:.2f}"
+    # Clean up labels for the plot axes
+    c1_lab = "Config. 1"
+    c2_lab = "Config. 2"
+
+    # Detail configurations for the caption
+    c1_desc = f"no overlap and no batch size increase ({c1_lab.lower()})"
+    c2_desc = rf"an overlap of approximately {p2[0]*100:.0f}% and a batch size increase factor ({p2[1]:.1f}) ({c2_lab.lower()})"
+
     arch_keys = helper.get_arch_keys(model_type)
 
     sgd1 = (
@@ -162,11 +184,9 @@ def create_sgd_parameter_comparison_plots(df, model_type, output_dir):
     )
     merged = pd.merge(sgd1, sgd2, on=arch_keys, suffixes=("_1", "_2"))
 
-    # Determine metrics to plot
     metrics = ["loss"] if model_type == "nanogpt" else ["loss", "accuracy"]
     num_metrics = len(metrics)
 
-    # Create one figure with subplots side-by-side
     fig, axes = plt.subplots(
         1, num_metrics, figsize=(8 * num_metrics, 8), squeeze=False
     )
@@ -180,23 +200,28 @@ def create_sgd_parameter_comparison_plots(df, model_type, output_dir):
             merged[m1], merged[m2], s=200, alpha=0.7, edgecolors="black", zorder=3
         )
 
-        # Calculate limits for the identity line
         min_val = min(merged[m1].min(), merged[m2].min())
         max_val = max(merged[m1].max(), merged[m2].max())
         lims = [min_val * 0.95, max_val * 1.05]
 
         ax.plot(lims, lims, "k--", alpha=0.5, zorder=2)
-        ax.set_title(metric.title(), fontsize=16)
-        ax.set_xlabel(f"Config 1: {c1_lab}")
-        ax.set_ylabel(f"Config 2: {c2_lab}")
+        ax.set_title(metric.title())
+        ax.set_xlabel(c1_lab)
+        ax.set_ylabel(c2_lab)
 
     fname = f"sgd_parameter_scatter_combined_{model_suffix}.pdf"
     helper.finalize_plot(plt.gca(), output_dir, fname)
 
-    cap = f"Scatter plot comparing SGD with standard configuration ({c1_lab}) against SGD with {c2_lab} for {model_type} on the {df['dataset'].iloc[0]} dataset."
+    # Updated caption with the requested descriptions
+    if "ffnn" in model_type:
+        model_type_desc = "FCNNs"
+    elif "cnn" in model_type:
+        model_type_desc = "CNNs"
+    else:
+        model_type_desc = "transformers"
 
-    # Since we combined them into one file, we don't need 'extra_images' or 'side_by_side' in LaTeX
-    # because the PDF itself now contains both plots side-by-side.
+    cap = f"Scatter plot comparing SGD with {c1_desc} against SGD with {c2_desc} for {model_type_desc} on the {df['dataset'].iloc[0]} dataset."
+
     write_latex_figure(fname, cap, f"fig:SGD_to_overlap_or_not_{model_suffix}")
 
 
@@ -280,12 +305,13 @@ def create_heatmaps_for_model(df, model_type, args):
             generated_files[metric] = fname
 
     if model_type == "nanogpt":
-        cap = (
-            f"Heatmaps showing final empirical loss for SAPTS and SGD on transformers."
-        )
+        cap = f"Heatmaps showing the final average empirical loss for SAPTS-D and SGD on transformers on the TinyShakespeare dataset."
         write_latex_figure(generated_files["loss"], cap, f"fig:heatmap_gpt_sgd_vs_apts")
     else:
-        cap = f"Heatmaps showing final empirical loss (top) and test accuracy (bottom) for SAPTS and SGD on {model_suffix.upper()}s."
+        if model_type == "medium_ffnn":
+            cap = f"Heatmaps showing the final average empirical loss (top) and final average test accuracy (bottom) for SAPTS-D and SGD on {model_suffix.upper()}s of varying depths and widths on the MNIST dataset."
+        else:
+            cap = f"Heatmaps showing the final average empirical loss (top) and final average test accuracy (bottom) for SAPTS-D and SGD on {model_suffix.upper()}s of varying depths and filter sizes on the MNIST dataset."
         write_latex_figure(
             generated_files["loss"],
             cap,
@@ -335,12 +361,26 @@ def run_analysis(df, model_type, args):
 
         ax.set_xscale("log")
         ax.set_xlabel("Total Parameters")
-        ax.set_ylabel(metric.title())
+        if metric.title().lower() == "loss":
+            ax.set_ylabel(f"Final Empirical {metric.title()}")
+        else:
+            ax.set_ylabel(f"Final Test {metric.title()}")
         fname = f"{metric}_vs_size_{model_suffix}.pdf"
         helper.finalize_plot(ax, args.output_dir, fname)
         size_files[metric] = fname
 
-    cap = f"Direct comparison of final empirical loss (left) and test accuracy (right) versus parameter count for SGD and SAPTS on {model_suffix.upper()}s."
+    if model_suffix == "gpt":
+        cap = (
+            f"Final average loss plotted against parameter count for transformers. "
+            "SAPTS-D consistently achieves lower loss compared to SGD "
+            "across all tested architectures on the TinyShakespeare dataset. Error bars represent $\\pm 1$ standard deviation."
+        )
+    else:
+        cap = (
+            f"Final average loss (left) and test accuracy (right) plotted against parameter count for {model_suffix.upper()}s. "
+            "SAPTS-D consistently achieves lower loss and higher accuracy compared to SGD "
+            "across all tested architectures on the MNIST dataset. Error bars represent $\\pm 1$ standard deviation."
+        )
     if "loss" in size_files and "accuracy" in size_files:
         write_latex_figure(
             size_files["loss"],
@@ -368,7 +408,7 @@ def main():
         "--entity", type=str, default="cruzas-universit-della-svizzera-italiana"
     )
     parser.add_argument("--save-plots", action="store_true")
-    parser.add_argument("--sgd-overlap", type=float, default=0.0)
+    # Removed --sgd-overlap from argparse
     parser.add_argument(
         "--models",
         type=str,
@@ -383,22 +423,37 @@ def main():
         create_global_legend(legend_dir)
 
     for model_type in args.models:
+        # Determine overlap based on the model type
+        if model_type == "nanogpt":
+            current_sgd_overlap = 0.33
+        else:
+            current_sgd_overlap = 0.0
+
+        # Attach it to args so run_analysis and create_heatmaps_for_model can still access it
+        args.sgd_overlap = current_sgd_overlap
+
         runs = helper.fetch_runs(
             project=args.project,
             entity=args.entity,
             filters={"config.model_name": model_type},
             model_type=model_type,
         )
+
         if not runs:
+            print(f"No runs found for {model_type}")
             continue
+
         df = extract_data(runs, model_type)
         if df.empty:
             continue
 
         args.output_dir = (
-            Path(__file__).parent / f"hyperparam_analysis_{SUFFIX_MAP.get(model_type)}"
+            Path(__file__).parent
+            / f"hyperparam_analysis_{SUFFIX_MAP.get(model_type, model_type)}"
         )
         args.output_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Analyzing {model_type} with SGD overlap set to {args.sgd_overlap}...")
         run_analysis(df, model_type, args)
 
 
