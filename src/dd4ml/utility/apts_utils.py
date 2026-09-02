@@ -11,6 +11,7 @@ from .optimizer_utils import get_state_dict
 def _get_device():
     """Cache device to avoid repeated CUDA checks."""
     from .utils import get_default_device
+
     return get_default_device()
 
 
@@ -28,7 +29,7 @@ def flatten_params(model, out=None):
 
     # Decide target dtype/device dynamically
     # Promote to float64 iff either params or out are float64
-    if out is not None and out.dtype == torch.float64 or param_dtype == torch.float64:
+    if (out is not None and out.dtype == torch.float64) or param_dtype == torch.float64:
         target_dtype = torch.float64
     else:
         target_dtype = param_dtype
@@ -151,8 +152,8 @@ def trainable_grads_to_vector(model: nn.Module) -> torch.Tensor:
     if not trainable_params:
         return torch.tensor([], dtype=torch.float32)
 
-    grads = [p.grad.view(-1) if p.grad is not None else torch.zeros_like(p).view(-1)
-             for p in trainable_params]
+    grads = [
+        p.grad.view(-1) if p.grad is not None else torch.zeros_like(p).view(-1)
+        for p in trainable_params
+    ]
     return torch.cat(grads).detach()
-
-

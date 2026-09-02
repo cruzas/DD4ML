@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from .base_cnn import BaseCNN
 
 
@@ -28,7 +29,9 @@ class MediumCNN(BaseCNN):
         C.kernel_size = 3
         C.padding = 1
         C.stride = 1
-        C.pool_every = 2  # Apply pooling every N layers (2 means pool after layer 2, 4, 6, etc.)
+        C.pool_every = (
+            2  # Apply pooling every N layers (2 means pool after layer 2, 4, 6, etc.)
+        )
         C.dropout_p = 0.5
         return C
 
@@ -39,7 +42,7 @@ class MediumCNN(BaseCNN):
         if isinstance(config.filters_per_layer, int):
             filters = [config.filters_per_layer] * config.num_conv_layers
         else:
-            filters = config.filters_per_layer[:config.num_conv_layers]
+            filters = config.filters_per_layer[: config.num_conv_layers]
             # Pad if needed
             while len(filters) < config.num_conv_layers:
                 filters.append(filters[-1] if filters else 32)
@@ -56,15 +59,15 @@ class MediumCNN(BaseCNN):
                     out_channels,
                     kernel_size=config.kernel_size,
                     padding=config.padding,
-                    stride=config.stride
+                    stride=config.stride,
                 ),
                 nn.BatchNorm2d(out_channels),
-                nn.ReLU(inplace=True)
+                nn.ReLU(inplace=True),
             )
 
             # Add pooling if this is a pooling layer
             if config.pool_every > 0 and i % config.pool_every == 0:
-                layer.add_module('pool', nn.MaxPool2d(kernel_size=2, stride=2))
+                layer.add_module("pool", nn.MaxPool2d(kernel_size=2, stride=2))
 
             setattr(self, f"conv{i}", layer)
             conv_layers.append((f"conv{i}", layer))
@@ -75,8 +78,10 @@ class MediumCNN(BaseCNN):
 
         # Calculate the size after convolutions for MNIST (28x28 input)
         # Each pooling reduces spatial dimensions by 2
-        num_pools = config.num_conv_layers // config.pool_every if config.pool_every > 0 else 0
-        spatial_size = 28 // (2 ** num_pools)
+        num_pools = (
+            config.num_conv_layers // config.pool_every if config.pool_every > 0 else 0
+        )
+        spatial_size = 28 // (2**num_pools)
         fc_input_size = filters[-1] * spatial_size * spatial_size
 
         # Fully connected layers
@@ -112,7 +117,7 @@ class MediumCNN(BaseCNN):
         if isinstance(cfg.filters_per_layer, int):
             filters = [cfg.filters_per_layer] * cfg.num_conv_layers
         else:
-            filters = cfg.filters_per_layer[:cfg.num_conv_layers]
+            filters = cfg.filters_per_layer[: cfg.num_conv_layers]
             while len(filters) < cfg.num_conv_layers:
                 filters.append(filters[-1] if filters else 32)
 
@@ -121,11 +126,11 @@ class MediumCNN(BaseCNN):
         # First conv layer
         in_ch = cfg.input_channels
         for i, out_ch in enumerate(filters, start=1):
-            use_pool = (cfg.pool_every > 0 and i % cfg.pool_every == 0)
+            use_pool = cfg.pool_every > 0 and i % cfg.pool_every == 0
 
             stage_name = f"conv{i}"
-            next_stage = f"conv{i+1}" if i < len(filters) else "fc1"
-            prev_stage = f"conv{i-1}" if i > 1 else []
+            next_stage = f"conv{i + 1}" if i < len(filters) else "fc1"
+            prev_stage = f"conv{i - 1}" if i > 1 else []
 
             model_dict[stage_name] = {
                 "callable": {
@@ -139,33 +144,37 @@ class MediumCNN(BaseCNN):
                                     "out_channels": out_ch,
                                     "kernel_size": cfg.kernel_size,
                                     "padding": cfg.padding,
-                                    "stride": cfg.stride
-                                }
+                                    "stride": cfg.stride,
+                                },
                             },
                             {
                                 "object": nn.BatchNorm2d,
-                                "settings": {"num_features": out_ch}
+                                "settings": {"num_features": out_ch},
                             },
-                            {
-                                "object": nn.ReLU,
-                                "settings": {"inplace": True}
-                            }
-                        ] + ([{
-                            "object": nn.MaxPool2d,
-                            "settings": {"kernel_size": 2, "stride": 2}
-                        }] if use_pool else [])
-                    }
+                            {"object": nn.ReLU, "settings": {"inplace": True}},
+                        ]
+                        + (
+                            [
+                                {
+                                    "object": nn.MaxPool2d,
+                                    "settings": {"kernel_size": 2, "stride": 2},
+                                }
+                            ]
+                            if use_pool
+                            else []
+                        )
+                    },
                 },
                 "dst": {"to": [next_stage]},
                 "rcv": {"src": [prev_stage] if prev_stage else [], "strategy": None},
                 "stage": i - 1,
-                "num_layer_shards": 1
+                "num_layer_shards": 1,
             }
             in_ch = out_ch
 
         # FC layers
         num_pools = cfg.num_conv_layers // cfg.pool_every if cfg.pool_every > 0 else 0
-        spatial_size = 28 // (2 ** num_pools)
+        spatial_size = 28 // (2**num_pools)
         fc_input_size = filters[-1] * spatial_size * spatial_size
 
         model_dict["fc1"] = {
@@ -178,18 +187,18 @@ class MediumCNN(BaseCNN):
                             "object": nn.Linear,
                             "settings": {
                                 "in_features": fc_input_size,
-                                "out_features": cfg.fc_width
-                            }
+                                "out_features": cfg.fc_width,
+                            },
                         },
                         {"object": nn.ReLU, "settings": {"inplace": True}},
-                        {"object": nn.Dropout, "settings": {"p": cfg.dropout_p}}
+                        {"object": nn.Dropout, "settings": {"p": cfg.dropout_p}},
                     ]
-                }
+                },
             },
             "dst": {"to": ["finish"]},
             "rcv": {"src": [f"conv{cfg.num_conv_layers}"], "strategy": None},
             "stage": cfg.num_conv_layers,
-            "num_layer_shards": 1
+            "num_layer_shards": 1,
         }
 
         model_dict["finish"] = {
@@ -197,13 +206,13 @@ class MediumCNN(BaseCNN):
                 "object": nn.Linear,
                 "settings": {
                     "in_features": cfg.fc_width,
-                    "out_features": cfg.output_classes
-                }
+                    "out_features": cfg.output_classes,
+                },
             },
             "dst": {"to": []},
             "rcv": {"src": ["fc1"], "strategy": None},
             "stage": cfg.num_conv_layers + 1,
-            "num_layer_shards": 1
+            "num_layer_shards": 1,
         }
 
         self.model_dict = model_dict

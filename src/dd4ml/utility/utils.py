@@ -74,15 +74,16 @@ class CfgNode:
         parts = []
         for k, v in self.__dict__.items():
             if isinstance(v, CfgNode):
-                parts.append("%s:\n" % k)
+                parts.append(f"{k}:\n")
                 parts.append(v._str_helper(indent + 1))
             else:
-                parts.append("%s: %s\n" % (k, v))
+                parts.append(f"{k}: {v}\n")
         parts = [" " * (indent * 4) + p for p in parts]
         return "".join(parts)
 
     def to_dict(self):
         """Return a dict representation of the config with JSON-serializable values."""
+
         def serialize_value(v):
             if isinstance(v, CfgNode):
                 return v.to_dict()
@@ -111,10 +112,9 @@ class CfgNode:
         --model.n_layer=10 --trainer.batch_size=32
         """
         for arg in args:
-
             keyval = arg.split("=")
             assert len(keyval) == 2, (
-                "expecting each override arg to be of form --arg=value, got %s" % arg
+                f"expecting each override arg to be of form --arg=value, got {arg}"
             )
             key, val = keyval  # unpack
 
@@ -139,12 +139,12 @@ class CfgNode:
             leaf_key = keys[-1]
 
             # ensure that this attribute exists
-            assert hasattr(
-                obj, leaf_key
-            ), f"{key} is not an attribute that exists in the config"
+            assert hasattr(obj, leaf_key), (
+                f"{key} is not an attribute that exists in the config"
+            )
 
             # overwrite the attribute
-            print("command line overwriting config attribute %s with %s" % (key, val))
+            print(f"command line overwriting config attribute {key} with {val}")
             setattr(obj, leaf_key, val)
 
     def merge_and_cleanup(self, keys_to_look=["system", "data", "model", "trainer"]):

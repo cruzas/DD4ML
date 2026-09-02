@@ -1,4 +1,12 @@
-from .apts_base import *
+import math
+
+import torch
+import torch.distributed as dist
+
+from dd4ml.utility import clone_model, dprint
+
+from .apts_base import APTS_Base
+from .asntr import ASNTR
 
 
 class APTS_D(APTS_Base):
@@ -83,7 +91,7 @@ class APTS_D(APTS_Base):
         temp_local = self.loc_params_to_vector()
         self.n_global = temp_global.numel()
         self.n_local = temp_local.numel()
-        
+
         # Only compute square roots if needed
         if self.norm_type == math.inf:
             self.sqrt_n_global = math.sqrt(self.n_global)
@@ -120,29 +128,31 @@ class APTS_D(APTS_Base):
                 float(weight), device=step.device, dtype=step.dtype
             )
         w = self._weight_tensor_cache[cache_key]
-        
+
         # If more than one model, global step is sum of local steps
         # and loc_red is the sum of all local reductions
         if self.nr_models > 1:
             # Pre-allocate coalesced buffer on first use
             coalesced_size = step.numel() + 1
-            if (self._coalesced_buffer is None or 
-                self._coalesced_buffer.numel() < coalesced_size or
-                self._coalesced_buffer.device != step.device or
-                self._coalesced_buffer.dtype != step.dtype):
+            if (
+                self._coalesced_buffer is None
+                or self._coalesced_buffer.numel() < coalesced_size
+                or self._coalesced_buffer.device != step.device
+                or self._coalesced_buffer.dtype != step.dtype
+            ):
                 self._coalesced_buffer = torch.empty(
                     coalesced_size, device=step.device, dtype=step.dtype
                 )
-            
+
             # Efficiently populate coalesced buffer
             numel = step.numel()
             coalesced = self._coalesced_buffer[:coalesced_size]
             coalesced[:numel] = step.view(-1)
             coalesced[numel] = loc_red * w
-            
+
             # Single all_reduce on that combined tensor
             dist.all_reduce(coalesced, op=dist.ReduceOp.SUM)
-            
+
             # Split back into step and loc_red
             step.copy_(coalesced[:numel].view_as(step))
             loc_red = coalesced[numel].unsqueeze(0)
@@ -183,7 +193,9 @@ class APTS_D(APTS_Base):
 
         # Calculate residual between global and local gradients
         if self.foc:
-            self.resid = (self.init_glob_grad - self.init_loc_grad).to(dtype=self.init_glob_grad.dtype)
+            self.resid = (self.init_glob_grad - self.init_loc_grad).to(
+                dtype=self.init_glob_grad.dtype
+            )
 
         # Perform local optimization steps
         loc_loss, _ = self.loc_steps(self.init_loc_loss, self.init_loc_grad)

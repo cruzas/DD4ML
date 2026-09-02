@@ -1,8 +1,3 @@
-import copy
-import math
-import random
-import time
-
 import torch
 import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
@@ -10,9 +5,6 @@ from torch.optim.optimizer import Optimizer
 
 from dd4ml.utility import (
     apts_ip_restore_params,
-    clone_model,
-    dprint,
-    ensure_tensor,
     flatten_params,
     get_apts_hparams,
     get_device,
@@ -22,13 +14,9 @@ from dd4ml.utility import (
     get_lssr1_tr_hparams,
     get_state_dict,
     get_tr_hparams,
-    mark_trainable,
     restore_params,
-    trainable_grads_to_vector,
-    trainable_params_to_vector,
 )
 
-from .asntr import ASNTR
 from .lssr1_tr import LSSR1_TR
 from .tr import TR
 from .tradam import TRAdam
@@ -151,7 +139,9 @@ class APTS_Base(Optimizer):
             self._loc_flat_buffer = torch.empty_like(sample_flat)  # for local models
             self._diff_cache = torch.empty_like(sample_flat)
         except (RuntimeError, ValueError, TypeError) as e:
-            print(f"Warning: Failed to create parameter buffers, using None (may impact performance): {e}")
+            print(
+                f"Warning: Failed to create parameter buffers, using None (may impact performance): {e}"
+            )
             self._flat_params_buffer = None
             self._loc_flat_buffer = None
             self._diff_cache = None
@@ -197,7 +187,9 @@ class APTS_Base(Optimizer):
         Returns a tensor containing the gradients of the local model parameters.
         """
         # parameters_to_vector already returns a new tensor, no need for .clone()
-        return parameters_to_vector([p.grad for p in self.loc_model.parameters()]).detach()
+        return parameters_to_vector(
+            [p.grad for p in self.loc_model.parameters()]
+        ).detach()
 
     @torch.no_grad()
     def glob_params_to_vector(self):
@@ -220,7 +212,9 @@ class APTS_Base(Optimizer):
         """
         # flatten_params modifies buffer in-place, so clone is necessary here
         if self._loc_flat_buffer is not None:
-            return flatten_params(self.loc_model, self._loc_flat_buffer).clone().detach()
+            return (
+                flatten_params(self.loc_model, self._loc_flat_buffer).clone().detach()
+            )
         else:
             # Fallback: create vector without buffer (less efficient)
             return parameters_to_vector(self.loc_model.parameters()).clone().detach()
@@ -268,7 +262,11 @@ class APTS_Base(Optimizer):
         loss = self.non_foc_loc_closure(compute_grad)
 
         # Handle buffer availability for PMW models
-        if self._flat_params_buffer is not None and self._loc_flat_buffer is not None and self._diff_cache is not None:
+        if (
+            self._flat_params_buffer is not None
+            and self._loc_flat_buffer is not None
+            and self._diff_cache is not None
+        ):
             # Flatten global and local parameters into pre-allocated buffers
             glob_flat = flatten_params(self.model, self._flat_params_buffer)
             loc_flat = flatten_params(self.loc_model, self._loc_flat_buffer)
@@ -284,7 +282,9 @@ class APTS_Base(Optimizer):
 
         # Optimized tolerance check using norm instead of element-wise operations
         if diff.norm() > self.tol:
-            if not hasattr(self, 'resid') or self.resid.dim() == 0 and self.resid.item() == 0:
+            if not hasattr(self, "resid") or (
+                self.resid.dim() == 0 and self.resid.item() == 0
+            ):
                 self.resid = torch.zeros_like(diff)
             # Ensure resid has the same dtype as diff for the dot product
             self.resid = self.resid.to(dtype=diff.dtype)
@@ -336,7 +336,11 @@ class APTS_Base(Optimizer):
         loss = self.non_foc_loc_closure_d(compute_grad)
 
         # Handle buffer availability for PMW models
-        if self._flat_params_buffer is not None and self._loc_flat_buffer is not None and self._diff_cache is not None:
+        if (
+            self._flat_params_buffer is not None
+            and self._loc_flat_buffer is not None
+            and self._diff_cache is not None
+        ):
             # Flatten global and local parameters into pre-allocated buffers
             glob_flat = flatten_params(self.model, self._flat_params_buffer)
             loc_flat = flatten_params(self.loc_model, self._loc_flat_buffer)
@@ -352,7 +356,9 @@ class APTS_Base(Optimizer):
 
         # Optimized tolerance check using norm instead of element-wise operations
         if diff.norm() > self.tol:
-            if not hasattr(self, 'resid') or self.resid.dim() == 0 and self.resid.item() == 0:
+            if not hasattr(self, "resid") or (
+                self.resid.dim() == 0 and self.resid.item() == 0
+            ):
                 self.resid = torch.zeros_like(diff)
             # Ensure resid has the same dtype as diff for the dot product
             self.resid = self.resid.to(dtype=diff.dtype)
@@ -394,7 +400,7 @@ class APTS_Base(Optimizer):
                 )
 
             # Stop iterations if gradient norm is below tolerance
-            if hasattr(optim, 'tol') and grad.norm(p=self.norm_type) <= optim.tol:
+            if hasattr(optim, "tol") and grad.norm(p=self.norm_type) <= optim.tol:
                 break
 
         return loss, grad
@@ -474,7 +480,7 @@ class APTS_Base(Optimizer):
                 if self._hess_precomputed_for_size != current_memory_size:
                     self.glob_opt.hess.precompute()
                     self._hess_precomputed_for_size = current_memory_size
-                    
+
                 Bp = self.glob_opt.hess.B(step)
                 pred_red -= 0.5 * step.dot(Bp)
         else:

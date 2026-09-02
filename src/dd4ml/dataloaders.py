@@ -1,6 +1,6 @@
 # overlap_sampler.py
 import math
-from typing import Iterator, List, Optional, Sequence, Union
+from collections.abc import Iterator
 
 import numpy as np
 import torch
@@ -12,7 +12,6 @@ from torch.utils.data import (
     DistributedSampler,
     Sampler,
 )
-from torch.utils.data.distributed import DistributedSampler
 
 
 class OverlapBatchSampler(BatchSampler):
@@ -27,7 +26,7 @@ class OverlapBatchSampler(BatchSampler):
         self,
         base_sampler: Sampler[int],
         batch_size: int,
-        overlap: Union[float, int] = 0.0,
+        overlap: float | int = 0.0,
         drop_last: bool = False,
     ):
         # Don't call super().__init__ to avoid conflicts
@@ -54,7 +53,7 @@ class OverlapBatchSampler(BatchSampler):
             self._cached_indices = list(self.base_sampler)
         return self._cached_indices
 
-    def __iter__(self) -> Iterator[List[int]]:
+    def __iter__(self) -> Iterator[list[int]]:
         idxs = self._get_indices()
         n = len(idxs)
 
@@ -142,11 +141,11 @@ class MicroBatchOverlapSampler:
         self.num_subdomains = num_subdomains
         self.allow_empty_microbatches = allow_empty_microbatches
 
-    def __iter__(self) -> Iterator[List[List[int]]]:
+    def __iter__(self) -> Iterator[list[list[int]]]:
         for mini_batch in self.overlap_sampler:
             yield self._split_mini_batch(mini_batch)
 
-    def _split_mini_batch(self, mini_batch: List[int]) -> List[List[int]]:
+    def _split_mini_batch(self, mini_batch: list[int]) -> list[list[int]]:
         unique_size = min(len(mini_batch), self.overlap_sampler.batch_size)
         unique = mini_batch[:unique_size]
         overlap = mini_batch[unique_size:]
@@ -214,7 +213,7 @@ class MicroBatchFlattenSampler(BatchSampler):
         self.micro_batch_sampler = micro_batch_sampler
         # Don't call super().__init__()
 
-    def __iter__(self) -> Iterator[List[int]]:
+    def __iter__(self) -> Iterator[list[int]]:
         for micro_batches in self.micro_batch_sampler:
             for micro_batch in micro_batches:
                 if micro_batch:  # Only yield non-empty micro-batches
@@ -229,7 +228,6 @@ from torch.utils.data import RandomSampler, SequentialSampler
 
 
 class GeneralizedDistributedDataLoader(DataLoader):
-
     def __init__(
         self,
         model_handler,
@@ -287,9 +285,7 @@ class GeneralizedDistributedDataLoader(DataLoader):
             return RandomSampler(ds) if do_shuffle else SequentialSampler(ds)
 
         # dispatch by pipeline position
-        if model_handler.num_stages == 1:
-            layer_ranks = first_ranks
-        elif rank in first_ranks:
+        if model_handler.num_stages == 1 or rank in first_ranks:
             layer_ranks = first_ranks
         elif rank in last_ranks:
             layer_ranks = last_ranks
@@ -340,7 +336,7 @@ class MockDataset(Dataset):
             device (optional): The device to be used. Defaults to None.
             first (optional): A boolean indicating if it is the first dataset. Defaults to True.
         """
-        super(MockDataset, self).__init__()
+        super().__init__()
         self.amount_of_batches = amount_of_batches
         self.dataset = dataset
         self.first = first
@@ -365,9 +361,9 @@ class MockDataset(Dataset):
         Returns:
             tuple: A tuple containing the item at the specified index.
         """
-        if self.first == True:
+        if self.first is True:
             return (self.dataset[idx][0], 1)
-        elif self.first == False:
+        elif self.first is False:
             return (1, self.dataset[idx][1])
         else:
             return (1, 1)
@@ -378,8 +374,8 @@ class GeneralizedDistributedSampler(DistributedSampler):
         self,
         layer_ranks,
         dataset: Dataset,
-        num_replicas: Optional[int] = None,
-        rank: Optional[int] = None,
+        num_replicas: int | None = None,
+        rank: int | None = None,
         shuffle: bool = True,
         seed: int = 0,
         drop_last: bool = False,
@@ -420,7 +416,7 @@ class GeneralizedDistributedSampler(DistributedSampler):
                 "drop_last": drop_last,
             }
         )
-        super(GeneralizedDistributedSampler, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         # super(GeneralizedDistributedSampler, self).__init__(dataset=dataset, num_replicas=len(first_layer_ranks), rank=rank, shuffle=shuffle, seed=seed, drop_last=drop_last, **kwargs)
 
 
@@ -546,7 +542,7 @@ class Power_DL:
                 .to(self.device)
                 .type(dtype)
             )
-        except:
+        except Exception:
             # self.dataset.targets = torch.from_numpy(np.array(self.dataset.targets)).type(torch.LongTensor).to(self.device)
             # if torch.cuda.is_available():
             #     self.dataset.targets = torch.from_numpy(np.array(self.dataset.targets)).to(self.device).type(dtype)

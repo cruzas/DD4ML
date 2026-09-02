@@ -8,23 +8,18 @@ Usage:
 """
 
 import argparse
-import itertools
 import os
 import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
-import yaml
+from typing import Any
 
 
-def parse_conf_file(conf_path: Path) -> Dict[str, Any]:
+def parse_conf_file(conf_path: Path) -> dict[str, Any]:
     """Parse a bash .conf file and extract variables."""
     config = {}
 
-    with open(conf_path, "r") as f:
+    with open(conf_path) as f:
         for line in f:
             line = line.strip()
             # Skip comments and empty lines
@@ -38,9 +33,9 @@ def parse_conf_file(conf_path: Path) -> Dict[str, Any]:
                 value = value.strip()
 
                 # Remove quotes if present
-                if value.startswith('"') and value.endswith('"'):
-                    value = value[1:-1]
-                elif value.startswith("'") and value.endswith("'"):
+                if (value.startswith('"') and value.endswith('"')) or (
+                    value.startswith("'") and value.endswith("'")
+                ):
                     value = value[1:-1]
 
                 # Parse arrays (e.g., OPTIMIZERS=(sgd adam))
@@ -66,7 +61,7 @@ def parse_conf_file(conf_path: Path) -> Dict[str, Any]:
     return config
 
 
-def set_optimizer_params(optimizer: str, config: Dict[str, Any]) -> None:
+def set_optimizer_params(optimizer: str, config: dict[str, Any]) -> None:
     """Set optimizer-specific parameters."""
     if optimizer == "apts_ip":
         config["USE_PMW"] = True
@@ -74,7 +69,7 @@ def set_optimizer_params(optimizer: str, config: Dict[str, Any]) -> None:
         config["NUM_REP"] = [1]
 
 
-def set_model_params(model: str, config: Dict[str, Any]) -> None:
+def set_model_params(model: str, config: dict[str, Any]) -> None:
     """Set model-specific parameters."""
     if model == "nanogpt":
         config["EVAL_PARAMS"] = [
@@ -85,14 +80,14 @@ def set_model_params(model: str, config: Dict[str, Any]) -> None:
         config["BATCH_SIZES"] = [128]
 
 
-def set_hardware_params(config: Dict[str, Any]) -> int:
+def set_hardware_params(config: dict[str, Any]) -> int:
     """Determine max GPUs based on environment."""
     if "/home/" in os.getcwd():
         return 1
     return 4
 
 
-def set_apts_lssr1_tr_params(optimizer: str, config: Dict[str, Any]) -> None:
+def set_apts_lssr1_tr_params(optimizer: str, config: dict[str, Any]) -> None:
     """Set APTS/LSSR1_TR specific parameters."""
     if optimizer in ["apts_d", "apts_p", "apts_ip", "lssr1_tr", "tr"]:
         apts_params = [
@@ -137,7 +132,7 @@ def set_apts_lssr1_tr_params(optimizer: str, config: Dict[str, Any]) -> None:
         config["APTS_PARAMS"] = apts_params
 
 
-def extract_apts_details(apts_params: List[str]) -> Dict[str, str]:
+def extract_apts_details(apts_params: list[str]) -> dict[str, str]:
     """Extract APTS optimizer details from parameters."""
     details = {
         "glob_opt": "none",
@@ -155,7 +150,7 @@ def extract_apts_details(apts_params: List[str]) -> Dict[str, str]:
     return details
 
 
-def calc_nodes(world_size: int, max_gpus: int) -> Tuple[int, int]:
+def calc_nodes(world_size: int, max_gpus: int) -> tuple[int, int]:
     """Calculate optimal number of nodes and tasks per node."""
     for n in range(1, world_size + 1):
         tpn = world_size // n
@@ -166,7 +161,7 @@ def calc_nodes(world_size: int, max_gpus: int) -> Tuple[int, int]:
 
 def update_config_yaml(yaml_path: Path, key: str, value: Any) -> None:
     """Update a value in a YAML config file."""
-    with open(yaml_path, "r") as f:
+    with open(yaml_path) as f:
         lines = f.readlines()
 
     # Find the key and update the value on the next line
@@ -222,7 +217,7 @@ def run_experiment(config_file: Path, job_name: str, dry_run: bool = False) -> b
 
 
 def generate_and_submit_jobs(
-    config: Dict[str, Any], script_dir: Path, dry_run: bool = False
+    config: dict[str, Any], script_dir: Path, dry_run: bool = False
 ) -> int:
     """Generate configurations and submit jobs."""
     max_gpus = set_hardware_params(config)
@@ -453,375 +448,425 @@ def generate_and_submit_jobs(
                                                                         )
 
                                                         # Get width and num_layers lists for ffnn models
-                                                        width_values = config.get("WIDTHS", [])
+                                                        width_values = config.get(
+                                                            "WIDTHS", []
+                                                        )
                                                         if not width_values:
-                                                            width_values = config.get("WIDTH")
+                                                            width_values = config.get(
+                                                                "WIDTH"
+                                                            )
                                                             if width_values is not None:
-                                                                width_values = [width_values]
+                                                                width_values = [
+                                                                    width_values
+                                                                ]
                                                             else:
                                                                 width_values = [None]
 
-                                                        num_layers_values = config.get("NUM_LAYERS", [])
+                                                        num_layers_values = config.get(
+                                                            "NUM_LAYERS", []
+                                                        )
                                                         if not num_layers_values:
                                                             num_layers_values = [None]
 
                                                         for width in width_values:
-                                                            for num_layers in num_layers_values:
+                                                            for (
+                                                                num_layers
+                                                            ) in num_layers_values:
+                                                                job_name = f"{optimizer}_{dataset}_{model}_{actual_bs}_epochs_{epoch_count}_nsd_{num_subd}"
 
-                                                                                job_name = f"{optimizer}_{dataset}_{model}_{actual_bs}_epochs_{epoch_count}_nsd_{num_subd}"
+                                                                # Add width to job name if ffnn model and width is specified
+                                                                if (
+                                                                    "ffnn" in model
+                                                                    and width
+                                                                    is not None
+                                                                ):
+                                                                    job_name += (
+                                                                        f"_w_{width}"
+                                                                    )
 
-                                                                                # Add width to job name if ffnn model and width is specified
-                                                                                if "ffnn" in model and width is not None:
-                                                                                    job_name += f"_w_{width}"
+                                                                # Add num_layers to job name if ffnn model and num_layers is specified
+                                                                if (
+                                                                    "ffnn" in model
+                                                                    and num_layers
+                                                                    is not None
+                                                                ):
+                                                                    job_name += f"_nl_{num_layers}"
 
-                                                                                # Add num_layers to job name if ffnn model and num_layers is specified
-                                                                                if "ffnn" in model and num_layers is not None:
-                                                                                    job_name += f"_nl_{num_layers}"
+                                                                if use_pmw:
+                                                                    job_name += f"_nst_{num_stages}_nrpsd_{num_rep}"
 
-                                                                                if use_pmw:
-                                                                                    job_name += f"_nst_{num_stages}_nrpsd_{num_rep}"
+                                                                # Extract batch_inc_factor and overlap if present
+                                                                # Check both current_apts_params and original config APTS_PARAMS
+                                                                all_params = (
+                                                                    current_apts_params
+                                                                    + config.get(
+                                                                        "APTS_PARAMS",
+                                                                        [],
+                                                                    )
+                                                                )
+                                                                batch_inc_factor = next(
+                                                                    (
+                                                                        p.split("=")[1]
+                                                                        for p in all_params
+                                                                        if p.startswith(
+                                                                            "batch_inc_factor="
+                                                                        )
+                                                                    ),
+                                                                    None,
+                                                                )
+                                                                overlap = next(
+                                                                    (
+                                                                        p.split("=")[1]
+                                                                        for p in all_params
+                                                                        if p.startswith(
+                                                                            "overlap="
+                                                                        )
+                                                                    ),
+                                                                    None,
+                                                                )
 
-                                                                                # Extract batch_inc_factor and overlap if present
-                                                                                # Check both current_apts_params and original config APTS_PARAMS
-                                                                                all_params = current_apts_params + config.get("APTS_PARAMS", [])
-                                                                                batch_inc_factor = next(
-                                                                                    (
-                                                                                        p.split("=")[1]
-                                                                                        for p in all_params
-                                                                                        if p.startswith("batch_inc_factor=")
-                                                                                    ),
-                                                                                    None,
-                                                                                )
-                                                                                overlap = next(
-                                                                                    (
-                                                                                        p.split("=")[1]
-                                                                                        for p in all_params
-                                                                                        if p.startswith("overlap=")
-                                                                                    ),
-                                                                                    None,
-                                                                                )
+                                                                if optimizer.startswith(
+                                                                    "apts_"
+                                                                ):
+                                                                    job_name += f"_gopt_{apts_details['glob_opt']}_lopt_{apts_details['loc_opt']}_gso_{apts_details['glob_second_order']}_lso_{apts_details['loc_second_order']}"
+                                                                    if (
+                                                                        batch_inc_factor
+                                                                        is not None
+                                                                    ):
+                                                                        job_name += f"_bif_{batch_inc_factor}"
+                                                                    if (
+                                                                        overlap
+                                                                        is not None
+                                                                    ):
+                                                                        job_name += f"_ovlp_{overlap}"
 
-                                                                                if optimizer.startswith(
-                                                                                    "apts_"
-                                                                                ):
-                                                                                    job_name += f"_gopt_{apts_details['glob_opt']}_lopt_{apts_details['loc_opt']}_gso_{apts_details['glob_second_order']}_lso_{apts_details['loc_second_order']}"
-                                                                                    if batch_inc_factor is not None:
-                                                                                        job_name += f"_bif_{batch_inc_factor}"
-                                                                                    if overlap is not None:
-                                                                                        job_name += f"_ovlp_{overlap}"
+                                                                    # Add max_loc_iters to job name if present
+                                                                    max_loc_iters = config.get(
+                                                                        "MAX_LOC_ITERS"
+                                                                    )
+                                                                    if (
+                                                                        max_loc_iters
+                                                                        is not None
+                                                                    ):
+                                                                        job_name += f"_mli_{max_loc_iters}"
 
-                                                                                    # Add max_loc_iters to job name if present
-                                                                                    max_loc_iters = config.get("MAX_LOC_ITERS")
-                                                                                    if max_loc_iters is not None:
-                                                                                        job_name += f"_mli_{max_loc_iters}"
+                                                                    if (
+                                                                        optimizer
+                                                                        == "apts_d"
+                                                                    ):
+                                                                        job_name += f"_foc_{str(foc).lower()}"
+                                                                    if (
+                                                                        apts_details[
+                                                                            "glob_opt"
+                                                                        ]
+                                                                        == "lssr1_tr"
+                                                                        or apts_details[
+                                                                            "loc_opt"
+                                                                        ]
+                                                                        == "lssr1_tr"
+                                                                    ):
+                                                                        job_name += f"_ptru_{str(paper_tr_update).lower()}"
+                                                                elif (
+                                                                    optimizer
+                                                                    == "lssr1_tr"
+                                                                ):
+                                                                    job_name += f"_gso_{apts_details['glob_second_order']}_ptru_{str(paper_tr_update).lower()}"
+                                                                    if (
+                                                                        batch_inc_factor
+                                                                        is not None
+                                                                    ):
+                                                                        job_name += f"_bif_{batch_inc_factor}"
+                                                                    if (
+                                                                        overlap
+                                                                        is not None
+                                                                    ):
+                                                                        job_name += f"_ovlp_{overlap}"
+                                                                else:
+                                                                    job_name += f"_gso_{apts_details['glob_second_order']}"
+                                                                    if (
+                                                                        batch_inc_factor
+                                                                        is not None
+                                                                    ):
+                                                                        job_name += f"_bif_{batch_inc_factor}"
+                                                                    if (
+                                                                        overlap
+                                                                        is not None
+                                                                    ):
+                                                                        job_name += f"_ovlp_{overlap}"
 
-                                                                                    if (
-                                                                                        optimizer
-                                                                                        == "apts_d"
-                                                                                    ):
-                                                                                        job_name += f"_foc_{str(foc).lower()}"
-                                                                                    if (
-                                                                                        apts_details[
-                                                                                            "glob_opt"
-                                                                                        ]
-                                                                                        == "lssr1_tr"
-                                                                                        or apts_details[
-                                                                                            "loc_opt"
-                                                                                        ]
-                                                                                        == "lssr1_tr"
-                                                                                    ):
-                                                                                        job_name += f"_ptru_{str(paper_tr_update).lower()}"
-                                                                                elif (
-                                                                                    optimizer
-                                                                                    == "lssr1_tr"
-                                                                                ):
-                                                                                    job_name += f"_gso_{apts_details['glob_second_order']}_ptru_{str(paper_tr_update).lower()}"
-                                                                                    if batch_inc_factor is not None:
-                                                                                        job_name += f"_bif_{batch_inc_factor}"
-                                                                                    if overlap is not None:
-                                                                                        job_name += f"_ovlp_{overlap}"
-                                                                                else:
-                                                                                    job_name += f"_gso_{apts_details['glob_second_order']}"
-                                                                                    if batch_inc_factor is not None:
-                                                                                        job_name += f"_bif_{batch_inc_factor}"
-                                                                                    if overlap is not None:
-                                                                                        job_name += f"_ovlp_{overlap}"
+                                                                job_name += f"_gdg_{str(gdg).lower()}"
+                                                                if optimizer.startswith(
+                                                                    "apts_"
+                                                                ):
+                                                                    job_name += f"_ldg_{str(ldg).lower()}"
+                                                                job_name += f"_pmw_{str(use_pmw).lower()}"
+                                                                if lr is not None:
+                                                                    job_name += (
+                                                                        f"_lr_{lr}"
+                                                                    )
+                                                                job_name += (
+                                                                    f"_trial_{trial}"
+                                                                )
 
-                                                                                job_name += f"_gdg_{str(gdg).lower()}"
-                                                                                if optimizer.startswith(
-                                                                                    "apts_"
-                                                                                ):
-                                                                                    job_name += f"_ldg_{str(ldg).lower()}"
-                                                                                job_name += f"_pmw_{str(use_pmw).lower()}"
-                                                                                if (
-                                                                                    lr
-                                                                                    is not None
-                                                                                ):
-                                                                                    job_name += f"_lr_{lr}"
-                                                                                job_name += f"_trial_{trial}"
+                                                                # Calculate world size and nodes
+                                                                world_size = (
+                                                                    num_stages
+                                                                    * num_subd
+                                                                    * num_rep
+                                                                )
+                                                                (
+                                                                    nodes,
+                                                                    ntasks_per_node,
+                                                                ) = calc_nodes(
+                                                                    world_size,
+                                                                    max_gpus,
+                                                                )
 
-                                                                                # Calculate world size and nodes
-                                                                                world_size = (
-                                                                                    num_stages
-                                                                                    * num_subd
-                                                                                    * num_rep
-                                                                                )
-                                                                                (
-                                                                                    nodes,
-                                                                                    ntasks_per_node,
-                                                                                ) = calc_nodes(
-                                                                                    world_size,
-                                                                                    max_gpus,
-                                                                                )
+                                                                # Create config file
+                                                                config_file = (
+                                                                    script_dir
+                                                                    / "config_files"
+                                                                    / f"config_{job_name}.yaml"
+                                                                )
 
-                                                                                # Create config file
-                                                                                config_file = (
-                                                                                    script_dir
-                                                                                    / "config_files"
-                                                                                    / f"config_{job_name}.yaml"
-                                                                                )
+                                                                if config_file.exists():
+                                                                    print(
+                                                                        f"-> Skipping existing: {config_file.name}"
+                                                                    )
+                                                                    skipped += 1
+                                                                    continue
 
-                                                                                if (
-                                                                                    config_file.exists()
-                                                                                ):
-                                                                                    print(
-                                                                                        f"-> Skipping existing: {config_file.name}"
-                                                                                    )
-                                                                                    skipped += 1
-                                                                                    continue
+                                                                # Copy base config
+                                                                base_config = (
+                                                                    script_dir
+                                                                    / "config_files"
+                                                                    / f"config_{optimizer}.yaml"
+                                                                )
+                                                                if not base_config.exists():
+                                                                    print(
+                                                                        f"ERROR: Base config not found: {base_config}",
+                                                                        file=sys.stderr,
+                                                                    )
+                                                                    continue
 
-                                                                                # Copy base config
-                                                                                base_config = (
-                                                                                    script_dir
-                                                                                    / "config_files"
-                                                                                    / f"config_{optimizer}.yaml"
-                                                                                )
-                                                                                if (
-                                                                                    not base_config.exists()
-                                                                                ):
-                                                                                    print(
-                                                                                        f"ERROR: Base config not found: {base_config}",
-                                                                                        file=sys.stderr,
-                                                                                    )
-                                                                                    continue
+                                                                shutil.copy(
+                                                                    base_config,
+                                                                    config_file,
+                                                                )
 
-                                                                                shutil.copy(
-                                                                                    base_config,
-                                                                                    config_file,
-                                                                                )
+                                                                # Update config values
+                                                                update_config_yaml(
+                                                                    config_file,
+                                                                    "optimizer",
+                                                                    optimizer,
+                                                                )
+                                                                update_config_yaml(
+                                                                    config_file,
+                                                                    "batch_size",
+                                                                    actual_bs,
+                                                                )
+                                                                update_config_yaml(
+                                                                    config_file,
+                                                                    "effective_batch_size",
+                                                                    eff_bs,
+                                                                )
+                                                                update_config_yaml(
+                                                                    config_file,
+                                                                    "dataset_name",
+                                                                    dataset,
+                                                                )
+                                                                update_config_yaml(
+                                                                    config_file,
+                                                                    "model_name",
+                                                                    model,
+                                                                )
+                                                                update_config_yaml(
+                                                                    config_file,
+                                                                    "criterion",
+                                                                    next(
+                                                                        (
+                                                                            p.split(
+                                                                                "="
+                                                                            )[1]
+                                                                            for p in eval_params
+                                                                            if p.startswith(
+                                                                                "criterion="
+                                                                            )
+                                                                        ),
+                                                                        "cross_entropy",
+                                                                    ),
+                                                                )
+                                                                update_config_yaml(
+                                                                    config_file,
+                                                                    "epochs",
+                                                                    epoch_count,
+                                                                )
+                                                                update_config_yaml(
+                                                                    config_file,
+                                                                    "max_iters",
+                                                                    next(
+                                                                        (
+                                                                            p.split(
+                                                                                "="
+                                                                            )[1]
+                                                                            for p in eval_params
+                                                                            if p.startswith(
+                                                                                "max_iters="
+                                                                            )
+                                                                        ),
+                                                                        "0",
+                                                                    ),
+                                                                )
+                                                                update_config_yaml(
+                                                                    config_file,
+                                                                    "num_subdomains",
+                                                                    num_subd,
+                                                                )
 
-                                                                                # Update config values
-                                                                                update_config_yaml(
-                                                                                    config_file,
-                                                                                    "optimizer",
-                                                                                    optimizer,
-                                                                                )
-                                                                                update_config_yaml(
-                                                                                    config_file,
-                                                                                    "batch_size",
-                                                                                    actual_bs,
-                                                                                )
-                                                                                update_config_yaml(
-                                                                                    config_file,
-                                                                                    "effective_batch_size",
-                                                                                    eff_bs,
-                                                                                )
-                                                                                update_config_yaml(
-                                                                                    config_file,
-                                                                                    "dataset_name",
-                                                                                    dataset,
-                                                                                )
-                                                                                update_config_yaml(
-                                                                                    config_file,
-                                                                                    "model_name",
-                                                                                    model,
-                                                                                )
-                                                                                update_config_yaml(
-                                                                                    config_file,
-                                                                                    "criterion",
-                                                                                    next(
-                                                                                        (
-                                                                                            p.split(
-                                                                                                "="
-                                                                                            )[
-                                                                                                1
-                                                                                            ]
-                                                                                            for p in eval_params
-                                                                                            if p.startswith(
-                                                                                                "criterion="
-                                                                                            )
-                                                                                        ),
-                                                                                        "cross_entropy",
-                                                                                    ),
-                                                                                )
-                                                                                update_config_yaml(
-                                                                                    config_file,
-                                                                                    "epochs",
-                                                                                    epoch_count,
-                                                                                )
-                                                                                update_config_yaml(
-                                                                                    config_file,
-                                                                                    "max_iters",
-                                                                                    next(
-                                                                                        (
-                                                                                            p.split(
-                                                                                                "="
-                                                                                            )[
-                                                                                                1
-                                                                                            ]
-                                                                                            for p in eval_params
-                                                                                            if p.startswith(
-                                                                                                "max_iters="
-                                                                                            )
-                                                                                        ),
-                                                                                        "0",
-                                                                                    ),
-                                                                                )
-                                                                                update_config_yaml(
-                                                                                    config_file,
-                                                                                    "num_subdomains",
-                                                                                    num_subd,
-                                                                                )
+                                                                if (
+                                                                    optimizer
+                                                                    == "lssr1_tr"
+                                                                    or (
+                                                                        optimizer.startswith(
+                                                                            "apts_"
+                                                                        )
+                                                                        and (
+                                                                            apts_details[
+                                                                                "glob_opt"
+                                                                            ]
+                                                                            == "lssr1_tr"
+                                                                            or apts_details[
+                                                                                "loc_opt"
+                                                                            ]
+                                                                            == "lssr1_tr"
+                                                                        )
+                                                                    )
+                                                                ):
+                                                                    update_config_yaml(
+                                                                        config_file,
+                                                                        "paper_tr_update",
+                                                                        str(
+                                                                            paper_tr_update
+                                                                        ).lower(),
+                                                                    )
 
-                                                                                if (
-                                                                                    optimizer
-                                                                                    == "lssr1_tr"
-                                                                                    or (
-                                                                                        optimizer.startswith(
-                                                                                            "apts_"
-                                                                                        )
-                                                                                        and (
-                                                                                            apts_details[
-                                                                                                "glob_opt"
-                                                                                            ]
-                                                                                            == "lssr1_tr"
-                                                                                            or apts_details[
-                                                                                                "loc_opt"
-                                                                                            ]
-                                                                                            == "lssr1_tr"
-                                                                                        )
-                                                                                    )
-                                                                                ):
-                                                                                    update_config_yaml(
-                                                                                        config_file,
-                                                                                        "paper_tr_update",
-                                                                                        str(
-                                                                                            paper_tr_update
-                                                                                        ).lower(),
-                                                                                    )
+                                                                for kv in (
+                                                                    current_apts_params
+                                                                ):
+                                                                    if "=" in kv:
+                                                                        (
+                                                                            key,
+                                                                            val,
+                                                                        ) = kv.split(
+                                                                            "=",
+                                                                            1,
+                                                                        )
+                                                                        update_config_yaml(
+                                                                            config_file,
+                                                                            key,
+                                                                            val,
+                                                                        )
 
-                                                                                for (
-                                                                                    kv
-                                                                                ) in current_apts_params:
-                                                                                    if (
-                                                                                        "="
-                                                                                        in kv
-                                                                                    ):
-                                                                                        (
-                                                                                            key,
-                                                                                            val,
-                                                                                        ) = kv.split(
-                                                                                            "=",
-                                                                                            1,
-                                                                                        )
-                                                                                        update_config_yaml(
-                                                                                            config_file,
-                                                                                            key,
-                                                                                            val,
-                                                                                        )
+                                                                update_config_yaml(
+                                                                    config_file,
+                                                                    "glob_dogleg",
+                                                                    str(gdg).lower(),
+                                                                )
+                                                                if optimizer.startswith(
+                                                                    "apts_"
+                                                                ):
+                                                                    update_config_yaml(
+                                                                        config_file,
+                                                                        "loc_dogleg",
+                                                                        str(
+                                                                            ldg
+                                                                        ).lower(),
+                                                                    )
 
-                                                                                update_config_yaml(
-                                                                                    config_file,
-                                                                                    "glob_dogleg",
-                                                                                    str(
-                                                                                        gdg
-                                                                                    ).lower(),
-                                                                                )
-                                                                                if optimizer.startswith(
-                                                                                    "apts_"
-                                                                                ):
-                                                                                    update_config_yaml(
-                                                                                        config_file,
-                                                                                        "loc_dogleg",
-                                                                                        str(
-                                                                                            ldg
-                                                                                        ).lower(),
-                                                                                    )
+                                                                if use_pmw:
+                                                                    update_config_yaml(
+                                                                        config_file,
+                                                                        "num_stages",
+                                                                        num_stages,
+                                                                    )
+                                                                    update_config_yaml(
+                                                                        config_file,
+                                                                        "num_replicas_per_subdomain",
+                                                                        num_rep,
+                                                                    )
 
-                                                                                if use_pmw:
-                                                                                    update_config_yaml(
-                                                                                        config_file,
-                                                                                        "num_stages",
-                                                                                        num_stages,
-                                                                                    )
-                                                                                    update_config_yaml(
-                                                                                        config_file,
-                                                                                        "num_replicas_per_subdomain",
-                                                                                        num_rep,
-                                                                                    )
+                                                                if config.get(
+                                                                    "GRAD_ACC",
+                                                                    False,
+                                                                ):
+                                                                    update_config_yaml(
+                                                                        config_file,
+                                                                        "gradient_accumulation",
+                                                                        "true",
+                                                                    )
+                                                                    update_config_yaml(
+                                                                        config_file,
+                                                                        "accumulation_steps",
+                                                                        config.get(
+                                                                            "ACCUM_STEPS",
+                                                                            1,
+                                                                        ),
+                                                                    )
 
-                                                                                if config.get(
-                                                                                    "GRAD_ACC",
-                                                                                    False,
-                                                                                ):
-                                                                                    update_config_yaml(
-                                                                                        config_file,
-                                                                                        "gradient_accumulation",
-                                                                                        "true",
-                                                                                    )
-                                                                                    update_config_yaml(
-                                                                                        config_file,
-                                                                                        "accumulation_steps",
-                                                                                        config.get(
-                                                                                            "ACCUM_STEPS",
-                                                                                            1,
-                                                                                        ),
-                                                                                    )
+                                                                if lr is not None:
+                                                                    update_config_yaml(
+                                                                        config_file,
+                                                                        "learning_rate",
+                                                                        lr,
+                                                                    )
 
-                                                                                if (
-                                                                                    lr
-                                                                                    is not None
-                                                                                ):
-                                                                                    update_config_yaml(
-                                                                                        config_file,
-                                                                                        "learning_rate",
-                                                                                        lr,
-                                                                                    )
+                                                                # Update max_loc_iters if present
+                                                                max_loc_iters = (
+                                                                    config.get(
+                                                                        "MAX_LOC_ITERS"
+                                                                    )
+                                                                )
+                                                                if (
+                                                                    max_loc_iters
+                                                                    is not None
+                                                                ):
+                                                                    update_config_yaml(
+                                                                        config_file,
+                                                                        "max_loc_iters",
+                                                                        max_loc_iters,
+                                                                    )
 
-                                                                                # Update max_loc_iters if present
-                                                                                max_loc_iters = config.get("MAX_LOC_ITERS")
-                                                                                if max_loc_iters is not None:
-                                                                                    update_config_yaml(
-                                                                                        config_file,
-                                                                                        "max_loc_iters",
-                                                                                        max_loc_iters,
-                                                                                    )
+                                                                # Update width for ffnn models
+                                                                if (
+                                                                    "ffnn" in model
+                                                                    and width
+                                                                    is not None
+                                                                ):
+                                                                    update_config_yaml(
+                                                                        config_file,
+                                                                        "width",
+                                                                        width,
+                                                                    )
 
-                                                                                # Update width for ffnn models
-                                                                                if "ffnn" in model and width is not None:
-                                                                                    update_config_yaml(
-                                                                                        config_file,
-                                                                                        "width",
-                                                                                        width,
-                                                                                    )
+                                                                # Update num_layers for ffnn models
+                                                                if (
+                                                                    "ffnn" in model
+                                                                    and num_layers
+                                                                    is not None
+                                                                ):
+                                                                    update_config_yaml(
+                                                                        config_file,
+                                                                        "num_layers",
+                                                                        num_layers,
+                                                                    )
 
-                                                                                # Update num_layers for ffnn models
-                                                                                if "ffnn" in model and num_layers is not None:
-                                                                                    update_config_yaml(
-                                                                                        config_file,
-                                                                                        "num_layers",
-                                                                                        num_layers,
-                                                                                    )
-
-                                                                                # Run experiment directly
-                                                                                if run_experiment(
-                                                                                    config_file,
-                                                                                    job_name,
-                                                                                    dry_run,
-                                                                                ):
-                                                                                    submitted += (
-                                                                                        1
-                                                                                    )
+                                                                # Run experiment directly
+                                                                if run_experiment(
+                                                                    config_file,
+                                                                    job_name,
+                                                                    dry_run,
+                                                                ):
+                                                                    submitted += 1
 
     return submitted, skipped
 

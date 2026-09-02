@@ -14,11 +14,9 @@ Usage:
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 import yaml
 
@@ -49,7 +47,7 @@ def create_config(
         raise FileNotFoundError(f"Base config not found: {base_config}")
 
     # Load base config
-    with open(base_config, "r") as f:
+    with open(base_config) as f:
         config = yaml.safe_load(f)
 
     # Add GPT-specific parameters if they don't exist
@@ -124,9 +122,9 @@ def create_config(
 
     # Set num_replicas_per_subdomain if provided (applies to all optimizers)
     if num_replicas_per_subdomain is not None:
-        config["parameters"]["num_replicas_per_subdomain"][
-            "value"
-        ] = num_replicas_per_subdomain
+        config["parameters"]["num_replicas_per_subdomain"]["value"] = (
+            num_replicas_per_subdomain
+        )
 
     # Create output config file
     config_name = f"config_hyperparam_gpt_{optimizer}_embd{n_embd}_head{n_head}_layer{n_layer}_trial{trial}.yaml"
@@ -160,7 +158,7 @@ def check_experiment_completed(config_path: Path) -> bool:
 
 def run_experiment(
     config_path: Path, test_dir: Path, skip_existing: bool = False
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Run a single experiment with the given config."""
     job_name = config_path.stem
 
@@ -361,10 +359,10 @@ def main():
     print("=" * 80)
     print("HYPERPARAMETERIZATION TEST: SGD vs APTS_D for GPT Models")
     print("=" * 80)
-    print(f"\nTest configuration:")
+    print("\nTest configuration:")
     print(f"  Optimizers: {args.optimizers}")
-    print(f"  Dataset: tinyshakespeare")
-    print(f"  Criterion: cross_entropy_transformers")
+    print("  Dataset: tinyshakespeare")
+    print("  Criterion: cross_entropy_transformers")
     print(f"  Embedding dimensions: {args.n_embds}")
     print(f"  Number of layers: {args.n_layers}")
     print(f"  Max iterations: {args.max_iters}")

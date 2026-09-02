@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class AllenCahnTimePINNLoss(nn.Module):
-    """Loss for the time-dependent Allen-Cahn PINN.
+    r"""Loss for the time-dependent Allen-Cahn PINN.
 
     This implements the residual for ``u_t - u_xx + u^3 - u = 0`` on
     ``x \in [low_x, high_x]`` and ``t \in [low_t, high_t]`` with boundary
@@ -30,7 +30,9 @@ class AllenCahnTimePINNLoss(nn.Module):
 
     def forward(self, u_pred, boundary_flag):
         if self.current_xt is None:
-            raise ValueError("current_xt must be set before calling AllenCahnTimePINNLoss")
+            raise ValueError(
+                "current_xt must be set before calling AllenCahnTimePINNLoss"
+            )
         xt = self.current_xt
         if not xt.requires_grad:
             xt.requires_grad_(True)

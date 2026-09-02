@@ -13,36 +13,40 @@ from dd4ml.utility.utils import detect_environment, prepare_distributed_environm
 print(f"Cuda available: {torch.cuda.is_available()}")
 print(f"Torch version: {torch.__version__}")
 
+
 class SimpleCNN(nn.Module):
     def __init__(self):
-        super(SimpleCNN, self).__init__()
+        super().__init__()
         self.features = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(2),
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(2)
+            nn.MaxPool2d(2),
         )
         self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(64 * 8 * 8, 256),
-            nn.ReLU(),
-            nn.Linear(256, 10)
+            nn.Flatten(), nn.Linear(64 * 8 * 8, 256), nn.ReLU(), nn.Linear(256, 10)
         )
 
     def forward(self, x):
         x = self.features(x)
         return self.classifier(x)
 
+
 def main(rank, master_addr, master_port, world_size, args=None):
     # Initialize the distributed environment
-    prepare_distributed_environment(rank, master_addr, master_port, world_size,
-                                    is_cuda_enabled=torch.cuda.is_available())
-    
+    prepare_distributed_environment(
+        rank,
+        master_addr,
+        master_port,
+        world_size,
+        is_cuda_enabled=torch.cuda.is_available(),
+    )
+
     rank = dist.get_rank()
     world_size = dist.get_world_size()
-    local_rank = int(os.environ['LOCAL_RANK'])
+    local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
 
     print(f"Number of GPUs available: {torch.cuda.device_count()}")
@@ -51,13 +55,15 @@ def main(rank, master_addr, master_port, world_size, args=None):
     model = SimpleCNN().cuda(local_rank)
     ddp_model = DDP(model, device_ids=[local_rank])
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    ])
-    dataset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                           download=True, transform=transform)
-    sampler = torch.utils.data.distributed.DistributedSampler(dataset, num_replicas=world_size, rank=rank)
+    transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+    )
+    dataset = torchvision.datasets.CIFAR10(
+        root="./data", train=True, download=True, transform=transform
+    )
+    sampler = torch.utils.data.distributed.DistributedSampler(
+        dataset, num_replicas=world_size, rank=rank
+    )
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=250, sampler=sampler)
 
     criterion = nn.CrossEntropyLoss().cuda(local_rank)
@@ -87,15 +93,21 @@ def main(rank, master_addr, master_port, world_size, args=None):
         average_loss = epoch_loss_tensor.item() / num_batches_tensor.item()
 
         if rank == 0:
-            print(f"Epoch {epoch+1}, Average Loss: {average_loss:.4f}")
+            print(f"Epoch {epoch + 1}, Average Loss: {average_loss:.4f}")
 
     dist.destroy_process_group()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     environment = detect_environment()
     rank = None
-    master_addr = None 
+    master_addr = None
     master_port = None
     world_size = None
     print("Code being executed on a cluster...")
-    main(rank=rank, master_addr=master_addr, master_port=master_port, world_size=world_size)
+    main(
+        rank=rank,
+        master_addr=master_addr,
+        master_port=master_port,
+        world_size=world_size,
+    )

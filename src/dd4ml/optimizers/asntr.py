@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Callable, Iterable, List
+from collections.abc import Callable, Iterable
+from functools import reduce
 
 import torch
 from torch import Tensor, nn
@@ -71,9 +72,20 @@ class ASNTR(Optimizer):
         if self.dogleg and not self.second_order:
             raise ValueError("Dogleg is only applicable in second-order mode")
 
+        # Working dtype for every buffer this optimizer owns. Taken from the
+        # parameters, promoted to the widest present, so a float64 model is not
+        # silently truncated. See the flat-buffer allocation below.
+        self._param_dtype = reduce(
+            torch.promote_types, (p.dtype for p in self.param_groups[0]["params"])
+        )
+
         # SR1 memory and OBS solver
         self.hess = LSR1(
-            gamma=gamma, memory_length=mem_length, device=self.device, tol=self.tol
+            gamma=gamma,
+            memory_length=mem_length,
+            device=self.device,
+            dtype=self._param_dtype,
+            tol=self.tol,
         )
         self.obs = OBS()
 
@@ -92,9 +104,10 @@ class ASNTR(Optimizer):
         self.k = 0
 
         # precompute shapes and offsets for flatten/unflatten
-        shapes: List[torch.Size] = []
+        params = self.param_groups[0]["params"]
+        shapes: list[torch.Size] = []
         offsets = [0]
-        for p in self.param_groups[0]["params"]:
+        for p in params:
             n = p.numel()
             shapes.append(p.shape)
             offsets.append(offsets[-1] + n)
@@ -108,7 +121,11 @@ class ASNTR(Optimizer):
             st["flat_wk"] = flat_params.clone()
             st["flat_gk"] = flat_params.clone()
         else:
-            buf = torch.zeros(total_size, device=self.device)
+            # Take the dtype from the parameters rather than the global default.
+            # Every step stages parameters and gradients through these buffers,
+            # so allocating float32 here silently truncated a float64 model on
+            # each flatten/unflatten round trip.
+            buf = torch.zeros(total_size, device=self.device, dtype=self._param_dtype)
             st["flat_wk"] = buf
             st["flat_gk"] = buf.clone()
 
@@ -174,7 +191,7 @@ class ASNTR(Optimizer):
         # evaluate objective and gradient
         fN_old = _["loss"] if "loss" in _ else closure_main(compute_grad=True)
         g = _["grad"] if "grad" in _ else self._flat_grads_fn()
-        
+
         fD_old = closure_d(compute_grad=True)
         g_bar = self._flat_grads_fn()
 
@@ -200,8 +217,8 @@ class ASNTR(Optimizer):
             # pred_red = -g*p
             step, pred_red = solve_tr_first_order(g, gn, self.delta, self.tol)
 
-        # Since pred_red is the classical predicted TR reduction, here we multiply it by -1
-        # to abide by Q_k(p) specified in Equation (10) in the paper
+        # solve_tr_* returns the classical (positive) predicted reduction. Negate it
+        # to obtain Q_k(p_k) as defined in Eq. (4) of the paper, which is negative.
         pred_red *= -1
 
         # trial update
@@ -218,19 +235,30 @@ class ASNTR(Optimizer):
         #     f"abs(hNk): {hNk:.4f}, tol: {self.tol:.4f}, t{self.k} = {tk:.4f}, ttilde_{self.k} = {ttilde_k:.4f}"
         # )
 
+        # Non-monotone reference value for the N-sample, Eq. (7):
+        #   r_{N_k} = f_{N_k}(w_k) + t_k * delta_k
+        # and the agreement ratio, Eq. (6):
+        #   rho_{N_k} = (f_{N_k}(w_t) - r_{N_k}) / Q_k(p_k)
+        # Q_k(p_k) < 0 by the Cauchy-decrease condition Eq. (5), so a trial point
+        # that improves on the reference value gives rho_N > 0.
         if abs(float(pred_red)) < self.tol:
             rho_N = float("inf")
         else:
-            r_Nk = fN_new + tk * self.delta 
-            rho_N = (fN_old - rNk) / pred_red
+            r_Nk = fN_old + tk * self.delta
+            rho_N = (fN_new - r_Nk) / pred_red
 
-        if abs(float(pred_red_d)) < self.tol:
+        # Additional-sampling agreement ratio, Eq. (9):
+        #   rho_{D_k} = (f_{D_k}(w_t) - r_{D_k}) / L_k(-g_bar_k)
+        # with the linear model L_k(v) = v^T g_bar_k, so the denominator is
+        # L_k(-g_bar_k) = -||g_bar_k||^2 <= 0, and Eq. (10):
+        #   r_{D_k} = f_{D_k}(w_k) + delta_k * ttilde_k
+        lin_red_d = -g_bar.dot(g_bar)
+        if abs(float(lin_red_d)) < self.tol:
             rho_D = float("inf")
         else:
-            r_Dk = fDnew + self.delta * ttilde_k 
-            rho_D = (fD_old - r_DK) / (-g_bar.dot(g_bar))
+            r_Dk = fD_old + self.delta * ttilde_k
+            rho_D = (fD_new - r_Dk) / lin_red_d
 
-        # print(f"pred_red = {pred_red:.4f}, pred_red_d = {pred_red_d:.4f}")
         # print(f"rho_N = {rho_N:.4f}, rho_D = {rho_D:.4f}")
 
         if abs(hNk) > self.tol:
@@ -268,7 +296,7 @@ class ASNTR(Optimizer):
 
         # adjust delta
         if rho_N < self.eta_1:
-            self.delta = max(self.min_delta, self.delta*self.tau_1)
+            self.delta = max(self.min_delta, self.delta * self.tau_1)
         elif (
             rho_N > self.eta_2
             and torch.norm(step, p=self.norm_type) > self.tau_2 * self.delta

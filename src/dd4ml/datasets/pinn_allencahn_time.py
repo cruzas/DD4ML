@@ -1,7 +1,5 @@
 import torch
 
-from dd4ml.utility import CfgNode
-
 from .base_dataset import BaseDataset
 
 

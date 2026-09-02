@@ -27,7 +27,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
         self.consec_layers = model_handler.get_list_of_consecutive_layers()
         self.connector_symbol = "|~|~|"
         if self.DEBUG:
-            print(f'(INIT) rank={self.rank} Layer order: {self.stage_data["layers"]}')
+            print(f"(INIT) rank={self.rank} Layer order: {self.stage_data['layers']}")
         if any(self.connector_symbol in name for name in self.stage_data["layers"]):
             raise ValueError(
                 f"Layer names cannot contain the connector symbol {self.connector_symbol}."
@@ -63,7 +63,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
             layer_name: layer.state_dict()
             for layer_name, layer in zip(self.stage_data["layers"], self.sharded_layers)
         }
-        for key in temp.keys():
+        for key in temp:
             for subkey in temp[key].keys():
                 subkey2 = ".".join(subkey.split(".")[1:])
                 ordered_dict[f"{key}.{subkey2}"] = temp[key][subkey]
@@ -169,8 +169,9 @@ class WeightParallelizedSubdomain(BasePMWModel):
                             src=src_rank, device=backend_dev
                         )
                         self.shapes[key] = (
-                            lambda z, temp_shape=copy.deepcopy(list(rcv_shape)[1:]): [z]
-                            + temp_shape
+                            lambda z, temp_shape=copy.deepcopy(list(rcv_shape)[1:]): (
+                                [z] + temp_shape
+                            )
                         )
                         if self.DEBUG:
                             print(
@@ -270,9 +271,9 @@ class WeightParallelizedSubdomain(BasePMWModel):
                 for name, inputs in self.inputs.items():
                     _, rcv_name = name.split(self.connector_symbol)
                     rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
-                    assert (
-                        len(rcv_ranks) == 1
-                    ), "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                    assert len(rcv_ranks) == 1, (
+                        "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                    )
                     if self.rank != rcv_ranks[0]:
                         reverse_name = self.connector_symbol.join(
                             reversed(name.split(self.connector_symbol))
@@ -287,9 +288,9 @@ class WeightParallelizedSubdomain(BasePMWModel):
                 for name, outputs in self.outputs.items():
                     _, rcv_name = name.split(self.connector_symbol)
                     rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
-                    assert (
-                        len(rcv_ranks) == 1
-                    ), "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                    assert len(rcv_ranks) == 1, (
+                        "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                    )
                     if self.rank != rcv_ranks[0] and outputs[chunk].requires_grad:
                         outputs[chunk].backward(
                             self.grad_outputs[name][chunk], retain_graph=True
@@ -309,9 +310,9 @@ class WeightParallelizedSubdomain(BasePMWModel):
                     ]
                     for dst_name in dst_names:
                         dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
-                        assert (
-                            len(dst_ranks) == 1
-                        ), "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                        assert len(dst_ranks) == 1, (
+                            "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                        )
                         if self.rank != dst_ranks[0] and any(
                             [element in current_layer for element in consecutive_block]
                         ):
@@ -361,9 +362,9 @@ class WeightParallelizedSubdomain(BasePMWModel):
                             [element in current_layer for element in consecutive_block]
                         ):
                             rcv_ranks = self.model_handler.layer_name_to_ranks(rcv_name)
-                            assert (
-                                len(rcv_ranks) == 1
-                            ), "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                            assert len(rcv_ranks) == 1, (
+                                "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                            )
                             if self.rank != rcv_ranks[0]:
                                 outputs = self.outputs[key]
                                 if self.setup_phase:
@@ -379,10 +380,9 @@ class WeightParallelizedSubdomain(BasePMWModel):
                                             f"(BWD rank={self.rank}) Layer {current_layer} received from rank {rcv_ranks[0]} shape {rcv_shape}"
                                         )
                                     self.backward_shapes[key] = (
-                                        lambda z, temp_shape=copy.deepcopy(
-                                            list(rcv_shape)[1:]
-                                        ): [z]
-                                        + temp_shape
+                                        lambda z, temp_shape=copy.deepcopy(list(rcv_shape)[1:]): (
+                                            [z] + temp_shape
+                                        )
                                     )
                                 grad_output = torch.empty(
                                     self.backward_shapes[key](
@@ -418,9 +418,9 @@ class WeightParallelizedSubdomain(BasePMWModel):
                     ]
                     for dst_name in dst_names:
                         dst_ranks = self.model_handler.layer_name_to_ranks(dst_name)
-                        assert (
-                            len(dst_ranks) == 1
-                        ), "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                        assert len(dst_ranks) == 1, (
+                            "Tensor sharding not implemented yet. Only one rank per layer is supported for now"
+                        )
                         if self.rank != dst_ranks[0] and any(
                             [element in current_layer for element in consecutive_block]
                         ):

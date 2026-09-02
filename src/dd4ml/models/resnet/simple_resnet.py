@@ -1,8 +1,6 @@
 import torch.nn as nn
-import torch.nn.functional as F
 
 from dd4ml.models.resnet.base_resnet import BaseResNet
-from torchvision.models import resnet18
 
 
 # Basic residual block.
@@ -10,7 +8,7 @@ class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(self, in_channels, out_channels, stride=1, downsample=None):
-        super(BasicBlock, self).__init__()
+        super().__init__()
         self.start = nn.Conv2d(
             in_channels,
             out_channels,
@@ -40,7 +38,7 @@ class BasicBlock(nn.Module):
 # Helper module that encapsulates a ResNet layer.
 class ResNetLayer(nn.Module):
     def __init__(self, in_channels, block, out_channels, blocks, stride):
-        super(ResNetLayer, self).__init__()
+        super().__init__()
         downsample = None
         if stride != 1 or in_channels != out_channels * block.expansion:
             downsample = nn.Sequential(
@@ -79,7 +77,7 @@ class SimpleResNet(BaseResNet):
         super().__init__(config)
         # For all others
         # self.backbone = resnet18(pretrained=False)
-        
+
         # For APTS_IP
         self.layers_config = layers  # store configuration for use in as_model_dict
         self.in_channels = 64
@@ -103,7 +101,7 @@ class SimpleResNet(BaseResNet):
     def forward(self, x):
         # For APTS_IP
         # return self.backbone(x)
-        
+
         # For all others
         x = self.relu(self.bn1(self.start(x)))
         x = self.maxpool(x)

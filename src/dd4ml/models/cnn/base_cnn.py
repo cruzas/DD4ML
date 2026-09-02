@@ -87,7 +87,7 @@ class ConvBlock(nn.Module):
     def __init__(
         self, in_channels, out_channels, kernel_size, pool_size, stride, padding
     ):
-        super(ConvBlock, self).__init__()
+        super().__init__()
         self.conv = nn.Conv2d(
             in_channels, out_channels, kernel_size, stride=stride, padding=padding
         )
@@ -105,7 +105,7 @@ class FullyConnectedBlock(nn.Module):
     """Fully connected block with Linear and ReLU layers"""
 
     def __init__(self, in_features, out_features):
-        super(FullyConnectedBlock, self).__init__()
+        super().__init__()
         self.fc = nn.Linear(in_features, out_features)
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.5)

@@ -2,7 +2,6 @@ from .base_cnn import *
 
 
 class MyCNN(BaseCNN):
-
     @staticmethod
     def get_default_config():
         C = BaseCNN.get_default_config()

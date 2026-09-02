@@ -3,7 +3,6 @@ import math
 import torch
 import torch.autograd as autograd
 import torch.nn as nn
-from torch import autograd
 
 from dd4ml.models.base_model import BaseModel
 from dd4ml.utility import is_function_module
@@ -46,9 +45,11 @@ class ShardedLayer(BasePMWModel):
                             self.layer = obj(**layer_dict["callable"]["settings"]).to(
                                 self.tensor_device
                             )
-                    except Exception as e:
-                        print("asd")
-                        raise e
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Failed to construct layer {obj!r} with settings "
+                            f"{layer_dict['callable']['settings']!r}"
+                        ) from exc
 
                     # Optional initialization
                     if isinstance(self.layer, nn.Linear):
@@ -91,7 +92,7 @@ class ShardedLayer(BasePMWModel):
         blacklist_weight_modules = (torch.nn.LayerNorm, torch.nn.Embedding)
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters():
-                fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
+                fpn = f"{mn}.{pn}" if mn else pn  # full param name
                 # random note: because named_modules and named_parameters are recursive
                 # we will see the same tensors p many many times. but doing it this way
                 # allows us to know which parent module any tensor p belongs to...
@@ -109,13 +110,12 @@ class ShardedLayer(BasePMWModel):
         param_dict = {pn: p for pn, p in self.named_parameters()}
         inter_params = decay & no_decay
         union_params = decay | no_decay
-        assert (
-            len(inter_params) == 0
-        ), "parameters %s made it into both decay/no_decay sets!" % (str(inter_params),)
-        assert (
-            len(param_dict.keys() - union_params) == 0
-        ), "parameters %s were not separated into either decay/no_decay set!" % (
-            str(param_dict.keys() - union_params),
+        assert len(inter_params) == 0, (
+            f"parameters {inter_params} made it into both decay/no_decay sets!"
+        )
+        assert len(param_dict.keys() - union_params) == 0, (
+            f"parameters {param_dict.keys() - union_params} were not separated "
+            "into either decay/no_decay set!"
         )
 
         # create the pytorch optimizer object

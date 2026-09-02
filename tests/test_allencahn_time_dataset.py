@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import torch
 from torch.utils.data import DataLoader
 
@@ -5,7 +7,6 @@ from dd4ml.datasets.pinn_allencahn_time import AllenCahn1DTimeDataset
 from dd4ml.models.ffnn.pinn_ffnn import PINNFFNN
 from dd4ml.trainer import Trainer
 from dd4ml.utility.pinn_allencahn_time_loss import AllenCahnTimePINNLoss
-from unittest.mock import patch
 
 
 def test_allencahn_time_dataloader_batching():

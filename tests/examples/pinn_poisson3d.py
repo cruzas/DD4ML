@@ -1,6 +1,5 @@
 from dd4ml.utility import generic_run
 
-
 if __name__ == "__main__":
     args = {
         "dataset_name": "poisson3d",
@@ -13,4 +12,3 @@ if __name__ == "__main__":
         "num_workers": 0,
     }
     generic_run(args=args, wandb_config=None)
-

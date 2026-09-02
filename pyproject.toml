@@ -1,11 +1,23 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "DD4ML"
+name = "dd4ml"
 version = "0.1.0"
-description = "A PyTorch-based project for domain decomposition methods for machine learning."
+description = "Domain decomposition methods for machine learning: additively preconditioned trust-region optimizers for distributed and multilevel training."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+keywords = [
+    "domain decomposition",
+    "trust region",
+    "distributed training",
+    "optimization",
+    "physics-informed neural networks",
+    "pytorch",
+]
 authors = [
     { name = "Samuel Adolfo Cruz Alegría", email = "cruzas@usi.ch" },
     { name = "Ken Trotti", email = "ken.trotti@usi.ch" },
@@ -13,11 +25,26 @@ authors = [
     { name = "Shega Likaj", email = "shega.likaj@usi.ch" },
     { name = "Bindi Capriqi", email = "bindi.capriqi@kaust.edu.sa" },
     { name = "Armando Maria Monforte", email = "armandomaria.monforte01@universitadipavia.it" },
-    { name = "Prof. Dr. Rolf Krause", email = "rolf.krause@kaust.edu.sa" },
+    { name = "Rolf Krause", email = "rolf.krause@kaust.edu.sa" },
 ]
-license = { file = "LICENSE" }
+maintainers = [
+    { name = "Samuel Adolfo Cruz Alegría", email = "cruzas@usi.ch" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Typing :: Typed",
+]
 dependencies = [
-    "torch>=2.5.1",  # Default CPU version
+    "torch>=2.5.1",
     "torchvision>=0.20.1",
     "torchaudio>=2.5.1",
     "matplotlib>=3.10.0",
@@ -25,10 +52,98 @@ dependencies = [
     "pandas>=1.5.3",
     "scipy>=1.10.1",
     "requests>=2.32.3",
+    "pyyaml>=6.0.1",
+    # TODO: wandb is imported at module scope in dd4ml.utility.wandb_utils, which
+    # is re-exported by dd4ml.utility. Until that import is made lazy it cannot
+    # move to the optional `tracking` extra below.
     "wandb>=0.19.6",
-    "pyyaml>=6.0.1"
 ]
+
+[project.optional-dependencies]
+tracking = ["wandb>=0.19.6"]
+test = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+dev = [
+    "dd4ml[test]",
+    "pre-commit>=3.7",
+    # Pinned exactly: ruff's formatter output changes between minor releases,
+    # so CI, pre-commit and local runs must all use the same version.
+    "ruff==0.16.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/cruzas/DD4ML"
+Repository = "https://github.com/cruzas/DD4ML"
+Issues = "https://github.com/cruzas/DD4ML/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["*"]
+include = ["dd4ml*"]
+
+[tool.setuptools.package-data]
+dd4ml = ["rawdata/*.txt"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+]
+markers = [
+    "slow: long-running tests, deselect with '-m \"not slow\"'",
+    "distributed: tests that require a real torch.distributed process group",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:torch.*",
+    "ignore::UserWarning:torch.*",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = [
+    "src/dd4ml/models/gpt/nanogpt",  # vendored from karpathy/minGPT
+    "src/dd4ml/rawdata",
+]
+
+[tool.ruff.lint]
+# This set is enforced at zero violations, so CI fails on any regression.
+# The backlog rules (B, C4, SIM, RUF) are deliberately NOT enabled yet: they
+# currently report ~220 findings that each need a judgement call on numerical
+# code. Enable them one family at a time as the backlog is burned down, rather
+# than parking them in a permanent ignore list.
+select = [
+    "E4",  # pycodestyle: imports
+    "E7",  # pycodestyle: statements (bare except, == True, ...)
+    "E9",  # pycodestyle: runtime/syntax errors
+    "F",   # pyflakes: undefined names, unused imports, redefinitions
+    "I",   # isort: import ordering
+    "UP",  # pyupgrade: modern syntax for the supported Python range
+]
+ignore = [
+    "E501",  # line length is the formatter's job
+    "E741",  # ambiguous names (l, I, O) are idiomatic in numerical code
+    "E402",  # deferred imports are used to keep torch.distributed init ordering
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Star imports remain in datasets/ and models/ and in dd4ml.utility's re-export
+# hub. Converting these to explicit imports is the same refactor already applied
+# to dd4ml/optimizers/; until it lands, F403/F405 stay scoped to the files that
+# still rely on the pattern instead of being ignored globally.
+"src/dd4ml/utility/__init__.py" = ["F401", "F403"]
+"src/dd4ml/datasets/*.py" = ["F403", "F405"]
+"src/dd4ml/models/**/*.py" = ["F403", "F405"]
+"**/__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dd4ml"]
+
+[tool.ruff.format]
+docstring-code-format = true

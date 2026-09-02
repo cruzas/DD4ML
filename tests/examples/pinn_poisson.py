@@ -1,6 +1,5 @@
 from dd4ml.utility import generic_run
 
-
 if __name__ == "__main__":
     args = {
         "dataset_name": "poisson1d",

@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main, development]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Never let a stray import try to reach Weights & Biases from CI.
+  WANDB_MODE: disabled
+
+jobs:
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Lint does not need torch, so install ruff alone and keep this job fast.
+      - name: Install ruff
+        run: pipx install "ruff==0.16.5"
+
+      - name: ruff check
+        run: ruff check --output-format=github .
+
+      - name: ruff format --check
+        run: ruff format --check --diff .
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # torch must come from the CPU index explicitly. Adding that index as an
+      # *extra* index is not enough: PyPI carries the same version numbers for
+      # the CUDA builds, and pip is free to pick those, which then blows past
+      # the runner's disk budget. Installing torch first means the editable
+      # install below sees the requirement as already satisfied.
+      - name: Install CPU-only PyTorch
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch torchvision torchaudio \
+            --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[test]"
+
+      - name: Show resolved environment
+        run: |
+          python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+          python -c "import dd4ml; print('dd4ml imported from', dd4ml.__file__)"
+
+      - name: Run tests
+        run: pytest --cov=dd4ml --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: warn
+
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+
+      # Guards the packaging fix: dd4ml must not ship the MNIST/CIFAR-10 blobs
+      # that currently sit under src/dd4ml/rawdata/.
+      - name: Check wheel size
+        run: |
+          set -euo pipefail
+          wheel=$(ls dist/*.whl)
+          size_kb=$(du -k "$wheel" | cut -f1)
+          echo "$wheel is ${size_kb} KB"
+          if [ "$size_kb" -gt 5120 ]; then
+            echo "::error::Wheel is ${size_kb} KB (>5 MB). Large data files are leaking into the distribution."
+            exit 1
+          fi

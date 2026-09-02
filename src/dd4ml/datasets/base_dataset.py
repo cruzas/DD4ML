@@ -7,7 +7,6 @@ from dd4ml.utility import *
 
 
 class BaseDataset(Dataset, ABC):
-
     @staticmethod
     def get_default_config():
         C = CfgNode()
@@ -63,6 +62,7 @@ class BaseDataset(Dataset, ABC):
         device = config.device
         if device == "auto":
             from ..utility.utils import get_default_device
+
             device = str(get_default_device())
 
         return x_batch.to(device)
@@ -83,6 +83,7 @@ class BaseDataset(Dataset, ABC):
         device = config.device
         if device == "auto":
             from ..utility.utils import get_default_device
+
             device = str(get_default_device())
 
         return y_batch.to(device)

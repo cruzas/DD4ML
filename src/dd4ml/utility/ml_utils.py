@@ -183,7 +183,6 @@ def closure(
         ):
             # Use specified precision for distributed operations
             # Ensure consistent precision throughout the reduction
-            original_dtype = loss.dtype
             loss = loss.to(precision_dtype)
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
             loss.div_(

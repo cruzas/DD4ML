@@ -4,7 +4,7 @@ from .base_dataset import BaseDataset
 
 
 class Poisson3DDataset(BaseDataset):
-    """Dataset for 3D Poisson equation ``-\Delta u = f`` on [0,1]^3 with zero boundary conditions."""
+    r"""Dataset for 3D Poisson equation ``-\Delta u = f`` on [0,1]^3 with zero boundary conditions."""
 
     @staticmethod
     def get_default_config():
@@ -32,8 +32,12 @@ class Poisson3DDataset(BaseDataset):
 
         xx, zz = torch.meshgrid(t, t, indexing="ij")
         xz = torch.stack([xx.reshape(-1), zz.reshape(-1)], dim=1)
-        front = torch.cat([xz[:, 0:1], torch.full((xz.size(0), 1), low), xz[:, 1:2]], dim=1)
-        back = torch.cat([xz[:, 0:1], torch.full((xz.size(0), 1), high), xz[:, 1:2]], dim=1)
+        front = torch.cat(
+            [xz[:, 0:1], torch.full((xz.size(0), 1), low), xz[:, 1:2]], dim=1
+        )
+        back = torch.cat(
+            [xz[:, 0:1], torch.full((xz.size(0), 1), high), xz[:, 1:2]], dim=1
+        )
 
         xx, yy = torch.meshgrid(t, t, indexing="ij")
         xy = torch.stack([xx.reshape(-1), yy.reshape(-1)], dim=1)
@@ -53,4 +57,3 @@ class Poisson3DDataset(BaseDataset):
         xyz = self.data[idx]
         is_boundary = 1.0 if idx >= len(self.x_interior) else 0.0
         return xyz, torch.tensor([is_boundary], dtype=torch.float32)
-

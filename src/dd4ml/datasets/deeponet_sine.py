@@ -1,6 +1,9 @@
 import math
+
 import torch
+
 from .base_dataset import BaseDataset
+
 
 class SineOperatorDataset(BaseDataset):
     """Synthetic dataset for training DeepONet on functions a -> sin(a * x)."""

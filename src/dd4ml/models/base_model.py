@@ -1,4 +1,3 @@
-import math
 from abc import ABC
 from collections import deque
 
@@ -90,7 +89,6 @@ class BaseModel(nn.Module, ABC):
                 self.model_dict[node]["stage"] = stage_idx
 
         return self.model_dict
-
 
     # @abstractmethod
     # def as_model_dict(self):
