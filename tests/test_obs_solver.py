@@ -214,3 +214,24 @@ def test_zero_psi_falls_back_to_a_scaled_identity_model():
     p = OBS().solve_tr_subproblem(g, delta, gamma, Psi, Minv)
     assert float(p.norm()) == pytest.approx(float(delta), rel=1e-12)
     assert torch.allclose(p / p.norm(), -g / g.norm(), atol=1e-12)
+
+
+def test_newton_returns_a_tensor_when_it_exits_immediately():
+    """Newton must cope with the initial point already solving phi_bar = 0.
+
+    x0 is passed as a plain 0 from two call sites, and when the loop body never
+    executes that int used to fall straight through to torch.isnan, raising
+    TypeError. Reachable only once phiBar_fg stopped returning its sentinel on
+    almost every call.
+    """
+    obs = OBS()
+    # Choose a_j and Lambda so that ||p(0)|| == delta exactly, which makes
+    # phi_bar(0) == 0 and satisfies the stopping test on the first evaluation.
+    Lambda = torch.tensor([1.0, 2.0], dtype=DTYPE)
+    a_j = torch.tensor([3.0, 8.0], dtype=DTYPE)
+    delta = torch.norm(a_j / Lambda)
+
+    x = obs.Newton(0, Lambda, a_j, delta)
+
+    assert isinstance(x, torch.Tensor)
+    assert torch.isfinite(x)

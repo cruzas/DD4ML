@@ -314,7 +314,13 @@ class OBS:
     def Newton(self, x0, Lambda, a_j, delta):
         maxIter = 200
 
-        x = x0
+        # x0 arrives as a plain 0 from two of the three call sites. Coerce it,
+        # because when the initial point already satisfies |phi_bar| <= tol the
+        # loop below never runs and x is returned as-is -- and the isnan/isinf
+        # check at the end then raises TypeError on an int. That was previously
+        # unreachable only because phiBar_fg returned its -1/delta sentinel
+        # almost every time; fixing that guard made an immediate exit possible.
+        x = torch.as_tensor(x0, dtype=a_j.dtype, device=a_j.device)
         k = 0
 
         f, g = self.phiBar_fg(x, Lambda, a_j, delta)
