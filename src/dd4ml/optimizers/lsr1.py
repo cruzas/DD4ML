@@ -139,6 +139,12 @@ class LSR1:
         # Initialize workspace matrices on first use
         if self._S_matrix is None:
             n = s.shape[0]
+            # Psi = Y - gamma*S has at most n independent columns, so a memory
+            # longer than the problem dimension cannot hold more curvature
+            # information -- it only guarantees a rank-deficient Psi. OBS copes
+            # with that now, but there is no reason to pay for the extra
+            # columns.
+            self.memory_length = min(self.memory_length, n)
             self._S_matrix = torch.zeros(
                 n, self.memory_length, device=self.device, dtype=self.dtype
             )

@@ -215,45 +215,31 @@ def test_tradam_solves_rosenbrock_given_enough_iterations():
 # --------------------------------------------------------------------------- #
 
 
-# The second-order path is broken for every optimizer that uses it. The root
-# cause is in the LSR1/OBS pair: OBS.solve_tr_subproblem takes a Cholesky factor
-# of Psi^T Psi, but LSR1 never rejects curvature pairs whose psi is linearly
-# dependent on the existing basis -- that check is commented out in lsr1.py, as
-# is the Tikhonov regularisation in obs.py. Once the iterates stop varying much,
-# successive pairs become near-parallel and Psi loses rank. This is
-# dimension-independent: it reproduces at n = 50 with a memory of 10 just as it
-# does at n = 2, and disappears only when the memory holds a single pair (pinned
-# by test_second_order_works_with_a_single_memory_pair below).
+# Second-order mode used to fail for every optimizer that used it, and it is
+# the default for LSSR1_TR and ASNTR. Two causes, both now fixed:
 #
-# The *symptom* is platform-dependent, so these markers deliberately do not pin
-# an exception type. The same case surfaces as any of:
-#   * torch.linalg.LinAlgError  -- the Cholesky rejects the rank-deficient input;
-#   * ValueError                -- OBS.Newton returns a non-finite root, which
-#                                  propagates into the next gradient;
-#   * plain divergence          -- no exception at all, the objective runs away
-#                                  (asntr on Rosenbrock reached ~1.9e10 on
-#                                  Linux/x86 while raising LinAlgError on
-#                                  macOS/ARM).
-# Which one you get depends on the BLAS and the platform, so pinning `raises=`
-# made this suite pass locally and fail in CI. What is stable is that the path
-# does not work, and that is what these markers assert.
-_SECOND_ORDER_BROKEN = (
-    "Second-order path is broken; see the comment above this marker. "
-    "Remove the xfail once LSR1/OBS is repaired."
-)
-
-SECOND_ORDER_BROKEN = pytest.mark.xfail(strict=True, reason=_SECOND_ORDER_BROKEN)
+#   * OBS took a Cholesky factor of Psi^T Psi. Psi loses column rank whenever
+#     the memory outgrows the problem dimension or the iterates stop varying,
+#     and Psi^T Psi squares the condition number, so the factorisation failed
+#     long before Psi was numerically singular. It now uses a rank-revealing
+#     eigendecomposition (see dd4ml/solvers/obs.py).
+#   * ComputeSBySMW dropped the 1/tau factor on the Woodbury update term, so
+#     every step it produced was wrong -- verified against an exact dense
+#     trust-region solve in tests/test_obs_solver.py.
+#
+# The second bug was hidden behind the first: fixing only the factorisation
+# made the optimizers diverge instead of crash.
 
 
 @pytest.mark.parametrize(
     ("name", "problem"),
     [
-        pytest.param("tr", "quadratic", marks=SECOND_ORDER_BROKEN),
-        pytest.param("lssr1_tr", "quadratic", marks=SECOND_ORDER_BROKEN),
-        pytest.param("asntr", "quadratic", marks=SECOND_ORDER_BROKEN),
-        pytest.param("tr", "rosenbrock", marks=SECOND_ORDER_BROKEN),
-        pytest.param("lssr1_tr", "rosenbrock", marks=SECOND_ORDER_BROKEN),
-        pytest.param("asntr", "rosenbrock", marks=SECOND_ORDER_BROKEN),
+        ("tr", "quadratic"),
+        ("lssr1_tr", "quadratic"),
+        ("asntr", "quadratic"),
+        ("tr", "rosenbrock"),
+        ("lssr1_tr", "rosenbrock"),
+        ("asntr", "rosenbrock"),
     ],
 )
 def test_second_order_paths(name, problem):
@@ -262,6 +248,37 @@ def test_second_order_paths(name, problem):
 
     assert torch.isfinite(w).all(), f"{name} produced a non-finite iterate: {w}"
     assert final < initial, f"{name} on {problem} (second order): {initial} -> {final}"
+
+
+@pytest.mark.parametrize("name", ["tr", "asntr"])
+def test_second_order_beats_first_order_on_the_quadratic(name):
+    """Curvature information should pay for itself on a quadratic.
+
+    TR and ASNTR both land on the exact minimiser here. LSSR1_TR is excluded:
+    it improves on its own first-order mode but still stalls, for reasons in
+    its Wolfe/zoom line search rather than in LSR1 or OBS.
+    """
+    _, first_order, _ = _run(name, "quadratic", iters=500)
+    _, second_order, w = _run(name, "quadratic", iters=500, second_order=True)
+
+    assert second_order <= first_order, (
+        f"{name}: second order ({second_order}) is worse than first ({first_order})"
+    )
+    assert second_order < 1e-12, f"{name} did not converge: f = {second_order}"
+    expected = torch.tensor(QUADRATIC_MIN, dtype=w.dtype)
+    assert torch.allclose(w, expected, atol=1e-6), f"{name} converged to {w}"
+
+
+def test_asntr_second_order_solves_rosenbrock():
+    """ASNTR reaches the Rosenbrock minimiser exactly with curvature enabled.
+
+    Its first-order mode only gets f down to ~0.2 in the same budget.
+    """
+    _, final, w = _run("asntr", "rosenbrock", iters=500, second_order=True)
+
+    assert final < 1e-12, f"expected convergence, got f = {final}"
+    expected = torch.tensor(ROSENBROCK_MIN, dtype=w.dtype)
+    assert torch.allclose(w, expected, atol=1e-6), f"converged to {w}"
 
 
 @pytest.mark.parametrize("name", ["tr", "lssr1_tr", "asntr"])
