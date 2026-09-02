@@ -171,27 +171,19 @@ def test_optimizer_runs_and_reduces_objective(name, problem):
         ("tr", 1e-6),
         ("tradam", 1e-6),
         ("asntr", 1e-6),
-        # LSSR1_TR is an L-SR1 method: with second_order disabled it has no
-        # curvature model to work with and plateaus around f ~ 0.9 instead of
-        # converging. Its intended second-order path is covered (as an expected
-        # failure) below. Only progress is asserted here.
-        pytest.param("lssr1_tr", None, id="lssr1_tr-progress-only"),
+        ("lssr1_tr", 1e-6),
     ],
 )
 def test_converges_on_quadratic(name, tol):
     """The SPD quadratic has a unique minimiser at (1, 2)."""
-    initial, final, w = _run(name, "quadratic", iters=500)
-
-    if tol is None:
-        assert final < initial / 2.0, f"{name} made too little progress"
-        return
+    _, final, w = _run(name, "quadratic", iters=500)
 
     assert final < tol, f"{name} did not reach the minimum: f = {final}"
     expected = torch.tensor(QUADRATIC_MIN, dtype=w.dtype)
     assert torch.allclose(w, expected, atol=1e-3), f"{name} converged to {w}"
 
 
-@pytest.mark.parametrize("name", ["tr", "tradam", "asntr"])
+@pytest.mark.parametrize("name", ["tr", "tradam", "asntr", "lssr1_tr"])
 def test_makes_substantial_progress_on_rosenbrock(name):
     """Rosenbrock is hard; require a large reduction rather than convergence."""
     initial, final, w = _run(name, "rosenbrock", iters=500)
@@ -211,7 +203,7 @@ def test_tradam_solves_rosenbrock_given_enough_iterations():
 
 
 # --------------------------------------------------------------------------- #
-# Second-order paths: currently broken, pinned as strict xfails.
+# Second-order paths.
 # --------------------------------------------------------------------------- #
 
 
@@ -250,13 +242,11 @@ def test_second_order_paths(name, problem):
     assert final < initial, f"{name} on {problem} (second order): {initial} -> {final}"
 
 
-@pytest.mark.parametrize("name", ["tr", "asntr"])
+@pytest.mark.parametrize("name", ["tr", "asntr", "lssr1_tr"])
 def test_second_order_beats_first_order_on_the_quadratic(name):
     """Curvature information should pay for itself on a quadratic.
 
-    TR and ASNTR both land on the exact minimiser here. LSSR1_TR is excluded:
-    it improves on its own first-order mode but still stalls, for reasons in
-    its Wolfe/zoom line search rather than in LSR1 or OBS.
+    All three land on the exact minimiser here.
     """
     _, first_order, _ = _run(name, "quadratic", iters=500)
     _, second_order, w = _run(name, "quadratic", iters=500, second_order=True)
@@ -269,12 +259,15 @@ def test_second_order_beats_first_order_on_the_quadratic(name):
     assert torch.allclose(w, expected, atol=1e-6), f"{name} converged to {w}"
 
 
-def test_asntr_second_order_solves_rosenbrock():
-    """ASNTR reaches the Rosenbrock minimiser exactly with curvature enabled.
+@pytest.mark.parametrize("name", ["asntr", "lssr1_tr"])
+def test_second_order_solves_rosenbrock(name):
+    """ASNTR and LSSR1_TR reach the Rosenbrock minimiser exactly.
 
-    Its first-order mode only gets f down to ~0.2 in the same budget.
+    Their first-order modes only get f down to ~0.2 and ~2e-3 respectively in
+    the same budget. TR is excluded: it reaches f ~ 5e-3, a large improvement on
+    its own first-order result but not an exact solve.
     """
-    _, final, w = _run("asntr", "rosenbrock", iters=500, second_order=True)
+    _, final, w = _run(name, "rosenbrock", iters=500, second_order=True)
 
     assert final < 1e-12, f"expected convergence, got f = {final}"
     expected = torch.tensor(ROSENBROCK_MIN, dtype=w.dtype)

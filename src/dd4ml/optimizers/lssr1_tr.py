@@ -393,8 +393,12 @@ class LSSR1_TR(Optimizer):
         phi_prev = phi_0
         dphi_prev = dphi_0
 
-        # initial trial
-        alpha_i = 0.5 * alpha_max
+        # Initial trial. This used to be 0.5 * alpha_max, i.e. 5.0 by default,
+        # which ignored the alpha_0 argument entirely. p is already scaled so
+        # that ||p|| <= delta, so trialling alpha = 5 steps five times outside
+        # the trust region on every iteration and the radius controls nothing.
+        # Start from the full trust-region step and let the search adjust.
+        alpha_i = alpha_0
 
         for i in range(max_iter):
             phi_i, grad_i, dphi_i = self._evaluate_function_and_gradient(
@@ -523,6 +527,9 @@ class LSSR1_TR(Optimizer):
                 self.gamma = self.hess.gamma
                 hess_memory_updated = True
 
+        # The momentum term further down needs the iterate from the previous
+        # step, so keep a reference before old_wk is overwritten here.
+        prev_wk = st.get("old_wk")
         st["old_wk"], st["prev_grad"] = wk.clone(), g.clone()
 
         # Only precompute if Hessian memory changed
@@ -555,7 +562,14 @@ class LSSR1_TR(Optimizer):
 
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
-        vk.mul_(self.mu).add_(wk - st["old_wk"])
+        # vk <- mu*vk + (w_k - w_{k-1}). This used to read st["old_wk"] after it
+        # had already been reassigned to wk a few lines above, so the increment
+        # was identically zero: vk stayed at its zero initialisation forever and
+        # the momentum term never contributed anything.
+        if prev_wk is not None:
+            vk.mul_(self.mu).add_(wk - prev_wk)
+        else:
+            vk.mul_(self.mu)
 
         # Cache norm computations
         vk_norm_sq = vk.dot(vk)
@@ -613,7 +627,14 @@ class LSSR1_TR(Optimizer):
         if abs(float(pred_red)) < self.tol:
             rho = float("inf")
         else:
-            rho = (loss - new_loss) / pred_red if (alpha > 0 and pred_red < 0) else 0.0
+            # solve_tr_* returns the classical predicted reduction
+            # pred = -(g^T p + 0.5 p^T B p), which is positive for a descent
+            # step. The guard used to require pred_red < 0, so it never held and
+            # rho was pinned at 0.0 -- which is below tau_2, so the radius was
+            # shrunk on every single iteration regardless of how well the step
+            # had actually done. delta collapsed to min_delta within a dozen
+            # iterations and the method stalled short of the minimiser.
+            rho = (loss - new_loss) / pred_red if (alpha > 0 and pred_red > 0) else 0.0
 
         # Use cached norm if available and step is just scaled version
         if alpha == 1.0 and "_p_comb_norm_sq" in st:
