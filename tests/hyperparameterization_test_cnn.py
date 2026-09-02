@@ -130,9 +130,9 @@ def create_config(
 
     # Set num_replicas_per_subdomain if provided (applies to all optimizers)
     if num_replicas_per_subdomain is not None:
-        config["parameters"]["num_replicas_per_subdomain"][
-            "value"
-        ] = num_replicas_per_subdomain
+        config["parameters"]["num_replicas_per_subdomain"]["value"] = (
+            num_replicas_per_subdomain
+        )
 
     # Create output config file
     config_name = f"config_hyperparam_cnn_{optimizer}_f{filters}_cl{num_conv_layers}_trial{trial}.yaml"

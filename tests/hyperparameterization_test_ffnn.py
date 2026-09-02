@@ -72,11 +72,15 @@ def create_config(
     # Optimizer-specific settings
     if optimizer == "sgd":
         config["parameters"]["learning_rate"]["value"] = 0.01
-        config["parameters"]["num_subdomains"]["value"] = num_subdomains if num_subdomains is not None else 1
+        config["parameters"]["num_subdomains"]["value"] = (
+            num_subdomains if num_subdomains is not None else 1
+        )
         config["parameters"]["overlap"]["value"] = overlap
         config["parameters"]["batch_inc_factor"]["value"] = batch_inc_factor
     elif optimizer in ["apts_d", "apts_p"]:
-        config["parameters"]["num_subdomains"]["value"] = num_subdomains if num_subdomains is not None else 2
+        config["parameters"]["num_subdomains"]["value"] = (
+            num_subdomains if num_subdomains is not None else 2
+        )
         config["parameters"]["max_loc_iters"]["value"] = 2
         config["parameters"]["glob_second_order"]["value"] = False
         config["parameters"]["loc_second_order"]["value"] = False
@@ -89,7 +93,9 @@ def create_config(
         if max_zoom_iters is not None:
             config["parameters"]["max_zoom_iters"]["value"] = max_zoom_iters
     elif optimizer == "apts_ip":
-        config["parameters"]["num_stages"]["value"] = num_stages if num_stages is not None else 2
+        config["parameters"]["num_stages"]["value"] = (
+            num_stages if num_stages is not None else 2
+        )
         config["parameters"]["max_loc_iters"]["value"] = 2
         config["parameters"]["glob_second_order"]["value"] = False
         config["parameters"]["loc_second_order"]["value"] = False
@@ -104,10 +110,14 @@ def create_config(
 
     # Set num_replicas_per_subdomain if provided (applies to all optimizers)
     if num_replicas_per_subdomain is not None:
-        config["parameters"]["num_replicas_per_subdomain"]["value"] = num_replicas_per_subdomain
+        config["parameters"]["num_replicas_per_subdomain"]["value"] = (
+            num_replicas_per_subdomain
+        )
 
     # Create output config file
-    config_name = f"config_hyperparam_{optimizer}_w{width}_nl{num_layers}_trial{trial}.yaml"
+    config_name = (
+        f"config_hyperparam_{optimizer}_w{width}_nl{num_layers}_trial{trial}.yaml"
+    )
     output_path = base_dir / "config_files" / config_name
 
     with open(output_path, "w") as f:
@@ -323,7 +333,9 @@ def main():
 
     # Generate all configurations
     configs = []
-    total_experiments = len(args.optimizers) * len(args.widths) * len(args.depths) * args.num_trials
+    total_experiments = (
+        len(args.optimizers) * len(args.widths) * len(args.depths) * args.num_trials
+    )
 
     print(f"Generating {total_experiments} configurations...")
     for optimizer in args.optimizers:
@@ -367,7 +379,9 @@ def main():
 
     results = []
     for i, (optimizer, width, depth, trial, config_path) in enumerate(configs, 1):
-        print(f"[{i}/{len(configs)}] {optimizer} - Width: {width}, Depth: {depth}, Trial: {trial}")
+        print(
+            f"[{i}/{len(configs)}] {optimizer} - Width: {width}, Depth: {depth}, Trial: {trial}"
+        )
         success, output = run_experiment(
             config_path, script_dir, skip_existing=args.skip_existing
         )

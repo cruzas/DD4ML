@@ -748,7 +748,10 @@ class Trainer:
     def _move_to_device(self, data):
         if isinstance(data, (list, tuple)):
             return type(data)(
-                d.to(self.device, dtype=self.precision_dtype) if d.is_floating_point() else d.to(self.device) for d in data
+                d.to(self.device, dtype=self.precision_dtype)
+                if d.is_floating_point()
+                else d.to(self.device)
+                for d in data
             )
         # Only convert to precision_dtype if the tensor is a floating-point type
         # Integer tensors (e.g., token indices) should preserve their dtype

@@ -124,9 +124,9 @@ def create_config(
 
     # Set num_replicas_per_subdomain if provided (applies to all optimizers)
     if num_replicas_per_subdomain is not None:
-        config["parameters"]["num_replicas_per_subdomain"][
-            "value"
-        ] = num_replicas_per_subdomain
+        config["parameters"]["num_replicas_per_subdomain"]["value"] = (
+            num_replicas_per_subdomain
+        )
 
     # Create output config file
     config_name = f"config_hyperparam_gpt_{optimizer}_embd{n_embd}_head{n_head}_layer{n_layer}_trial{trial}.yaml"

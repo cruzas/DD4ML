@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from .base_pinn_loss import BasePINNLoss
 
+
 class Poisson2DPINNLoss(BasePINNLoss):
     """Loss for 2D Poisson PINN with forcing ``f(x,y)=2\pi^2\sin(\pi x)\sin(\pi y)`` and zero Dirichlet boundary."""
 
@@ -29,5 +30,10 @@ class Poisson2DPINNLoss(BasePINNLoss):
         grad2_u_y = self.compute_second_gradient(u_y, coords)[:, 1:2]
         laplace_u = grad2_u_x + grad2_u_y
 
-        rhs = 2 * math.pi ** 2 * torch.sin(math.pi * coords[:, 0:1]) * torch.sin(math.pi * coords[:, 1:2])
+        rhs = (
+            2
+            * math.pi**2
+            * torch.sin(math.pi * coords[:, 0:1])
+            * torch.sin(math.pi * coords[:, 1:2])
+        )
         return (-laplace_u - rhs).squeeze()

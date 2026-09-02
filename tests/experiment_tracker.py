@@ -54,7 +54,7 @@ class ExperimentTracker:
         """Load tracking data from JSON file."""
         if self.tracker_file.exists():
             try:
-                with open(self.tracker_file, 'r') as f:
+                with open(self.tracker_file, "r") as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError) as e:
                 print(f"Warning: Could not load tracker file: {e}")
@@ -65,7 +65,7 @@ class ExperimentTracker:
     def _save(self):
         """Save tracking data to JSON file."""
         try:
-            with open(self.tracker_file, 'w') as f:
+            with open(self.tracker_file, "w") as f:
                 json.dump(self.data, f, indent=2, sort_keys=True)
         except IOError as e:
             print(f"Warning: Could not save tracker file: {e}")
@@ -89,9 +89,12 @@ class ExperimentTracker:
             param_str = "_".join(f"{k}={v}" for k, v in sorted(kwargs.items()))
             return hashlib.md5(param_str.encode()).hexdigest()[:16]
 
-    def is_completed(self, experiment_id: Optional[str] = None,
-                    config_path: Optional[Path] = None,
-                    **kwargs) -> bool:
+    def is_completed(
+        self,
+        experiment_id: Optional[str] = None,
+        config_path: Optional[Path] = None,
+        **kwargs,
+    ) -> bool:
         """
         Check if an experiment has been completed.
 
@@ -108,10 +111,13 @@ class ExperimentTracker:
 
         return experiment_id in self.data["experiments"]
 
-    def mark_completed(self, experiment_id: Optional[str] = None,
-                      config_path: Optional[Path] = None,
-                      metadata: Optional[Dict[str, Any]] = None,
-                      **kwargs):
+    def mark_completed(
+        self,
+        experiment_id: Optional[str] = None,
+        config_path: Optional[Path] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ):
         """
         Mark an experiment as completed.
 
@@ -139,10 +145,13 @@ class ExperimentTracker:
         self.data["experiments"][experiment_id] = full_metadata
         self._save()
 
-    def mark_failed(self, experiment_id: Optional[str] = None,
-                   config_path: Optional[Path] = None,
-                   error: Optional[str] = None,
-                   **kwargs):
+    def mark_failed(
+        self,
+        experiment_id: Optional[str] = None,
+        config_path: Optional[Path] = None,
+        error: Optional[str] = None,
+        **kwargs,
+    ):
         """
         Mark an experiment as failed (does not mark as completed).
 
@@ -166,13 +175,16 @@ class ExperimentTracker:
             "failed_at": datetime.now().isoformat(),
             "error": error,
             "config_path": str(config_path) if config_path else None,
-            **kwargs
+            **kwargs,
         }
         self._save()
 
-    def get_metadata(self, experiment_id: Optional[str] = None,
-                    config_path: Optional[Path] = None,
-                    **kwargs) -> Optional[Dict[str, Any]]:
+    def get_metadata(
+        self,
+        experiment_id: Optional[str] = None,
+        config_path: Optional[Path] = None,
+        **kwargs,
+    ) -> Optional[Dict[str, Any]]:
         """
         Get metadata for a completed experiment.
 

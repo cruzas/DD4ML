@@ -1,6 +1,7 @@
 import torch
 from .base_dataset import BaseDataset
 
+
 class Poisson1DDataset(BaseDataset):
     """Simple dataset for training a PINN on the 1D Poisson equation
     ``-u''(x) = f(x), x in [0,1], u(0)=u(1)=0``.
@@ -24,7 +25,9 @@ class Poisson1DDataset(BaseDataset):
 
     def _generate_points(self):
         cfg = self.config
-        interior = torch.linspace(cfg.low, cfg.high, cfg.n_interior, dtype=torch.float32).unsqueeze(1)
+        interior = torch.linspace(
+            cfg.low, cfg.high, cfg.n_interior, dtype=torch.float32
+        ).unsqueeze(1)
         boundary = torch.tensor([[cfg.low], [cfg.high]], dtype=torch.float32)
         self.x_interior = interior
         self.x_boundary = boundary

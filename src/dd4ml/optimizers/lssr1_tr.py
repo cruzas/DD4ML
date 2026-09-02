@@ -527,8 +527,13 @@ class LSSR1_TR(Optimizer):
 
         # Only precompute if Hessian memory changed
         current_memory_size = len(self.hess._S)
-        if (self.second_order and current_memory_size > 0 and 
-            (hess_memory_updated or self._precomputed_for_size != current_memory_size)):
+        if (
+            self.second_order
+            and current_memory_size > 0
+            and (
+                hess_memory_updated or self._precomputed_for_size != current_memory_size
+            )
+        ):
             self.hess.precompute()
             self._precomputed_for_size = current_memory_size
 
@@ -551,14 +556,14 @@ class LSSR1_TR(Optimizer):
         # Momentum-like update for vk term, bounding to trust-region radius
         vk = st["flat_vk"]
         vk.mul_(self.mu).add_(wk - st["old_wk"])
-        
+
         # Cache norm computations
         vk_norm_sq = vk.dot(vk)
         if vk_norm_sq > self.tol:
             vk_norm = math.sqrt(float(vk_norm_sq))
             scale = min(1.0, self.delta / vk_norm)
             vk.mul_(scale)
-            
+
         # Combine p_star and vk, then bound combined step to trust-region radius
         p_comb = p_star + vk
         p_comb_norm_sq = p_comb.dot(p_comb)
@@ -568,9 +573,9 @@ class LSSR1_TR(Optimizer):
             p_comb.mul_(scale)
             # Update cached norm after scaling
             p_comb_norm_sq = p_comb.dot(p_comb)
-            
+
         st["flat_vk"] = vk.clone()
-        
+
         # Cache frequently used values for line search
         st["_p_comb_norm_sq"] = p_comb_norm_sq
 
@@ -609,7 +614,7 @@ class LSSR1_TR(Optimizer):
             rho = float("inf")
         else:
             rho = (loss - new_loss) / pred_red if (alpha > 0 and pred_red < 0) else 0.0
-            
+
         # Use cached norm if available and step is just scaled version
         if alpha == 1.0 and "_p_comb_norm_sq" in st:
             s_norm_sq = st["_p_comb_norm_sq"]

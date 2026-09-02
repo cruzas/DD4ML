@@ -26,7 +26,7 @@ def main(entity: str, project: str):
 
         # run.summary["grad_evals"] = corrected
         # run.summary.update()
-        print(f"Patched run {run.id}: " f"{orig} × {nsd} → {corrected}")
+        print(f"Patched run {run.id}: {orig} × {nsd} → {corrected}")
 
 
 if __name__ == "__main__":

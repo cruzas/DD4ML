@@ -248,7 +248,9 @@ def solve_tr_second_order(
     delta = trust_radius
 
     # OBS (full step)
-    delta_tensor = torch.scalar_tensor(delta, device=gradient.device, dtype=gradient.dtype)
+    delta_tensor = torch.scalar_tensor(
+        delta, device=gradient.device, dtype=gradient.dtype
+    )
     p_b = obs_solver.solve_tr_subproblem(
         gradient,
         delta_tensor,

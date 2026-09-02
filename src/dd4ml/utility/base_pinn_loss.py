@@ -13,7 +13,9 @@ class BasePINNLoss(nn.Module, ABC):
     def validate_coordinates(self, coords_name="coordinates"):
         """Validate that coordinates are set before computation."""
         if self.coordinates is None:
-            raise ValueError(f"{coords_name} must be set before calling {self.__class__.__name__}")
+            raise ValueError(
+                f"{coords_name} must be set before calling {self.__class__.__name__}"
+            )
         return self.coordinates
 
     def enable_gradients(self, coords):
@@ -49,7 +51,7 @@ class BasePINNLoss(nn.Module, ABC):
 
         # Compute physics loss
         physics_residual = self.compute_physics_loss(u_pred, coords)
-        interior_loss = (physics_residual ** 2) * (1 - boundary_flag.squeeze())
+        interior_loss = (physics_residual**2) * (1 - boundary_flag.squeeze())
 
         # Compute boundary loss
         boundary_loss = (u_pred.squeeze() ** 2) * boundary_flag.squeeze()

@@ -13,4 +13,3 @@ if __name__ == "__main__":
         "num_workers": 0,
     }
     generic_run(args=args, wandb_config=None)
-

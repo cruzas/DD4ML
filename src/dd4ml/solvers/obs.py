@@ -169,7 +169,9 @@ class OBS:
             if torch.isnan(sigmaStar) or torch.isinf(sigmaStar):
                 sigmaStar = self.Newton(0, Lambda, a_j, delta)
 
-            pStar = self.ComputeSBySMW(gamma + sigmaStar, g_compatible, PsiTg, Psi, Minv, PsiPsi)
+            pStar = self.ComputeSBySMW(
+                gamma + sigmaStar, g_compatible, PsiTg, Psi, Minv, PsiPsi
+            )
             return pStar
 
     def ComputeSBySMW(self, tauStar, g, PsiTg, Psi, Minv, PsiPsi):

@@ -316,8 +316,7 @@ class ModelHandler:
             }
             for rep in range(self.num_replicas_per_subdomain):
                 rep_ranks = subdomain_ranks[sd][
-                    rep
-                    * self.num_ranks_per_model : (rep + 1)
+                    rep * self.num_ranks_per_model : (rep + 1)
                     * self.num_ranks_per_model
                 ]
                 nn_structure[f"sd{sd}"][f"r{rep}"] = {

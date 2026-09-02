@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from dd4ml.models.base_model import BaseModel
 
+
 class DeepONet(BaseModel):
     """Minimal DeepONet implementation with branch and trunk networks."""
 

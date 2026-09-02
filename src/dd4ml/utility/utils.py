@@ -83,6 +83,7 @@ class CfgNode:
 
     def to_dict(self):
         """Return a dict representation of the config with JSON-serializable values."""
+
         def serialize_value(v):
             if isinstance(v, CfgNode):
                 return v.to_dict()
@@ -111,7 +112,6 @@ class CfgNode:
         --model.n_layer=10 --trainer.batch_size=32
         """
         for arg in args:
-
             keyval = arg.split("=")
             assert len(keyval) == 2, (
                 "expecting each override arg to be of form --arg=value, got %s" % arg
@@ -139,9 +139,9 @@ class CfgNode:
             leaf_key = keys[-1]
 
             # ensure that this attribute exists
-            assert hasattr(
-                obj, leaf_key
-            ), f"{key} is not an attribute that exists in the config"
+            assert hasattr(obj, leaf_key), (
+                f"{key} is not an attribute that exists in the config"
+            )
 
             # overwrite the attribute
             print("command line overwriting config attribute %s with %s" % (key, val))

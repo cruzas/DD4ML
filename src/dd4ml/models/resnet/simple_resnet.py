@@ -79,7 +79,7 @@ class SimpleResNet(BaseResNet):
         super().__init__(config)
         # For all others
         # self.backbone = resnet18(pretrained=False)
-        
+
         # For APTS_IP
         self.layers_config = layers  # store configuration for use in as_model_dict
         self.in_channels = 64
@@ -103,7 +103,7 @@ class SimpleResNet(BaseResNet):
     def forward(self, x):
         # For APTS_IP
         # return self.backbone(x)
-        
+
         # For all others
         x = self.relu(self.bn1(self.start(x)))
         x = self.maxpool(x)

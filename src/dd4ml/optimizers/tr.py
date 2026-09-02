@@ -151,8 +151,10 @@ class TR(Optimizer):
         current_memory_size = 0
         if self.second_order and self.hess is not None:
             current_memory_size = len(self.hess._S)
-            if (current_memory_size > 0 and 
-                self._precomputed_for_size != current_memory_size):
+            if (
+                current_memory_size > 0
+                and self._precomputed_for_size != current_memory_size
+            ):
                 self.hess.precompute()
                 self._precomputed_for_size = current_memory_size
 

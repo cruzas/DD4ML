@@ -72,12 +72,15 @@ def test_apts_pinn_dataset_not_split():
         "loc_opt": "lssr1_tr",
     }
 
-    with patch("torch.distributed.is_initialized", return_value=False), patch(
-        "dd4ml.utility.trainer_setup.get_device", return_value="cpu"
-    ), patch("dd4ml.trainer.dist.get_backend", return_value="gloo"), patch(
-        "dd4ml.datasets.pinn_allencahn.AllenCahn1DDataset.split_domain",
-        wraps=AllenCahn1DDataset.split_domain,
-    ) as mock_split:
+    with (
+        patch("torch.distributed.is_initialized", return_value=False),
+        patch("dd4ml.utility.trainer_setup.get_device", return_value="cpu"),
+        patch("dd4ml.trainer.dist.get_backend", return_value="gloo"),
+        patch(
+            "dd4ml.datasets.pinn_allencahn.AllenCahn1DDataset.split_domain",
+            wraps=AllenCahn1DDataset.split_domain,
+        ) as mock_split,
+    ):
         _, _, trainer = get_config_model_and_trainer(args, None)
         mock_split.assert_not_called()
         assert len(trainer.train_dataset) == 12
@@ -237,12 +240,13 @@ def test_run_by_epoch_pinn_full_dataset_overlap():
         "tol": 1e-6,
     }
 
-    with patch("torch.distributed.is_initialized", return_value=True), patch(
-        "torch.distributed.get_world_size", return_value=2
-    ), patch("torch.distributed.get_rank", return_value=0), patch(
-        "dd4ml.utility.trainer_setup.get_device", return_value="cpu"
-    ), patch("dd4ml.trainer.dist.get_backend", return_value="gloo"), patch(
-        "dd4ml.utility.trainer_setup.DDP", lambda m, *a, **k: m
+    with (
+        patch("torch.distributed.is_initialized", return_value=True),
+        patch("torch.distributed.get_world_size", return_value=2),
+        patch("torch.distributed.get_rank", return_value=0),
+        patch("dd4ml.utility.trainer_setup.get_device", return_value="cpu"),
+        patch("dd4ml.trainer.dist.get_backend", return_value="gloo"),
+        patch("dd4ml.utility.trainer_setup.DDP", lambda m, *a, **k: m),
     ):
         _, _, trainer = get_config_model_and_trainer(args, None)
         trainer.setup_data_loaders()
@@ -253,10 +257,8 @@ def test_run_by_epoch_pinn_full_dataset_overlap():
             return_value=(0.0, None, len(trainer.train_dataset)),
         ):
             trainer.run_by_epoch_PINN()
-        assert (
-            trainer.num_training_samples_per_process
-            == len(trainer.train_dataset)
-        )
+        assert trainer.num_training_samples_per_process == len(trainer.train_dataset)
+
 
 def main():
     world_size = 2

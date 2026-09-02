@@ -174,7 +174,7 @@ class ASNTR(Optimizer):
         # evaluate objective and gradient
         fN_old = _["loss"] if "loss" in _ else closure_main(compute_grad=True)
         g = _["grad"] if "grad" in _ else self._flat_grads_fn()
-        
+
         fD_old = closure_d(compute_grad=True)
         g_bar = self._flat_grads_fn()
 
@@ -221,13 +221,13 @@ class ASNTR(Optimizer):
         if abs(float(pred_red)) < self.tol:
             rho_N = float("inf")
         else:
-            r_Nk = fN_new + tk * self.delta 
+            r_Nk = fN_new + tk * self.delta
             rho_N = (fN_old - rNk) / pred_red
 
         if abs(float(pred_red_d)) < self.tol:
             rho_D = float("inf")
         else:
-            r_Dk = fDnew + self.delta * ttilde_k 
+            r_Dk = fDnew + self.delta * ttilde_k
             rho_D = (fD_old - r_DK) / (-g_bar.dot(g_bar))
 
         # print(f"pred_red = {pred_red:.4f}, pred_red_d = {pred_red_d:.4f}")
@@ -268,7 +268,7 @@ class ASNTR(Optimizer):
 
         # adjust delta
         if rho_N < self.eta_1:
-            self.delta = max(self.min_delta, self.delta*self.tau_1)
+            self.delta = max(self.min_delta, self.delta * self.tau_1)
         elif (
             rho_N > self.eta_2
             and torch.norm(step, p=self.norm_type) > self.tau_2 * self.delta

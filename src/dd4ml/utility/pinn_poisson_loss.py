@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from .base_pinn_loss import BasePINNLoss
 
+
 class PoissonPINNLoss(BasePINNLoss):
     """Loss for 1D Poisson PINN (-u'' = f, u(0)=u(1)=0 with f=sin(pi x))."""
 
@@ -24,4 +25,4 @@ class PoissonPINNLoss(BasePINNLoss):
         grad2_u = self.compute_second_gradient(grad_u, coords)
 
         rhs = torch.sin(torch.pi * coords)
-        return (-grad2_u.squeeze() - rhs.squeeze())
+        return -grad2_u.squeeze() - rhs.squeeze()

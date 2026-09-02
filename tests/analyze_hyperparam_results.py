@@ -166,7 +166,7 @@ def create_sgd_parameter_comparison_plots(df, model_type, output_dir):
 
     # Detail configurations for the caption
     c1_desc = f"no overlap and no batch size increase ({c1_lab.lower()})"
-    c2_desc = rf"an overlap of approximately {p2[0]*100:.0f}% and a batch size increase factor ({p2[1]:.1f}) ({c2_lab.lower()})"
+    c2_desc = rf"an overlap of approximately {p2[0] * 100:.0f}% and a batch size increase factor ({p2[1]:.1f}) ({c2_lab.lower()})"
 
     arch_keys = helper.get_arch_keys(model_type)
 

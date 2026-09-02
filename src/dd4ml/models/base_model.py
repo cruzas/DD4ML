@@ -91,7 +91,6 @@ class BaseModel(nn.Module, ABC):
 
         return self.model_dict
 
-
     # @abstractmethod
     # def as_model_dict(self):
     #     # Was a bit too difficult to implement. Maybe TODO later

@@ -73,10 +73,12 @@ class PINNFFNN(BaseFFNN):
                         },
                     },
                     "dst": {
-                        "to": [f"stage{i+1}"] if i < len(cfg.fc_layers) else ["finish"]
+                        "to": [f"stage{i + 1}"]
+                        if i < len(cfg.fc_layers)
+                        else ["finish"]
                     },
                     "rcv": {
-                        "src": ["start"] if i == 2 else [f"stage{i-1}"],
+                        "src": ["start"] if i == 2 else [f"stage{i - 1}"],
                         "strategy": None,
                     },
                     "stage": i - 1,

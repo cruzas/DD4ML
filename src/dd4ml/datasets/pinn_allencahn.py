@@ -25,9 +25,7 @@ class AllenCahn1DDataset(BaseDataset):
             if not hasattr(config, "n_boundary"):
                 config.n_boundary = 2
             if config.batch_size < config.n_boundary:
-                raise ValueError(
-                    "batch_size must be >= number of boundary points"
-                )
+                raise ValueError("batch_size must be >= number of boundary points")
             config.n_interior = int(config.batch_size - config.n_boundary)
         # keep batch_size consistent with n_interior and n_boundary
         config.batch_size = int(config.n_interior + config.n_boundary)

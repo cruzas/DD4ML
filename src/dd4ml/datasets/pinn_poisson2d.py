@@ -2,6 +2,7 @@ import torch
 
 from .base_dataset import BaseDataset
 
+
 class Poisson2DDataset(BaseDataset):
     """Dataset for 2D Poisson equation ``-\Delta u = f`` on [0,1]^2 with zero boundary conditions."""
 

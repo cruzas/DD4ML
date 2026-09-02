@@ -30,7 +30,9 @@ class AllenCahnTimePINNLoss(nn.Module):
 
     def forward(self, u_pred, boundary_flag):
         if self.current_xt is None:
-            raise ValueError("current_xt must be set before calling AllenCahnTimePINNLoss")
+            raise ValueError(
+                "current_xt must be set before calling AllenCahnTimePINNLoss"
+            )
         xt = self.current_xt
         if not xt.requires_grad:
             xt.requires_grad_(True)

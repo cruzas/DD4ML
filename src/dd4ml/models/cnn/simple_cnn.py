@@ -68,7 +68,6 @@ class IdentityBlock(nn.Module):
 
 
 class SimpleCNN(BaseCNN):
-
     @staticmethod
     def get_default_config():
         C = BaseCNN.get_default_config()

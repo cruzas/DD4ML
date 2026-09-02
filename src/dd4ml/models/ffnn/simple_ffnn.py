@@ -27,7 +27,7 @@ class SimpleFFNN(BaseFFNN):
             input_features=config.input_features,
             fc_layers=config.fc_layers,
             dropout_p=config.dropout_p,
-            use_sequential=False  # Get OrderedDict to add output layer
+            use_sequential=False,  # Get OrderedDict to add output layer
         )
 
         # Add output layer

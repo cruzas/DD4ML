@@ -229,7 +229,6 @@ from torch.utils.data import RandomSampler, SequentialSampler
 
 
 class GeneralizedDistributedDataLoader(DataLoader):
-
     def __init__(
         self,
         model_handler,

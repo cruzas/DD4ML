@@ -92,9 +92,9 @@ class BigResNet(BaseResNet):
             **{
                 f"stage{i}": {
                     "callable": {"object": BasicBlock, "settings": settings},
-                    "dst": {"to": [f"stage{i+1}" if i < 7 else "finish"]},
+                    "dst": {"to": [f"stage{i + 1}" if i < 7 else "finish"]},
                     "rcv": {
-                        "src": ["start"] if i == 2 else [f"stage{i-1}"],
+                        "src": ["start"] if i == 2 else [f"stage{i - 1}"],
                         "strategy": None,
                     },
                     "stage": i - 1,
