@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 import hashlib
 import json
-import math
 import os
 import time
-from functools import lru_cache
+from functools import cache
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.lines import Line2D
-
 import wandb
+from matplotlib.lines import Line2D
 
 # ==========================================
 # PRESENTATION STYLE SETTINGS
@@ -71,7 +69,7 @@ def _metric_label(metric: str) -> str:
 def _safe_int(v):
     try:
         return int(float(v))
-    except:
+    except Exception:
         return -1
 
 
@@ -81,7 +79,7 @@ def _loose_match(actual, target):
     try:
         if abs(float(actual) - float(target)) < 1e-6:
             return True
-    except:
+    except Exception:
         pass
     return False
 
@@ -94,7 +92,7 @@ def _load_history_cached_by_id(api, project_path, run_id, cache_dir, dataset):
     if path and os.path.exists(path):
         try:
             return pd.read_pickle(path)
-        except:
+        except Exception:
             pass
     try:
         run = api.run(f"{project_path}/{run_id}")
@@ -116,7 +114,7 @@ def _load_history_cached_by_id(api, project_path, run_id, cache_dir, dataset):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             df.to_pickle(path)
         return df
-    except:
+    except Exception:
         return pd.DataFrame()
 
 
@@ -137,7 +135,7 @@ def _list_runs_cached(api, project_path, filters, cache_dir, dataset):
     ):
         try:
             return pd.read_pickle(path)["runs"]
-        except:
+        except Exception:
             pass
     runs = api.runs(project_path, filters=filters)
     recs = [
@@ -278,7 +276,6 @@ def generate_summary_table(
 
     is_strong = regime.lower() == "strong"
     bs_acronym = "GBS" if is_strong else "EBS"
-    bs_full = "global batch size (GBS)" if is_strong else "effective batch size (EBS)"
 
     metric_col_name = "Speedup" if is_strong else "Efficiency"
 
@@ -349,7 +346,7 @@ def generate_summary_table(
 
     # --- PASS 3: GENERATE THE TABLE ---
     with open(file_path, "w") as f:
-        f.write(f"\\begin{{table}}[htbp]\n  \\centering\n")
+        f.write("\\begin{table}[htbp]\n  \\centering\n")
         f.write(f"  \\caption{{{table_caption}}}\n")
         f.write(f"  \\label{{tab:{dataset}_{regime}_scaling}}\n")
         f.write("  \\resizebox{\\textwidth}{!}{\n")
@@ -517,7 +514,7 @@ def plot_grid_presentation(
     dataset_name = filters_base.get("config.dataset_name", "dataset").lower()
     prog_key = "iter" if "tinyshakespeare" in dataset_name else "epoch"
 
-    @lru_cache(maxsize=None)
+    @cache
     def get_history(run_id):
         return _load_history_cached_by_id(
             api, project_path, run_id, cache_dir, dataset_name

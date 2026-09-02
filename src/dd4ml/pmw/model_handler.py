@@ -133,7 +133,7 @@ class ModelHandler:
             print(
                 f"Rank {self.rank}/{dist.get_world_size() - 1} is assigned to SD {self.sd}, Rep {self.rep}, S {self.s}, SH {self.sh}."
             )
-        except:
+        except Exception:
             raise ValueError(
                 f"Rank {self.rank}/{dist.get_world_size() - 1} is not assigned to any subdomain, replica, stage, or shard."
             )
@@ -355,10 +355,10 @@ class ModelHandler:
                                 global_ranks, use_local_synchronization=True
                             )
                         else:
-                            global_ranks = nn_structure[f"sd0"]["r0"][f"s{s}"][
+                            global_ranks = nn_structure["sd0"]["r0"][f"s{s}"][
                                 f"sh{sh}"
                             ]["global_ranks"]
-                            global_group = nn_structure[f"sd0"]["r0"][f"s{s}"][
+                            global_group = nn_structure["sd0"]["r0"][f"s{s}"][
                                 f"sh{sh}"
                             ]["global_group"]
                         if rep == 0:
@@ -370,10 +370,10 @@ class ModelHandler:
                                 local_ranks, use_local_synchronization=True
                             )
                         else:
-                            local_ranks = nn_structure[f"sd{sd}"][f"r0"][f"s{s}"][
+                            local_ranks = nn_structure[f"sd{sd}"]["r0"][f"s{s}"][
                                 f"sh{sh}"
                             ]["local_ranks"]
-                            local_group = nn_structure[f"sd{sd}"][f"r0"][f"s{s}"][
+                            local_group = nn_structure[f"sd{sd}"]["r0"][f"s{s}"][
                                 f"sh{sh}"
                             ]["local_group"]
 

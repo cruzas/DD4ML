@@ -22,7 +22,6 @@ import hashlib
 import json
 import os
 from itertools import product
-from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -51,7 +50,7 @@ def _history_path(cache_dir: str, dataset: str, run_id: str) -> str:
 
 
 def _try_load_cached_listing(
-    project_path: str, filters: dict, cache_dir: Optional[str], dataset: str
+    project_path: str, filters: dict, cache_dir: str | None, dataset: str
 ):
     if not cache_dir:
         return None
@@ -71,8 +70,8 @@ def _try_load_cached_listing(
 
 
 def _try_load_cached_history(
-    cache_dir: Optional[str], dataset: str, run_id: str
-) -> Optional[pd.DataFrame]:
+    cache_dir: str | None, dataset: str, run_id: str
+) -> pd.DataFrame | None:
     if not cache_dir:
         return None
     path = _history_path(cache_dir, dataset, run_id)
@@ -97,12 +96,12 @@ def _last_non_nan(series: pd.Series):
 def _build_gdf_via_cache(
     project_path: str,
     dataset: str,
-    filters: Dict,
-    group_keys: List[str],  # e.g., ["optimizer", "batch_size", "num_stages"]
-    metrics: List[str],  # e.g., ["loss","grad_evals","running_time","accuracy"?]
-    cache_dir: Optional[str],
+    filters: dict,
+    group_keys: list[str],  # e.g., ["optimizer", "batch_size", "num_stages"]
+    metrics: list[str],  # e.g., ["loss","grad_evals","running_time","accuracy"?]
+    cache_dir: str | None,
     exclude_sgd: bool = False,  # for non-SGD path
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame | None:
     """
     Attempt to build the grouped summary DataFrame using ONLY on-disk caches.
     Returns None if any critical cache entries are missing (so caller may fall back).
@@ -318,7 +317,7 @@ def collect_gdf_all(
     aggregate="mean",
     mad_threshold=1e99,
     parallel_key="num_subdomains",
-    cache_dir: Optional[str] = None,  # NEW: path to time_series_grid cache root
+    cache_dir: str | None = None,  # NEW: path to time_series_grid cache root
 ):
     """
     For each (dataset, size):
@@ -471,7 +470,7 @@ def main(
     project="thesis_results",
     choice="poisson2d",
     parallel_key="num_subdomains",  # or num_stages
-    cache_dir: Optional[str] = None,
+    cache_dir: str | None = None,
 ):
     if parallel_key not in PARALLEL_KEYS:
         raise ValueError(f"parallel_key must be one of {PARALLEL_KEYS}")

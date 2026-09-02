@@ -63,7 +63,7 @@ class WeightParallelizedSubdomain(BasePMWModel):
             layer_name: layer.state_dict()
             for layer_name, layer in zip(self.stage_data["layers"], self.sharded_layers)
         }
-        for key in temp.keys():
+        for key in temp:
             for subkey in temp[key].keys():
                 subkey2 = ".".join(subkey.split(".")[1:])
                 ordered_dict[f"{key}.{subkey2}"] = temp[key][subkey]

@@ -1,9 +1,8 @@
 import pprint
 
 import pandas as pd
-from scipy.stats import median_abs_deviation
-
 import wandb
+from scipy.stats import median_abs_deviation
 
 from .utils import _abbreviate_val
 

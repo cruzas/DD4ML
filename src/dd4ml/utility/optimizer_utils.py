@@ -1,11 +1,8 @@
 import math
-from typing import Tuple
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
-
-from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
 
 def _get_world_size_and_scale(config):
@@ -199,7 +196,7 @@ def solve_tr_first_order(
     grad_norm: float,
     trust_radius: float,
     tol: float,
-) -> Tuple[Tensor, float]:
+) -> tuple[Tensor, float]:
     """
     If grad_norm <= tol
         - returns zeros
@@ -223,7 +220,7 @@ def solve_tr_second_order(
     obs_solver,  # exposes .solve_tr_subproblem(g, delta, gamma, Psi, Minv)
     tol: float,
     dogleg: bool = False,  # if True, use dogleg between Cauchy and OBS
-) -> Tuple[torch.Tensor, float]:
+) -> tuple[torch.Tensor, float]:
     """
     TR via LSR1+OBS, with optional dogleg:
       1. If ||g|| <= tol, return zero

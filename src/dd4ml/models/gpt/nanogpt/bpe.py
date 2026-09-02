@@ -79,7 +79,7 @@ class Encoder:
         self.bpe_ranks = dict(zip(bpe_merges, range(len(bpe_merges))))
         # the splitting pattern used for pre-tokenization
         # Should haved added re.IGNORECASE so BPE merges can happen for capitalized versions of contractions <-- original openai comment
-        """
+        r"""
         ok so what is this regex looking for, exactly?
         python re reference: https://docs.python.org/3/library/re.html
         - the vertical bars | is OR, so re.findall will chunkate text as the pieces match, from left to right

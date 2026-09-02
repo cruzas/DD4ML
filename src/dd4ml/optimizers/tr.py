@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Iterable, Tuple
+from collections.abc import Callable, Iterable
 
 import torch
 from torch.optim import Optimizer
@@ -135,7 +135,7 @@ class TR(Optimizer):
         for g in self.param_groups:
             g["lr"] = self.delta
 
-    def step(self, closure, **_) -> Tuple[float, torch.Tensor]:
+    def step(self, closure, **_) -> tuple[float, torch.Tensor]:
         # Evaluate loss and gradient
         loss = _["loss"] if "loss" in _ else closure(compute_grad=True)
         grad = _["grad"] if "grad" in _ else self._flat_grad()

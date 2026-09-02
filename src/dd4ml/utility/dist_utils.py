@@ -1,13 +1,14 @@
-import os
 import datetime
-import sys
+import os
 import pickle
+import random
 import socket
 import subprocess
+import sys
 from contextlib import closing
+
 import torch
 import torch.distributed as dist
-import random
 
 
 def _get_local_rank():

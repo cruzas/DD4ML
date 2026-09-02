@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class AllenCahnTimePINNLoss(nn.Module):
-    """Loss for the time-dependent Allen-Cahn PINN.
+    r"""Loss for the time-dependent Allen-Cahn PINN.
 
     This implements the residual for ``u_t - u_xx + u^3 - u = 0`` on
     ``x \in [low_x, high_x]`` and ``t \in [low_t, high_t]`` with boundary

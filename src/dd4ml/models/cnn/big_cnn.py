@@ -1,6 +1,4 @@
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .base_cnn import BaseCNN
 
@@ -10,7 +8,7 @@ class ConvBlock(nn.Module):
     def __init__(
         self, in_channels, out_channels, kernel_size, padding, pool_size, stride
     ):
-        super(ConvBlock, self).__init__()
+        super().__init__()
         self.conv = nn.Conv2d(
             in_channels,
             out_channels,
@@ -44,7 +42,7 @@ class ConvPoolAdaptiveBlock(nn.Module):
         stride,
         adaptive_output,
     ):
-        super(ConvPoolAdaptiveBlock, self).__init__()
+        super().__init__()
         self.conv = nn.Conv2d(
             in_channels,
             out_channels,
@@ -75,7 +73,7 @@ class FlattenBlock(nn.Module):
 
 class FCBlock(nn.Module):
     def __init__(self, in_features, out_features, activation="relu"):
-        super(FCBlock, self).__init__()
+        super().__init__()
         self.fc = nn.Linear(in_features, out_features)
         self.activation = nn.ReLU(inplace=True) if activation == "relu" else None
 
@@ -88,7 +86,7 @@ class FCBlock(nn.Module):
 
 class DropoutFCBlock(nn.Module):
     def __init__(self, in_features, out_features, p):
-        super(DropoutFCBlock, self).__init__()
+        super().__init__()
         self.dropout = nn.Dropout(p)
         self.fc = nn.Linear(in_features, out_features)
 
@@ -101,7 +99,7 @@ class FlattenFCBlock(nn.Module):
     """Flatten input then apply a linear layer."""
 
     def __init__(self, in_features, out_features, activation="relu"):
-        super(FlattenFCBlock, self).__init__()
+        super().__init__()
         self.flatten = nn.Flatten()
         self.fc = nn.Linear(in_features, out_features)
         self.activation = nn.ReLU(inplace=True) if activation == "relu" else None

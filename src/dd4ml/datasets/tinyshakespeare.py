@@ -27,7 +27,7 @@ class TinyShakespeareDataset(BaseDataset):
             file_path = os.path.join(
                 os.path.dirname(__file__), self.config.root, self.config.filename
             )
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 self.data = f.read()
         else:
             self.data = data

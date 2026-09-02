@@ -29,7 +29,7 @@ def flatten_params(model, out=None):
 
     # Decide target dtype/device dynamically
     # Promote to float64 iff either params or out are float64
-    if out is not None and out.dtype == torch.float64 or param_dtype == torch.float64:
+    if (out is not None and out.dtype == torch.float64) or param_dtype == torch.float64:
         target_dtype = torch.float64
     else:
         target_dtype = param_dtype

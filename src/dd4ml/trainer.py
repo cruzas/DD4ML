@@ -9,11 +9,11 @@ import numbers
 import os
 import time
 from collections import defaultdict
-from itertools import chain, count
+from itertools import chain
 
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Subset
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 
 from dd4ml.datasets.deeponet_sine import SineOperatorDataset
@@ -859,7 +859,6 @@ class Trainer:
 
     def _train_one_batch(self, x, y, first_grad: bool):
         """Runs forward/backward/step on a single (x,y). Returns (batch_loss, batch_grad, bs)."""
-        rank = dist.get_rank() if dist.is_initialized() else 0
         x = self._move_to_device(x)
         y = self._move_to_device(y)
         bs = y.size(0)
@@ -1144,7 +1143,6 @@ class Trainer:
         dprint(
             f"Total number of training samples per process: {self.num_training_samples_per_process}"
         )
-        rank = dist.get_rank() if dist.is_initialized() else 0
 
         while self.epoch_num <= self.config.epochs:
             epoch_loss = 0.0

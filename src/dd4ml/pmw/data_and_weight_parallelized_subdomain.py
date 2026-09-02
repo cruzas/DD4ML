@@ -9,7 +9,7 @@ class DataAndWeightParallelizedSubdomain(BasePMWModel):
         super().__init__()
         """
         This function defines a subdomain in data. The subdomain has subdomains in weights and can parallelize forward and backward passes in data.
-        
+
         rank_list = list of lists containing the ranks of the model replicas that are responsible for each layer, e.g. [[0, 1], [2, 3], [4, 5]] (3 replicas, 2 layers each replica)
         """
         self.model_handler = model_handler

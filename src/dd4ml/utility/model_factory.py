@@ -1,6 +1,6 @@
-import torch
-import torch.nn as nn
 from collections import OrderedDict
+
+import torch.nn as nn
 
 
 def create_fc_layers(

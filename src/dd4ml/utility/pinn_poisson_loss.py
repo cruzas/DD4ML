@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+
 from .base_pinn_loss import BasePINNLoss
 
 

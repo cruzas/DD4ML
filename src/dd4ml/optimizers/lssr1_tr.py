@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Callable, Iterable, Optional, Tuple
+from collections.abc import Callable
 
 import torch
 import torch.distributed as dist
@@ -250,7 +250,7 @@ class LSSR1_TR(Optimizer):
         p: Tensor,
         alpha: float,
         closure: Callable,
-    ) -> Tuple[Tensor, Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor]:
         """
         Move to trial point w = wk + alpha * p, evaluate loss and gradient.
         Return loss value, flattened gradient, and directional derivative along p.
@@ -285,7 +285,7 @@ class LSSR1_TR(Optimizer):
         x2: Tensor,
         f2: Tensor,
         g2: Tensor,
-        bounds: Optional[Tuple[Tensor, Tensor]] = None,
+        bounds: tuple[Tensor, Tensor] | None = None,
     ) -> Tensor:
         """
         Full cubic interpolation between (x1,f1,g1) and (x2,f2,g2),
@@ -324,7 +324,7 @@ class LSSR1_TR(Optimizer):
         c_1: float,
         c_2: float,
         max_iter: int = 5,
-    ) -> Tuple[Tensor, Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor]:
         """
         Zoom phase using full cubic interpolation between (alpha_lo, phi_lo, dphi_lo)
         and (alpha_hi, phi_hi, dphi_hi), clamped to a safe interval.
@@ -384,7 +384,7 @@ class LSSR1_TR(Optimizer):
         c_2: float = 0.9,
         alpha_max: float = 10.0,
         max_iter: int = 5,
-    ) -> Tuple[Tensor, Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor]:
         """
         Conduct strong Wolfe line search with cubic-zoom.
         Returns (alpha, new_loss, new_grad).
@@ -470,7 +470,7 @@ class LSSR1_TR(Optimizer):
         c_1: float = 1e-4,
         c_2: float = 0.9,
         max_iter: int = 1,
-    ) -> Tuple[float, float, Tensor]:
+    ) -> tuple[float, float, Tensor]:
         """
         Simple backtracking line search to satisfy Armijo and curvature.
         Returns step size alpha, new loss, and new gradient.
@@ -490,7 +490,7 @@ class LSSR1_TR(Optimizer):
         # If line search fails, return zero step
         return 0.0, phi_0, self._flat_grads_fn()
 
-    def step(self, closure: Callable[[], Tensor], **_) -> Tuple[float, float]:
+    def step(self, closure: Callable[[], Tensor], **_) -> tuple[float, float]:
         """
         Perform a single optimisation step.
         Returns tuple (new_loss, flat_gradient).

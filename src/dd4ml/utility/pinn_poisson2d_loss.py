@@ -1,11 +1,12 @@
 import math
+
 import torch
-import torch.nn as nn
+
 from .base_pinn_loss import BasePINNLoss
 
 
 class Poisson2DPINNLoss(BasePINNLoss):
-    """Loss for 2D Poisson PINN with forcing ``f(x,y)=2\pi^2\sin(\pi x)\sin(\pi y)`` and zero Dirichlet boundary."""
+    r"""Loss for 2D Poisson PINN with forcing ``f(x,y)=2\pi^2\sin(\pi x)\sin(\pi y)`` and zero Dirichlet boundary."""
 
     def __init__(self, current_xy=None):
         super().__init__(coordinates=current_xy)

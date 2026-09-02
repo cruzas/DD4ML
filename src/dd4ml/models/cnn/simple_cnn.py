@@ -10,7 +10,7 @@ class ConvBNBlock(nn.Module):
     def __init__(
         self, in_channels, out_channels, kernel_size, padding, pool_size, stride
     ):
-        super(ConvBNBlock, self).__init__()
+        super().__init__()
         self.conv = nn.Conv2d(
             in_channels,
             out_channels,
@@ -31,7 +31,7 @@ class ConvBNBlock(nn.Module):
 
 class FlattenBlock(nn.Module):
     def __init__(self):
-        super(FlattenBlock, self).__init__()
+        super().__init__()
 
     def forward(self, x):
         return x.view(x.size(0), -1)
@@ -39,7 +39,7 @@ class FlattenBlock(nn.Module):
 
 class FCBlock(nn.Module):
     def __init__(self, in_features, out_features, activation="relu"):
-        super(FCBlock, self).__init__()
+        super().__init__()
         self.fc = nn.Linear(in_features, out_features)
         self.activation = nn.ReLU() if activation == "relu" else None
 
@@ -52,7 +52,7 @@ class FCBlock(nn.Module):
 
 class DropoutBlock(nn.Module):
     def __init__(self, p):
-        super(DropoutBlock, self).__init__()
+        super().__init__()
         self.dropout = nn.Dropout(p)
 
     def forward(self, x):
@@ -61,7 +61,7 @@ class DropoutBlock(nn.Module):
 
 class IdentityBlock(nn.Module):
     def __init__(self):
-        super(IdentityBlock, self).__init__()
+        super().__init__()
 
     def forward(self, x):
         return x

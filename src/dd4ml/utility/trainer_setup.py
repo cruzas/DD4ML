@@ -11,9 +11,7 @@ from dd4ml.utility import (
     dataset_factory,
     dprint,
     get_device,
-    mark_trainable,
     optimizer_factory,
-    print_params_norm,
 )
 
 from .config import GPT_MODEL_ALIASES, get_config, make_std_config
@@ -462,7 +460,7 @@ def generic_run(
     # Adjust args for apts_d optimizer.
     if (
         "apts" in wandb_config.get("optimizer", "").lower()
-        and not "apts_ip" == wandb_config.get("optimizer", "").lower()
+        and not wandb_config.get("optimizer", "").lower() == "apts_ip"
     ):
         args["use_pmw"] = False
         args["num_subdomains"] = dist.get_world_size() if dist.is_initialized() else 1
@@ -470,7 +468,7 @@ def generic_run(
     # Enable PMW for APTS_IP optimizer
     if wandb_config.get("optimizer", "").lower() == "apts_ip":
         args["use_pmw"] = True
-        dprint(f"APTS_IP detected, setting use_pmw=True")
+        dprint("APTS_IP detected, setting use_pmw=True")
 
     config, _, trainer = get_config_model_and_trainer(args, wandb_config)
     dprint(config)

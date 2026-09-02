@@ -1,4 +1,4 @@
-from typing import Callable, Iterable, Union
+from collections.abc import Callable, Iterable
 
 import torch
 from torch.optim import Optimizer
@@ -77,7 +77,7 @@ class TRAdam(Optimizer):
                     s, e = int(self.offsets[i]), int(self.offsets[i + 1])
                     p.add_(self._step_buf[s:e].view(self.shapes[i]) * sign)
 
-    def step(self, closure=None) -> Union[None, float]:
+    def step(self, closure=None) -> None | float:
         """Perform a single optimisation step."""
         self.t += 1
         loss = closure() if closure is not None else None

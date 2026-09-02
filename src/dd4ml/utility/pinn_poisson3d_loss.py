@@ -1,11 +1,12 @@
 import math
+
 import torch
-import torch.nn as nn
+
 from .base_pinn_loss import BasePINNLoss
 
 
 class Poisson3DPINNLoss(BasePINNLoss):
-    """Loss for 3D Poisson PINN with forcing ``f(x,y,z)=3\pi^2\sin(\pi x)\sin(\pi y)\sin(\pi z)`` and zero Dirichlet boundary."""
+    r"""Loss for 3D Poisson PINN with forcing ``f(x,y,z)=3\pi^2\sin(\pi x)\sin(\pi y)\sin(\pi z)`` and zero Dirichlet boundary."""
 
     def __init__(self, current_xyz=None):
         super().__init__(coordinates=current_xyz)

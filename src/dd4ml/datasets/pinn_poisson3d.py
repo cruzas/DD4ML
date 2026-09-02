@@ -4,7 +4,7 @@ from .base_dataset import BaseDataset
 
 
 class Poisson3DDataset(BaseDataset):
-    """Dataset for 3D Poisson equation ``-\Delta u = f`` on [0,1]^3 with zero boundary conditions."""
+    r"""Dataset for 3D Poisson equation ``-\Delta u = f`` on [0,1]^3 with zero boundary conditions."""
 
     @staticmethod
     def get_default_config():

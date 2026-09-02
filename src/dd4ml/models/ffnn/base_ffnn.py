@@ -1,8 +1,6 @@
 # base_ffnn.py
 from abc import abstractmethod
 
-import torch.nn as nn
-
 from dd4ml.models.base_model import BaseModel
 
 
