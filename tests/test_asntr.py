@@ -27,11 +27,11 @@ import torch
 
 from dd4ml.optimizers.asntr import ASNTR
 
-# ASNTR stages parameters through a flat buffer allocated with the default
-# dtype, so a float64 model round-trips through float32. Compare with a
-# tolerance that is loose enough for that, and tight enough to catch a
-# genuinely wrong iterate.
-ATOL = 1e-6
+# The flat buffers adopt the parameter dtype, so float64 arithmetic stays
+# float64 end to end. This tolerance only absorbs ordinary floating-point
+# rounding; it is far tighter than the ~1e-8 error a float32 buffer would
+# introduce, so a regression in the buffer dtype fails these tests.
+ATOL = 1e-12
 
 # Make t_k and ttilde_k negligible so the non-monotonicity allowance does not
 # mask the orientation of the ratios; the paper only requires them to be
@@ -203,3 +203,32 @@ def test_zero_gradient_is_handled():
 
     assert param.detach().item() == pytest.approx(0.0, abs=ATOL)
     assert torch.isfinite(torch.tensor(opt.delta))
+
+
+def test_flat_buffers_adopt_the_parameter_dtype():
+    """Regression: the buffers used to be allocated with the global default.
+
+    ASNTR stages every parameter and gradient through state["flat_wk"] and
+    state["flat_gk"]. Those were allocated with torch.zeros(..., device=...) and
+    no dtype, so they came out float32 regardless of the model. A float64 model
+    was therefore truncated on every flatten/unflatten round trip: restoring the
+    iterate after a rejected step returned -0.05 as -0.05000000074505806.
+    """
+    param, cm, cd = _make_problem([-0.05])
+    opt = _opt(param, delta=0.2)
+
+    assert opt.state["flat_wk"].dtype == torch.float64
+    assert opt.state["flat_gk"].dtype == torch.float64
+
+    # This step is rejected (it overshoots the minimiser), so w_k must come back
+    # bit-for-bit, not merely to within float32 precision.
+    opt.step(closure_main=cm, closure_d=cd, hNk=0.0)
+    assert param.detach().item() == -0.05
+
+
+def test_flat_buffers_follow_float32_parameters():
+    """A float32 model must not be silently widened either."""
+    param = torch.nn.Parameter(torch.tensor([1.0], dtype=torch.float32))
+    opt = _opt(param, delta=0.1)
+
+    assert opt.state["flat_wk"].dtype == torch.float32

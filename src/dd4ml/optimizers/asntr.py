@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from functools import reduce
 
 import torch
 from torch import Tensor, nn
@@ -92,9 +93,10 @@ class ASNTR(Optimizer):
         self.k = 0
 
         # precompute shapes and offsets for flatten/unflatten
+        params = self.param_groups[0]["params"]
         shapes: list[torch.Size] = []
         offsets = [0]
-        for p in self.param_groups[0]["params"]:
+        for p in params:
             n = p.numel()
             shapes.append(p.shape)
             offsets.append(offsets[-1] + n)
@@ -108,7 +110,13 @@ class ASNTR(Optimizer):
             st["flat_wk"] = flat_params.clone()
             st["flat_gk"] = flat_params.clone()
         else:
-            buf = torch.zeros(total_size, device=self.device)
+            # Take the dtype from the parameters rather than the global default.
+            # Every step stages parameters and gradients through these buffers,
+            # so allocating float32 here silently truncated a float64 model on
+            # each flatten/unflatten round trip. Mixed-precision parameters are
+            # promoted to the widest dtype present for the same reason.
+            buf_dtype = reduce(torch.promote_types, (p.dtype for p in params))
+            buf = torch.zeros(total_size, device=self.device, dtype=buf_dtype)
             st["flat_wk"] = buf
             st["flat_gk"] = buf.clone()
 
