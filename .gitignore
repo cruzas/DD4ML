@@ -24,6 +24,15 @@ tests/wandb_sweep/sweep_id.txt
 .vscode/
 .idea/
 
+# Test, coverage and tool caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+
 # Build files
 build/
 dist/

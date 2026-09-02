@@ -1,0 +1,39 @@
+# Install with:  pre-commit install
+# Run on everything:  pre-commit run --all-files
+default_language_version:
+  python: python3
+
+# Never let the whitespace fixers touch corpora or dataset binaries: stripping a
+# trailing space or appending a final newline silently changes the training
+# data. (The end-of-file and trailing-whitespace hooks did exactly that to
+# rawdata/tinyshakespeare.txt before this exclusion was added.)
+exclude: |
+  (?x)^(
+    src/dd4ml/rawdata/.*
+    |src/dd4ml/models/gpt/nanogpt/.*
+  )$
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        # The repository already carries ~231 MB of MNIST/CIFAR-10 binaries under
+        # src/dd4ml/rawdata/. This hook stops that class of mistake from growing
+        # while the existing blobs are purged from history separately.
+        args: [--maxkb=1024]
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: debug-statements
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.5
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
