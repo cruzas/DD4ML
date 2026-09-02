@@ -1,8 +1,3 @@
-import copy
-import math
-import random
-import time
-
 import torch
 import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
@@ -10,9 +5,6 @@ from torch.optim.optimizer import Optimizer
 
 from dd4ml.utility import (
     apts_ip_restore_params,
-    clone_model,
-    dprint,
-    ensure_tensor,
     flatten_params,
     get_apts_hparams,
     get_device,
@@ -22,13 +14,9 @@ from dd4ml.utility import (
     get_lssr1_tr_hparams,
     get_state_dict,
     get_tr_hparams,
-    mark_trainable,
     restore_params,
-    trainable_grads_to_vector,
-    trainable_params_to_vector,
 )
 
-from .asntr import ASNTR
 from .lssr1_tr import LSSR1_TR
 from .tr import TR
 from .tradam import TRAdam
@@ -294,10 +282,8 @@ class APTS_Base(Optimizer):
 
         # Optimized tolerance check using norm instead of element-wise operations
         if diff.norm() > self.tol:
-            if (
-                not hasattr(self, "resid")
-                or self.resid.dim() == 0
-                and self.resid.item() == 0
+            if not hasattr(self, "resid") or (
+                self.resid.dim() == 0 and self.resid.item() == 0
             ):
                 self.resid = torch.zeros_like(diff)
             # Ensure resid has the same dtype as diff for the dot product
@@ -370,10 +356,8 @@ class APTS_Base(Optimizer):
 
         # Optimized tolerance check using norm instead of element-wise operations
         if diff.norm() > self.tol:
-            if (
-                not hasattr(self, "resid")
-                or self.resid.dim() == 0
-                and self.resid.item() == 0
+            if not hasattr(self, "resid") or (
+                self.resid.dim() == 0 and self.resid.item() == 0
             ):
                 self.resid = torch.zeros_like(diff)
             # Ensure resid has the same dtype as diff for the dot product

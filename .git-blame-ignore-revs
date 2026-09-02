@@ -1,0 +1,7 @@
+# Revisions to skip when running `git blame`.
+# Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Repository-wide `ruff format` pass. Formatting only: no lint fixes and no
+# behavioural changes are included in this commit.
+8a730bceb0ee0ec6fa117db65615be0339275ef7
