@@ -8,23 +8,18 @@ Usage:
 """
 
 import argparse
-import itertools
 import os
 import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
-import yaml
+from typing import Any
 
 
-def parse_conf_file(conf_path: Path) -> Dict[str, Any]:
+def parse_conf_file(conf_path: Path) -> dict[str, Any]:
     """Parse a bash .conf file and extract variables."""
     config = {}
 
-    with open(conf_path, "r") as f:
+    with open(conf_path) as f:
         for line in f:
             line = line.strip()
             # Skip comments and empty lines
@@ -38,9 +33,9 @@ def parse_conf_file(conf_path: Path) -> Dict[str, Any]:
                 value = value.strip()
 
                 # Remove quotes if present
-                if value.startswith('"') and value.endswith('"'):
-                    value = value[1:-1]
-                elif value.startswith("'") and value.endswith("'"):
+                if (value.startswith('"') and value.endswith('"')) or (
+                    value.startswith("'") and value.endswith("'")
+                ):
                     value = value[1:-1]
 
                 # Parse arrays (e.g., OPTIMIZERS=(sgd adam))
@@ -66,7 +61,7 @@ def parse_conf_file(conf_path: Path) -> Dict[str, Any]:
     return config
 
 
-def set_optimizer_params(optimizer: str, config: Dict[str, Any]) -> None:
+def set_optimizer_params(optimizer: str, config: dict[str, Any]) -> None:
     """Set optimizer-specific parameters."""
     if optimizer == "apts_ip":
         config["USE_PMW"] = True
@@ -74,7 +69,7 @@ def set_optimizer_params(optimizer: str, config: Dict[str, Any]) -> None:
         config["NUM_REP"] = [1]
 
 
-def set_model_params(model: str, config: Dict[str, Any]) -> None:
+def set_model_params(model: str, config: dict[str, Any]) -> None:
     """Set model-specific parameters."""
     if model == "nanogpt":
         config["EVAL_PARAMS"] = [
@@ -85,14 +80,14 @@ def set_model_params(model: str, config: Dict[str, Any]) -> None:
         config["BATCH_SIZES"] = [128]
 
 
-def set_hardware_params(config: Dict[str, Any]) -> int:
+def set_hardware_params(config: dict[str, Any]) -> int:
     """Determine max GPUs based on environment."""
     if "/home/" in os.getcwd():
         return 1
     return 4
 
 
-def set_apts_lssr1_tr_params(optimizer: str, config: Dict[str, Any]) -> None:
+def set_apts_lssr1_tr_params(optimizer: str, config: dict[str, Any]) -> None:
     """Set APTS/LSSR1_TR specific parameters."""
     if optimizer in ["apts_d", "apts_p", "apts_ip", "lssr1_tr", "tr"]:
         apts_params = [
@@ -137,7 +132,7 @@ def set_apts_lssr1_tr_params(optimizer: str, config: Dict[str, Any]) -> None:
         config["APTS_PARAMS"] = apts_params
 
 
-def extract_apts_details(apts_params: List[str]) -> Dict[str, str]:
+def extract_apts_details(apts_params: list[str]) -> dict[str, str]:
     """Extract APTS optimizer details from parameters."""
     details = {
         "glob_opt": "none",
@@ -155,7 +150,7 @@ def extract_apts_details(apts_params: List[str]) -> Dict[str, str]:
     return details
 
 
-def calc_nodes(world_size: int, max_gpus: int) -> Tuple[int, int]:
+def calc_nodes(world_size: int, max_gpus: int) -> tuple[int, int]:
     """Calculate optimal number of nodes and tasks per node."""
     for n in range(1, world_size + 1):
         tpn = world_size // n
@@ -166,7 +161,7 @@ def calc_nodes(world_size: int, max_gpus: int) -> Tuple[int, int]:
 
 def update_config_yaml(yaml_path: Path, key: str, value: Any) -> None:
     """Update a value in a YAML config file."""
-    with open(yaml_path, "r") as f:
+    with open(yaml_path) as f:
         lines = f.readlines()
 
     # Find the key and update the value on the next line
@@ -222,7 +217,7 @@ def run_experiment(config_file: Path, job_name: str, dry_run: bool = False) -> b
 
 
 def generate_and_submit_jobs(
-    config: Dict[str, Any], script_dir: Path, dry_run: bool = False
+    config: dict[str, Any], script_dir: Path, dry_run: bool = False
 ) -> int:
     """Generate configurations and submit jobs."""
     max_gpus = set_hardware_params(config)

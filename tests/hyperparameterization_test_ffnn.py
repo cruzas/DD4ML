@@ -14,11 +14,9 @@ Usage:
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 import yaml
 
@@ -48,7 +46,7 @@ def create_config(
         raise FileNotFoundError(f"Base config not found: {base_config}")
 
     # Load base config
-    with open(base_config, "r") as f:
+    with open(base_config) as f:
         config = yaml.safe_load(f)
 
     # Update parameters
@@ -148,7 +146,7 @@ def check_experiment_completed(config_path: Path) -> bool:
 
 def run_experiment(
     config_path: Path, test_dir: Path, skip_existing: bool = False
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Run a single experiment with the given config."""
     job_name = config_path.stem
 
@@ -301,7 +299,7 @@ def main():
     print("=" * 80)
     print("HYPERPARAMETERIZATION TEST: SGD vs APTS_D")
     print("=" * 80)
-    print(f"\nTest configuration:")
+    print("\nTest configuration:")
     print(f"  Optimizers: {args.optimizers}")
     print(f"  Widths: {args.widths}")
     print(f"  Depths: {args.depths}")

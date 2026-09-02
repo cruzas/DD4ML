@@ -17,7 +17,6 @@ from dd4ml.utility import (
     dprint,
     find_free_port,
     generic_run,
-    is_main_process,
     prepare_distributed_environment,
     set_seed,
 )
@@ -224,7 +223,6 @@ def main(
     def epoch_end_callback(
         trainer, save_model: bool = False, save_frequency: int = SAVE_FREQUENCY_EPOCH
     ) -> None:
-
         delta, thing_to_print = get_optimizer_delta_info(trainer.optimizer)
 
         if isinstance(
@@ -400,7 +398,7 @@ def main_single_run():
     """Run a single experiment with command line arguments."""
     args = vars(parse_cmd_args())
     try:
-        with open(args["sweep_config"], "r") as f:
+        with open(args["sweep_config"]) as f:
             sweep_config = yaml.safe_load(f)
     except FileNotFoundError:
         print(f"Config file {args['sweep_config']} not found")

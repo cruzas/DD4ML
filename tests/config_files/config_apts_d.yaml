@@ -3,8 +3,8 @@ metric:
   name: train_loss
   goal: minimize
 parameters:
-  optimizer: 
-    value: "apts_d" 
+  optimizer:
+    value: "apts_d"
   batch_size:
     value: 10000
   effective_batch_size:
@@ -35,16 +35,16 @@ parameters:
     value: 1
   max_iters:
     value: 10 # for Transformers
-  epochs: 
+  epochs:
     value: 5
-  delta: 
+  delta:
     value: 0.1
-  min_delta: 
+  min_delta:
     value: 0.01
   max_delta:
     value: 1.0
-  dataset_name: 
-    value: "mnist" 
+  dataset_name:
+    value: "mnist"
   model_name:
     value: "medium_ffnn"
   width:

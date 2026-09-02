@@ -4,13 +4,11 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import seaborn as sns
 from cycler import cycler
 
 try:
@@ -96,7 +94,7 @@ def get_cache_dir(model_type: str = "generic") -> Path:
     return cache_dir
 
 
-def _get_cache_key(project_path: str, filters: Optional[Dict[str, Any]]) -> str:
+def _get_cache_key(project_path: str, filters: dict[str, Any] | None) -> str:
     """Generate a stable MD5 cache key for project and filters."""
     canonical = json.dumps(
         {"project": project_path, "filters": filters or {}}, sort_keys=True, default=str
@@ -106,12 +104,12 @@ def _get_cache_key(project_path: str, filters: Optional[Dict[str, Any]]) -> str:
 
 def fetch_runs(
     project: str = "ohtests",
-    entity: Optional[str] = None,
-    filters: Optional[Dict[str, Any]] = None,
+    entity: str | None = None,
+    filters: dict[str, Any] | None = None,
     use_cache: bool = True,
     cache_max_age_hours: int = 24,
     model_type: str = "generic",
-) -> List[Any]:
+) -> list[Any]:
     """Fetch runs from WandB with localized caching logic."""
     api = wandb.Api()
     project_path = f"{entity}/{project}" if entity else project
@@ -183,7 +181,7 @@ def load_history_cached(
 # =============================================================================
 
 
-def format_optimizer_name(optimizer: str, num_subdomains: Optional[int] = None) -> str:
+def format_optimizer_name(optimizer: str, num_subdomains: int | None = None) -> str:
     """Format optimizer name for display using LaTeX notation."""
     formatter = {
         "sgd": r"SGD",
@@ -241,7 +239,7 @@ def export_results(df: pd.DataFrame, output_path: Path) -> None:
     print(f"\nExported results to: {output_path}")
 
 
-def finalize_plot(ax: plt.Axes, output_dir: Optional[Path], filename: str):
+def finalize_plot(ax: plt.Axes, output_dir: Path | None, filename: str):
     """
     Standardize the finalization, saving, and closing of matplotlib figures.
     Removes the interactive 'show' step to allow for headless/automated execution.
@@ -257,7 +255,7 @@ def finalize_plot(ax: plt.Axes, output_dir: Optional[Path], filename: str):
     plt.close()
 
 
-def calculate_params(model_type: str, config: Dict) -> Optional[int]:
+def calculate_params(model_type: str, config: dict) -> int | None:
     """Centralized parameter calculation based on model architecture."""
     try:
         if model_type == "medium_ffnn":
@@ -286,12 +284,12 @@ def calculate_params(model_type: str, config: Dict) -> Optional[int]:
                 blk = l * (10 * e * e + 4 * e)  # Simplified GPT block estimate
                 head = 2 * e + e * v
                 return emb + blk + head
-    except:
+    except Exception:
         return None
     return None
 
 
-def get_arch_keys(model_type: str) -> List[str]:
+def get_arch_keys(model_type: str) -> list[str]:
     """Returns config keys used to define the architecture for heatmaps."""
     mapping = {
         "medium_ffnn": ["width", "num_layers"],
@@ -301,7 +299,7 @@ def get_arch_keys(model_type: str) -> List[str]:
     return mapping.get(model_type, [])
 
 
-def get_arch_labels(model_type: str) -> List[str]:
+def get_arch_labels(model_type: str) -> list[str]:
     """Returns human-readable labels for the architecture axes."""
     mapping = {
         "medium_ffnn": ["Width", "Number of Layers"],
@@ -311,7 +309,7 @@ def get_arch_labels(model_type: str) -> List[str]:
     return mapping.get(model_type, ["Param A", "Param B"])
 
 
-def get_common_n_head(df: pd.DataFrame) -> Optional[int]:
+def get_common_n_head(df: pd.DataFrame) -> int | None:
     """Helper for GPT models to find the mode of n_head to keep heatmaps 2D."""
     if "n_head" in df.columns and not df["n_head"].dropna().empty:
         return df["n_head"].mode()[0]

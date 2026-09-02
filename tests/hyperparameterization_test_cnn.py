@@ -14,13 +14,12 @@ Usage:
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 import yaml
+
 from experiment_tracker import ExperimentTracker
 
 
@@ -51,7 +50,7 @@ def create_config(
         raise FileNotFoundError(f"Base config not found: {base_config}")
 
     # Load base config
-    with open(base_config, "r") as f:
+    with open(base_config) as f:
         config = yaml.safe_load(f)
 
     # Update parameters
@@ -155,7 +154,7 @@ def run_experiment(
     tracker: ExperimentTracker,
     skip_existing: bool = False,
     metadata: dict = None,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Run a single experiment with the given config."""
     job_name = config_path.stem
 
@@ -328,7 +327,7 @@ def main():
     print("=" * 80)
     print("HYPERPARAMETERIZATION TEST: SGD vs APTS_D for CNNs")
     print("=" * 80)
-    print(f"\nTest configuration:")
+    print("\nTest configuration:")
     print(f"  Optimizers: {args.optimizers}")
     print(f"  Filters per layer: {args.filters}")
     print(f"  Number of conv layers: {args.num_conv_layers}")

@@ -3,8 +3,8 @@ metric:
   name: train_loss
   goal: minimize
 parameters:
-  optimizer: 
-    value: "apts_ip" 
+  optimizer:
+    value: "apts_ip"
   batch_size:
     value: 64
   effective_batch_size:
@@ -35,16 +35,16 @@ parameters:
     value: 1
   max_iters:
     value: 1000 # for Transformers
-  epochs: 
+  epochs:
     value: 10
-  delta: 
+  delta:
     value: 0.1
-  min_delta: 
+  min_delta:
     value: 0.01
   max_delta:
     value: 0.5
-  dataset_name: 
-    value: "tinyshakespeare" 
+  dataset_name:
+    value: "tinyshakespeare"
   model_name:
     value: "minigpt"
   width:

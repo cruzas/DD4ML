@@ -45,8 +45,8 @@ def test_apts_pinn_dataset_not_split():
     """Ensure dataset is not split when using the APTS_PINN optimizer."""
     from unittest.mock import patch
 
-    from dd4ml.utility.trainer_setup import get_config_model_and_trainer
     from dd4ml.datasets.pinn_allencahn import AllenCahn1DDataset
+    from dd4ml.utility.trainer_setup import get_config_model_and_trainer
 
     args = {
         "dataset_name": "allencahn1d",
@@ -211,7 +211,9 @@ def test_run_by_epoch_pinn_full_dataset_overlap():
     """run_by_epoch_PINN should process the full local dataset when the
     sampler does not shard data (e.g. domain decomposition with overlap)."""
     from unittest.mock import patch
+
     from torch.utils.data.distributed import DistributedSampler
+
     from dd4ml.utility.trainer_setup import get_config_model_and_trainer
 
     args = {

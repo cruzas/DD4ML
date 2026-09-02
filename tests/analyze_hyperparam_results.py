@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 import argparse
-import sys
 from pathlib import Path
 
-import analysis_helper as helper
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+
+import analysis_helper as helper
 
 # =============================================================================
 # FILENAME & ARCHITECTURE MAPPINGS
@@ -35,7 +35,7 @@ def write_latex_figure(filename, caption, label, extra_images=None, side_by_side
     if is_size_plot:
         # Legend takes full width on its own line
         content.append(
-            f"    \\includegraphics[width=\\linewidth]{{figures/overparameterization_legend.pdf}}\\\\"
+            "    \\includegraphics[width=\\linewidth]{figures/overparameterization_legend.pdf}\\\\"
         )
 
     if side_by_side and extra_images:
@@ -305,8 +305,8 @@ def create_heatmaps_for_model(df, model_type, args):
             generated_files[metric] = fname
 
     if model_type == "nanogpt":
-        cap = f"Heatmaps showing the final average empirical loss for SAPTS-D and SGD on transformers on the TinyShakespeare dataset."
-        write_latex_figure(generated_files["loss"], cap, f"fig:heatmap_gpt_sgd_vs_apts")
+        cap = "Heatmaps showing the final average empirical loss for SAPTS-D and SGD on transformers on the TinyShakespeare dataset."
+        write_latex_figure(generated_files["loss"], cap, "fig:heatmap_gpt_sgd_vs_apts")
     else:
         if model_type == "medium_ffnn":
             cap = f"Heatmaps showing the final average empirical loss (top) and final average test accuracy (bottom) for SAPTS-D and SGD on {model_suffix.upper()}s of varying depths and widths on the MNIST dataset."
@@ -371,7 +371,7 @@ def run_analysis(df, model_type, args):
 
     if model_suffix == "gpt":
         cap = (
-            f"Final average loss plotted against parameter count for transformers. "
+            "Final average loss plotted against parameter count for transformers. "
             "SAPTS-D consistently achieves lower loss compared to SGD "
             "across all tested architectures on the TinyShakespeare dataset. Error bars represent $\\pm 1$ standard deviation."
         )

@@ -26,17 +26,17 @@ Usage:
     })
 """
 
-import json
 import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class ExperimentTracker:
     """Tracks experiment completion status with JSON-based persistence."""
 
-    def __init__(self, tracker_file: Optional[Path] = None):
+    def __init__(self, tracker_file: Path | None = None):
         """
         Initialize the experiment tracker.
 
@@ -50,13 +50,13 @@ class ExperimentTracker:
         self.tracker_file = Path(tracker_file)
         self.data = self._load()
 
-    def _load(self) -> Dict[str, Any]:
+    def _load(self) -> dict[str, Any]:
         """Load tracking data from JSON file."""
         if self.tracker_file.exists():
             try:
-                with open(self.tracker_file, "r") as f:
+                with open(self.tracker_file) as f:
                     return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
+            except (OSError, json.JSONDecodeError) as e:
                 print(f"Warning: Could not load tracker file: {e}")
                 print("Starting with empty tracker")
                 return {"experiments": {}, "version": "1.0"}
@@ -67,10 +67,10 @@ class ExperimentTracker:
         try:
             with open(self.tracker_file, "w") as f:
                 json.dump(self.data, f, indent=2, sort_keys=True)
-        except IOError as e:
+        except OSError as e:
             print(f"Warning: Could not save tracker file: {e}")
 
-    def _generate_id(self, config_path: Optional[Path] = None, **kwargs) -> str:
+    def _generate_id(self, config_path: Path | None = None, **kwargs) -> str:
         """
         Generate a unique experiment ID from config path or parameters.
 
@@ -91,8 +91,8 @@ class ExperimentTracker:
 
     def is_completed(
         self,
-        experiment_id: Optional[str] = None,
-        config_path: Optional[Path] = None,
+        experiment_id: str | None = None,
+        config_path: Path | None = None,
         **kwargs,
     ) -> bool:
         """
@@ -113,9 +113,9 @@ class ExperimentTracker:
 
     def mark_completed(
         self,
-        experiment_id: Optional[str] = None,
-        config_path: Optional[Path] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        experiment_id: str | None = None,
+        config_path: Path | None = None,
+        metadata: dict[str, Any] | None = None,
         **kwargs,
     ):
         """
@@ -147,9 +147,9 @@ class ExperimentTracker:
 
     def mark_failed(
         self,
-        experiment_id: Optional[str] = None,
-        config_path: Optional[Path] = None,
-        error: Optional[str] = None,
+        experiment_id: str | None = None,
+        config_path: Path | None = None,
+        error: str | None = None,
         **kwargs,
     ):
         """
@@ -181,10 +181,10 @@ class ExperimentTracker:
 
     def get_metadata(
         self,
-        experiment_id: Optional[str] = None,
-        config_path: Optional[Path] = None,
+        experiment_id: str | None = None,
+        config_path: Path | None = None,
         **kwargs,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Get metadata for a completed experiment.
 
@@ -209,11 +209,11 @@ class ExperimentTracker:
         """Get the number of failed experiments."""
         return len(self.data.get("failed_experiments", {}))
 
-    def list_completed(self) -> Dict[str, Dict[str, Any]]:
+    def list_completed(self) -> dict[str, dict[str, Any]]:
         """Get all completed experiments with their metadata."""
         return self.data["experiments"].copy()
 
-    def list_failed(self) -> Dict[str, Dict[str, Any]]:
+    def list_failed(self) -> dict[str, dict[str, Any]]:
         """Get all failed experiments with their metadata."""
         return self.data.get("failed_experiments", {}).copy()
 
