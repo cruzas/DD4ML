@@ -1,4 +1,5 @@
 from collections.abc import Callable, Iterable
+from functools import reduce
 
 import torch
 from torch.optim import Optimizer
@@ -40,9 +41,14 @@ class TRAdam(Optimizer):
         )
         total = int(self.offsets[-1])
 
-        # Buffers for gradients, steps, and moments
+        # Buffers for gradients, steps, and moments. The dtype comes from the
+        # parameters rather than the global default: every step stages gradients
+        # and updates through these buffers, so allocating float32 here would
+        # silently truncate a float64 model. Mixed precision promotes to the
+        # widest dtype present rather than truncating to the first.
         device = self.ps[0].device
-        self._grad_buf = torch.zeros(total, device=device)
+        self._param_dtype = reduce(torch.promote_types, (p.dtype for p in self.ps))
+        self._grad_buf = torch.zeros(total, device=device, dtype=self._param_dtype)
         self._step_buf = torch.zeros_like(self._grad_buf)
         self._m_buf = torch.zeros_like(self._grad_buf)
         self._v_buf = torch.zeros_like(self._grad_buf)

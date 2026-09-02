@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from functools import reduce
 
 import torch
 from torch.optim import Optimizer
@@ -64,17 +65,24 @@ class TR(Optimizer):
         self.offsets = torch.tensor([0] + self.numels).cumsum(0)
         total = int(self.offsets[-1])
 
-        # Reusable buffers
+        # Reusable buffers. The dtype comes from the parameters rather than the
+        # global default: every step stages gradients and steps through these
+        # buffers, so allocating float32 here would silently truncate a float64
+        # model. Mixed precision promotes to the widest dtype present.
         device = self.ps[0].device
-        self._grad_buf = torch.zeros(total, device=device)
+        self._param_dtype = reduce(torch.promote_types, (p.dtype for p in self.ps))
+        self._grad_buf = torch.zeros(total, device=device, dtype=self._param_dtype)
         self._step_buf = torch.zeros_like(self._grad_buf)
 
         # Optional second-order support
         if self.second_order:
             mem_len = self.mem_length
-            device = self.ps[0].device
             self.hess = LSR1(
-                gamma=1.0, memory_length=mem_len, device=device, tol=self.tol
+                gamma=1.0,
+                memory_length=mem_len,
+                device=device,
+                dtype=self._param_dtype,
+                tol=self.tol,
             )
             self.obs = OBS()
         else:

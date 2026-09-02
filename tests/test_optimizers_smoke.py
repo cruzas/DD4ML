@@ -308,3 +308,55 @@ def test_second_order_works_with_a_single_memory_pair(name):
     assert final < initial, (
         f"{name} (mem_length=1) did not decrease: {initial} -> {final}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Buffer dtypes.
+# --------------------------------------------------------------------------- #
+
+
+def _internal_buffers(opt):
+    """Collect the flat working buffers an optimizer allocates for itself.
+
+    Covers both conventions in use: `*_buf` attributes (TR, TRAdam) and
+    `flat_*` entries in the optimizer state (ASNTR, LSSR1_TR).
+    """
+    buffers = {}
+    for attr, value in vars(opt).items():
+        if attr.endswith("_buf") and isinstance(value, torch.Tensor):
+            buffers[attr] = value
+    for key, value in getattr(opt, "state", {}).items():
+        if isinstance(key, str) and key.startswith("flat_"):
+            if isinstance(value, torch.Tensor):
+                buffers[key] = value
+    return buffers
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("name", ["tr", "lssr1_tr", "tradam", "asntr"])
+def test_internal_buffers_follow_the_parameter_dtype(name, dtype):
+    """Working buffers must adopt the parameter dtype, not the global default.
+
+    These were allocated as torch.zeros(..., device=...) with no dtype, so they
+    came out float32 whatever the model was. Since every step stages parameters
+    and gradients through them, a float64 model was truncated on each iteration
+    -- silently, because the configs advertise a `precision: float64` option.
+    """
+    w = torch.nn.Parameter(torch.tensor(START, dtype=dtype))
+    _build.problem = "quadratic"
+    opt, step = _build(name, w, second_order=False)
+
+    buffers = _internal_buffers(opt)
+    assert buffers, f"no internal buffers found on {name}; the probe needs updating"
+    for buf_name, buf in buffers.items():
+        assert buf.dtype == dtype, f"{name}.{buf_name} is {buf.dtype}, expected {dtype}"
+
+    # The SR1 memory is a buffer too, where the optimizer keeps one.
+    hess = getattr(opt, "hess", None)
+    if hess is not None:
+        assert hess.dtype == dtype, f"{name}.hess is {hess.dtype}, expected {dtype}"
+        assert hess.gamma.dtype == dtype
+
+    # A step must not silently widen or narrow the parameter either.
+    step()
+    assert w.dtype == dtype
