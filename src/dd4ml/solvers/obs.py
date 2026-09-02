@@ -1,15 +1,12 @@
 # Method originally from:
 # "On Solving L-SR1 Trust-Region Subproblems" by Brust et al.
 # https://arxiv.org/pdf/1506.07222
-from __future__ import absolute_import, division, print_function, unicode_literals
 
-from abc import ABCMeta, abstractmethod
+
+import warnings
 
 import numpy as np
-import scipy
-import scipy.linalg
 import torch
-from numpy import linalg as LA
 
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
 
@@ -19,13 +16,11 @@ except ImportError:
     import numpy as np
 
     array, dot = np.array, np.dot
-from scipy import linalg, sparse
-from scipy.linalg import eig, eigh
 
 
 class OBS:
     def __init__(self):
-        super(OBS, self).__init__()
+        super().__init__()
         self.tol = 1e-6
 
     def _vec_to_wpt(
@@ -223,7 +218,12 @@ class OBS:
             k = k + 1
 
         if torch.isnan(x) or torch.isinf(x):
-            print("asd")
+            warnings.warn(
+                "OBS: the phiBar Newton iteration produced a non-finite root; "
+                "the returned trust-region shift is unusable.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
         return x
 

@@ -1,5 +1,3 @@
-import copy
-
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -100,9 +98,6 @@ class ParallelizedModel(BasePMWModel):
 
         if self.rank == dst_rank:
             return dist.recv_object_list(src=replica_ranks[0])[0]
-
-    def parameters(self):
-        return self.subdomain.weight_parallelized_model.subdomain.parameters()
 
     def configure_params(self, train_config):
         return self.subdomain.weight_parallelized_model.subdomain.configure_params(
