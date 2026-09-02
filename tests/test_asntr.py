@@ -232,3 +232,82 @@ def test_flat_buffers_follow_float32_parameters():
     opt = _opt(param, delta=0.1)
 
     assert opt.state["flat_wk"].dtype == torch.float32
+
+
+def test_sr1_memory_keeps_the_parameter_dtype():
+    """The L-SR1 memory must not downcast a float64 model.
+
+    LSR1 defaulted self.dtype to float32 and update_memory() casts every
+    incoming curvature pair to it, so ASNTR's Hessian approximation ran in
+    single precision even once its own flat buffers were fixed.
+
+    The problem must be anisotropic. For an isotropic f = 0.5||w||^2 the true
+    Hessian is a multiple of the identity, so psi = y - gamma*s is exactly zero
+    and LSR1 rightly rejects every pair as carrying no information beyond gamma.
+    second_order stays off: update_memory() runs either way, and leaving it on
+    would hit the known OBS rank-deficiency break.
+    """
+    w = torch.nn.Parameter(torch.tensor([-1.2, 1.0], dtype=torch.float64))
+    curvature = torch.tensor([1.0, 5.0], dtype=torch.float64)
+
+    def closure(compute_grad=False):
+        loss = (w * w * curvature).sum()
+        if compute_grad:
+            if w.grad is not None:
+                w.grad.zero_()
+            loss.backward()
+        return loss.detach()
+
+    opt = ASNTR(
+        [w],
+        device="cpu",
+        delta=0.2,
+        min_delta=1e-6,
+        max_delta=5.0,
+        second_order=False,
+        mem_length=4,
+        tol=1e-12,
+        **TINY_NONMONOTONE,
+    )
+
+    assert opt.hess.dtype == torch.float64
+    assert opt.hess.gamma.dtype == torch.float64
+
+    for _ in range(5):
+        opt.step(closure_main=closure, closure_d=closure, hNk=0.0)
+
+    assert opt.hess._S, "expected at least one stored curvature pair"
+    assert all(v.dtype == torch.float64 for v in opt.hess._S)
+    assert all(v.dtype == torch.float64 for v in opt.hess._Y)
+    assert opt.hess._S_matrix.dtype == torch.float64
+    assert opt.hess._Y_matrix.dtype == torch.float64
+    assert opt.hess.gamma.dtype == torch.float64
+
+
+def test_lsr1_adopts_dtype_from_data_when_none_is_given():
+    """A caller that forgets to pass dtype still gets the right one."""
+    from dd4ml.optimizers.lsr1 import LSR1
+
+    hess = LSR1(gamma=1.0, memory_length=3, tol=1e-12)
+    s = torch.tensor([1.0, 2.0], dtype=torch.float64)
+    y = torch.tensor([0.5, 0.25], dtype=torch.float64)
+
+    hess.update_memory(s, y)
+
+    assert hess.dtype == torch.float64
+    assert hess.gamma.dtype == torch.float64
+    assert hess._S_matrix.dtype == torch.float64
+
+
+def test_lsr1_honours_an_explicit_dtype():
+    """An explicit dtype wins over the incoming data."""
+    from dd4ml.optimizers.lsr1 import LSR1
+
+    hess = LSR1(gamma=1.0, memory_length=3, tol=1e-12, dtype=torch.float32)
+    s = torch.tensor([1.0, 2.0], dtype=torch.float64)
+    y = torch.tensor([0.5, 0.25], dtype=torch.float64)
+
+    hess.update_memory(s, y)
+
+    assert hess.dtype == torch.float32
+    assert hess._S_matrix.dtype == torch.float32

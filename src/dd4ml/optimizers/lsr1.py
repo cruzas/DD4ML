@@ -2,6 +2,8 @@
 # Brust, Johannes, Jennifer B. Erway, and Roummel F. Marcia. "On solving L-SR1 trust-region subproblems." Computational Optimization and Applications 66 (2017): 245-266.
 from __future__ import annotations
 
+from functools import reduce
+
 import torch
 
 from dd4ml.pmw.weight_parallelized_tensor import WeightParallelizedTensor
@@ -30,7 +32,13 @@ class LSR1:
         self.memory_length = int(memory_length)
         self.tol = float(tol)
         self.device = torch.device("cpu") if device is None else device
-        self.dtype = torch.float32 if dtype is None else dtype
+        # update_memory() casts every incoming curvature pair to self.dtype, so a
+        # hard-coded default silently downcasts the caller's data -- a float64
+        # model got a float32 Hessian approximation. When the caller does not
+        # state a dtype, adopt it from the first pair instead (_adopt_dtype);
+        # until then follow the global default rather than assuming float32.
+        self._dtype_is_explicit = dtype is not None
+        self.dtype = torch.get_default_dtype() if dtype is None else dtype
 
         # Scalar gamma_0  (updated whenever a new (s,y) pair is accepted)
         self.gamma = torch.tensor(float(gamma), device=self.device, dtype=self.dtype)
@@ -48,6 +56,21 @@ class LSR1:
         self.Psi: torch.Tensor | None = None  # (n, k)
         self.Minv: torch.Tensor | None = None  # (k, k)
 
+    def _adopt_dtype(self, *vecs: torch.Tensor) -> None:
+        """Take the working dtype from the first curvature pair.
+
+        Applies only when the caller did not state a dtype, and only while the
+        memory is still empty, so nothing already stored needs recasting --
+        gamma is the sole piece of state at that point. Mixed dtypes are
+        promoted to the widest present rather than truncated.
+        """
+        if self._dtype_is_explicit or self._current_pairs:
+            return
+        incoming = reduce(torch.promote_types, (v.dtype for v in vecs))
+        if incoming != self.dtype:
+            self.dtype = incoming
+            self.gamma = self.gamma.to(dtype=incoming)
+
     def update_memory(self, s: torch.Tensor, y: torch.Tensor) -> None:
         """
         Add a curvature pair  (s = x_{k+1}-x_k,  y = g_{k+1}-g_k)  if it
@@ -56,10 +79,16 @@ class LSR1:
 
         # Ensure v is a vector and on the correct device/dtype
         def _prepare(vec: torch.Tensor) -> torch.Tensor:
-            if isinstance(vec, WeightParallelizedTensor):
-                vec = vec.detach()
             # Single operation instead of chained calls
             return vec.flatten().to(device=self.device, dtype=self.dtype)
+
+        if isinstance(s, WeightParallelizedTensor):
+            s = s.detach()
+        if isinstance(y, WeightParallelizedTensor):
+            y = y.detach()
+
+        # Must happen before _prepare, which would otherwise cast the evidence away.
+        self._adopt_dtype(s, y)
 
         s = _prepare(s)
         y = _prepare(y)

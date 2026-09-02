@@ -72,9 +72,20 @@ class ASNTR(Optimizer):
         if self.dogleg and not self.second_order:
             raise ValueError("Dogleg is only applicable in second-order mode")
 
+        # Working dtype for every buffer this optimizer owns. Taken from the
+        # parameters, promoted to the widest present, so a float64 model is not
+        # silently truncated. See the flat-buffer allocation below.
+        self._param_dtype = reduce(
+            torch.promote_types, (p.dtype for p in self.param_groups[0]["params"])
+        )
+
         # SR1 memory and OBS solver
         self.hess = LSR1(
-            gamma=gamma, memory_length=mem_length, device=self.device, tol=self.tol
+            gamma=gamma,
+            memory_length=mem_length,
+            device=self.device,
+            dtype=self._param_dtype,
+            tol=self.tol,
         )
         self.obs = OBS()
 
@@ -113,10 +124,8 @@ class ASNTR(Optimizer):
             # Take the dtype from the parameters rather than the global default.
             # Every step stages parameters and gradients through these buffers,
             # so allocating float32 here silently truncated a float64 model on
-            # each flatten/unflatten round trip. Mixed-precision parameters are
-            # promoted to the widest dtype present for the same reason.
-            buf_dtype = reduce(torch.promote_types, (p.dtype for p in params))
-            buf = torch.zeros(total_size, device=self.device, dtype=buf_dtype)
+            # each flatten/unflatten round trip.
+            buf = torch.zeros(total_size, device=self.device, dtype=self._param_dtype)
             st["flat_wk"] = buf
             st["flat_gk"] = buf.clone()
 
