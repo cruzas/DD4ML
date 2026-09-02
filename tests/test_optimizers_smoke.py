@@ -215,46 +215,45 @@ def test_tradam_solves_rosenbrock_given_enough_iterations():
 # --------------------------------------------------------------------------- #
 
 
-# The second-order path is currently broken for every optimizer that uses it,
-# in two different ways, both originating in the LSR1/OBS pair.
+# The second-order path is broken for every optimizer that uses it. The root
+# cause is in the LSR1/OBS pair: OBS.solve_tr_subproblem takes a Cholesky factor
+# of Psi^T Psi, but LSR1 never rejects curvature pairs whose psi is linearly
+# dependent on the existing basis -- that check is commented out in lsr1.py, as
+# is the Tikhonov regularisation in obs.py. Once the iterates stop varying much,
+# successive pairs become near-parallel and Psi loses rank. This is
+# dimension-independent: it reproduces at n = 50 with a memory of 10 just as it
+# does at n = 2, and disappears only when the memory holds a single pair (pinned
+# by test_second_order_works_with_a_single_memory_pair below).
 #
-# 1. Rank-deficient Psi. OBS.solve_tr_subproblem takes a Cholesky factor of
-#    Psi^T Psi, but LSR1 never rejects curvature pairs whose psi is linearly
-#    dependent on the existing basis: that check is commented out in lsr1.py,
-#    as is the Tikhonov regularisation in obs.py. Once the iterates stop
-#    varying much, successive pairs become near-parallel and the factorisation
-#    fails. This is dimension-independent -- it reproduces at n = 50 with a
-#    memory of 10 just as it does at n = 2.
-#
-# 2. Non-finite Newton root. On Rosenbrock, TR instead reaches OBS.Newton with
-#    data that drives the phiBar iteration to NaN. That NaN used to be swallowed
-#    by a bare `print("asd")`; it now warns, and the NaN propagates into the next
-#    gradient, which OBS rejects with ValueError.
-#
-# Both disappear when the memory holds a single pair, which is pinned by
-# test_second_order_works_with_a_single_memory_pair below.
+# The *symptom* is platform-dependent, so these markers deliberately do not pin
+# an exception type. The same case surfaces as any of:
+#   * torch.linalg.LinAlgError  -- the Cholesky rejects the rank-deficient input;
+#   * ValueError                -- OBS.Newton returns a non-finite root, which
+#                                  propagates into the next gradient;
+#   * plain divergence          -- no exception at all, the objective runs away
+#                                  (asntr on Rosenbrock reached ~1.9e10 on
+#                                  Linux/x86 while raising LinAlgError on
+#                                  macOS/ARM).
+# Which one you get depends on the BLAS and the platform, so pinning `raises=`
+# made this suite pass locally and fail in CI. What is stable is that the path
+# does not work, and that is what these markers assert.
 _SECOND_ORDER_BROKEN = (
     "Second-order path is broken; see the comment above this marker. "
     "Remove the xfail once LSR1/OBS is repaired."
 )
 
-RANK_DEFICIENT_PSI = pytest.mark.xfail(
-    raises=torch.linalg.LinAlgError, strict=True, reason=_SECOND_ORDER_BROKEN
-)
-NONFINITE_NEWTON_ROOT = pytest.mark.xfail(
-    raises=ValueError, strict=True, reason=_SECOND_ORDER_BROKEN
-)
+SECOND_ORDER_BROKEN = pytest.mark.xfail(strict=True, reason=_SECOND_ORDER_BROKEN)
 
 
 @pytest.mark.parametrize(
     ("name", "problem"),
     [
-        pytest.param("tr", "quadratic", marks=RANK_DEFICIENT_PSI),
-        pytest.param("lssr1_tr", "quadratic", marks=RANK_DEFICIENT_PSI),
-        pytest.param("asntr", "quadratic", marks=RANK_DEFICIENT_PSI),
-        pytest.param("lssr1_tr", "rosenbrock", marks=RANK_DEFICIENT_PSI),
-        pytest.param("asntr", "rosenbrock", marks=RANK_DEFICIENT_PSI),
-        pytest.param("tr", "rosenbrock", marks=NONFINITE_NEWTON_ROOT),
+        pytest.param("tr", "quadratic", marks=SECOND_ORDER_BROKEN),
+        pytest.param("lssr1_tr", "quadratic", marks=SECOND_ORDER_BROKEN),
+        pytest.param("asntr", "quadratic", marks=SECOND_ORDER_BROKEN),
+        pytest.param("tr", "rosenbrock", marks=SECOND_ORDER_BROKEN),
+        pytest.param("lssr1_tr", "rosenbrock", marks=SECOND_ORDER_BROKEN),
+        pytest.param("asntr", "rosenbrock", marks=SECOND_ORDER_BROKEN),
     ],
 )
 def test_second_order_paths(name, problem):
